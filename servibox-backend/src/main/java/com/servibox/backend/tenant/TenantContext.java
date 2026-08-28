@@ -2,7 +2,8 @@ package com.servibox.backend.tenant;
 
 /**
  * Holder del tenant activo para el hilo que atiende el request.
- * Lo llena TenantFilter y lo consume el filtro de Hibernate.
+ * Lo llena JwtAuthenticationFilter desde el claim del JWT y lo consume el filtro de
+ * Hibernate que habilita TenantAwareJpaTransactionManager.
  */
 public final class TenantContext {
 

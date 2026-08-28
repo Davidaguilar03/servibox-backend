@@ -76,15 +76,10 @@ Holder con `ThreadLocal<Long>` y metodos estaticos `setTenantId` / `getTenantId`
 `clear`. Constructor privado, clase final. Es el unico punto que responde "que tenant
 esta atendiendo este hilo".
 
-**`tenant.TenantFilter`**
-Servlet filter (`OncePerRequestFilter`), registrado con `Ordered.HIGHEST_PRECEDENCE` para
-correr antes de Spring Security. Lee la cabecera temporal `X-Tenant-Id`, la convierte a
-`Long` y la deja en `TenantContext`; si la cabecera trae basura responde 400. Siempre
-llama `TenantContext.clear()` en el `finally`, porque el hilo vuelve al pool de Tomcat y
-un valor pegado filtraria datos de otro tenant.
-
-Esta cabecera es provisional. Cuando exista JWT, el tenant sale de un claim del token y
-la cabecera desaparece.
+**Origen del tenant: el JWT.**
+`TenantContext` lo puebla `auth.JwtAuthenticationFilter` a partir del claim `tenantId` del
+token. La cabecera `X-Tenant-Id` y la clase `TenantFilter` que la leia fueron eliminadas,
+ver la seccion Capa de seguridad JWT de este mismo archivo y [03-DECISIONS.md](03-DECISIONS.md).
 
 **`tenant.TenantAwareJpaTransactionManager`**
 Extiende `JpaTransactionManager` y sobreescribe `doBegin`: apenas arranca la transaccion,
@@ -113,15 +108,133 @@ repositorios de Spring Data pasa por aqui, porque `SimpleJpaRepository` es trans
   Spring: los `save` quedan sin flush, devuelven `id` null y no se escribe ninguna fila.
 
 **Limitacion conocida:** el tenant se resuelve al iniciar la transaccion, asi que
-`TenantContext` debe estar poblado antes. En un request lo garantiza `TenantFilter`, que
-corre con `HIGHEST_PRECEDENCE`. Codigo que abra transacciones fuera de un request tiene
+`TenantContext` debe estar poblado antes. En un request lo garantiza
+`JwtAuthenticationFilter`, que corre dentro de la cadena de Spring Security, antes de que
+el controlador abra ninguna transaccion. Codigo que abra transacciones fuera de un request tiene
 que poblar `TenantContext` explicitamente.
 
 **`tenant.TenantFilterConfiguration`**
-`@Configuration` que registra el `FilterRegistrationBean` de `TenantFilter` sobre `/*` y
-el bean `PlatformTransactionManager` con `TenantAwareJpaTransactionManager`.
+`@Configuration` que registra el bean `PlatformTransactionManager` con
+`TenantAwareJpaTransactionManager`.
 
 ## Capa de seguridad JWT
+
+Autenticacion por token, sin sesion de servidor. El tenant no lo elige el cliente: viaja
+firmado dentro del token.
+
+### Flujo completo
+
+1. **`POST /api/auth/login`** (unica ruta con `permitAll`). Body: `tenantSlug`, `username`,
+   `password`.
+2. **`auth.AuthController`** busca el tenant por `slug`, luego el usuario con
+   `findByUsernameAndTenantId`, y compara la contrasena con
+   `passwordEncoder.matches(...)` contra el `passwordHash` BCrypt.
+3. Si algo no cuadra responde **401 con el mismo mensaje generico** en todos los casos
+   (tenant inexistente, usuario inexistente, usuario inactivo, contrasena incorrecta).
+   Distinguirlos le confirmaria a un atacante que usuarios existen en que tenant.
+4. Si cuadra, **`auth.JwtService.generateToken(user)`** emite un JWT firmado con HMAC SHA
+   con los claims `sub` (username), `tenantId` y `role`, y expiracion segun configuracion.
+5. En cada request posterior el cliente manda `Authorization: Bearer <token>`.
+6. **`auth.JwtAuthenticationFilter`** (registrado antes de
+   `UsernamePasswordAuthenticationFilter`) valida firma y expiracion. Con el token bueno:
+   pone `TenantContext.setTenantId(tenantId del token)`, **consulta el usuario en base con
+   `findByUsernameAndTenantId` y confirma que siga existiendo y activo**, y recien
+   entonces puebla el `SecurityContextHolder` con el username y la authority
+   `ROLE_<rol>`. Si el token es invalido o vencido, o el usuario ya no existe o esta
+   inactivo, no autentica y limpia todo; la cadena de seguridad responde 401.
+
+   El tenant se pone **antes** de la consulta a proposito: asi el filtro de Hibernate ya
+   esta activo y la busqueda del usuario no puede cruzar de tenant. Y la authority sale
+   del rol **en base**, no del claim del token, para que un cambio de rol tampoco tenga
+   que esperar a que el token expire.
+
+### Verificacion de usuario activo en cada request
+
+La firma de un JWT solo prueba que el token se emitio en algun momento; no dice nada del
+estado actual del usuario. Sin la consulta del paso 6, desactivar a un empleado no surtiria
+efecto hasta que su token venciera, hasta 24 horas despues. Por eso cada request protegido
+paga una consulta a `USUARIOS`. Motivo completo en [03-DECISIONS.md](03-DECISIONS.md).
+
+**Costo conocido:** es una consulta extra por request autenticado. Hoy es irrelevante, es
+una lectura por clave unica `(tenant_id, username)` con indice. Si algun dia el volumen lo
+justifica, la salida tipica es una cache corta en memoria del estado del usuario, con TTL
+de segundos, o una lista de tokens revocados. No esta implementado ni hace falta todavia.
+7. Al abrir la transaccion, `TenantAwareJpaTransactionManager` toma ese `TenantContext` y
+   habilita el filtro de Hibernate, ver
+   la seccion Estrategia multi-tenant de este mismo archivo.
+
+En resumen: `login -> JWT con tenantId -> JwtAuthenticationFilter -> TenantContext ->
+filtro de Hibernate`. El tenant nunca lo aporta el cliente en claro.
+
+**`TenantContext.clear()` va en un `finally`** dentro del filtro. El pool de hilos de
+Tomcat se reutiliza entre requests: un tenant que quede pegado se filtraria al siguiente
+request atendido por ese hilo.
+
+### Manejo centralizado de errores
+
+`shared.GlobalExceptionHandler` es un `@RestControllerAdvice` y es el unico lugar que
+construye respuestas de error. Todas usan el mismo formato, el record
+`shared.ErrorResponse`:
+
+```json
+{"error": "mensaje", "status": 401}
+```
+
+| Excepcion | Codigo | Cuerpo |
+|-|-|-|
+| `IllegalStateException` (tipicamente el `@PrePersist` sin tenant activo) | 400 | mensaje de la excepcion |
+| `InvalidCredentialsException` y `AuthenticationException` | 401 | "Credenciales invalidas" |
+| `MethodArgumentNotValidException` (fallo de `@Valid`) | 400 | "Peticion invalida" |
+| `NoResourceFoundException` | 404 | "Recurso no encontrado" |
+| `Exception` (ultimo recurso) | 500 | "Error interno del servidor" |
+
+El fallback de 500 registra el detalle en el log del servidor y **nunca lo devuelve al
+cliente**: un stacktrace en la respuesta le regala al atacante versiones de librerias y
+rutas internas.
+
+`AuthController` no arma respuestas de error: lanza `InvalidCredentialsException` en los
+cuatro casos de login fallido y el advice la traduce. Asi el mensaje generico se define en
+un solo sitio.
+
+Los rechazos de la cadena de seguridad ocurren antes de llegar a un controlador, asi que el
+`@RestControllerAdvice` no los ve. `config.JsonAuthenticationEntryPoint` cubre ese caso
+escribiendo el mismo formato, para que el cliente no tenga que parsear dos formas distintas
+de error.
+
+### Configuracion
+
+`SecurityConfig` (paquete `config`): sesion `STATELESS`, CSRF deshabilitado (es una API
+pura, sin formularios ni cookies de sesion), `BCryptPasswordEncoder` como bean,
+`permitAll` solo en `POST /api/auth/login` y `authenticated()` en todo lo demas.
+
+Propiedades en `application.properties`:
+
+```properties
+servibox.jwt.secret=${JWT_SECRET:dev-secret-cambiar-en-produccion-minimo-32-caracteres}
+servibox.jwt.expiration-ms=${JWT_EXPIRATION_MS:86400000}
+```
+
+El valor por defecto del secret es solo para desarrollo local. **En produccion `JWT_SECRET`
+tiene que venir de una variable de entorno real**, nunca el valor de respaldo.
+
+### Modelo de usuario
+
+`auth.entity.User` extiende `TenantAwareEntity`: `username`, `passwordHash`, `email`,
+`active`, y `role` como enum `auth.entity.Role` (`ADMIN`, `EMPLEADO`) con
+`@Enumerated(STRING)`. Motivo del enum en vez de tabla en
+[03-DECISIONS.md](03-DECISIONS.md).
+
+La restriccion unica es **compuesta**, `(tenant_id, username)`, no `unique` en la columna
+sola: dos negocios distintos pueden tener cada uno su usuario `admin`.
+
+Consecuencia de eso: el login necesita saber a que tenant entrar antes de poder resolver
+el username, por eso `LoginRequest` lleva `tenantSlug` ademas de usuario y contrasena.
+
+### Datos de prueba local
+
+`config.DevDataInitializer` es un `CommandLineRunner` con `@Profile("dev")`: si la tabla
+de tenants esta vacia crea el tenant `demo` y el usuario `admin`. Solo para probar el
+login en local.
 
 ## Estructura de paquetes
 
