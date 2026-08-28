@@ -238,4 +238,83 @@ login en local.
 
 ## Estructura de paquetes
 
+Base: `com.servibox.backend`. Un paquete por modulo de negocio, mas tres transversales.
+
+| Paquete | Contenido |
+|-|-|
+| `config` | `SecurityConfig`, `JpaAuditingConfiguration`, `JsonAuthenticationEntryPoint`, `DevDataInitializer` |
+| `tenant` | `Tenant`, `TenantContext`, `TenantAwareJpaTransactionManager`, `TenantFilterConfiguration` |
+| `shared` | `TenantAwareEntity`, `ErrorResponse`, `GlobalExceptionHandler` |
+| `auth` | `JwtService`, `JwtAuthenticationFilter`, `AuthController`, mas `entity` / `repository` / `dto` |
+| `inventory` | primer modulo de negocio migrado, ver abajo |
+| `sales`, `purchases`, `treasury`, `reporting` | vacios todavia |
+
+Los modulos de negocio usan siempre las mismas cinco capas:
+`controller`, `service`, `repository`, `entity`, `dto`.
+
+### Modulo Inventory
+
+Migrado desde el modulo `inventory` de Autollantas. Todas sus entidades extienden
+`TenantAwareEntity`, asi que heredan `id`, `tenantId`, auditoria, y el filtro por tenant.
+
+**Entidades**
+
+* `ProductCategory` (`CATEGORIA_PRODUCTOS`): `name`, `color`, `yellowStockMin`,
+  `redStockMin`, `targetMargin` (fraccion, 0.30 es 30 por ciento) y `taxTypes`, un
+  `ManyToMany` EAGER contra `TaxType` por la tabla `CATEGORIA_IMPUESTOS`.
+* `TaxType` (`TIPOS_IMPUESTO`): `name`, `rate`, `isVat`, `appliesToTransaction`,
+  `description`.
+* `Product` (`PRODUCTOS`): `code`, `description`, `purchaseCost`, `quantity`, `taxAmount`,
+  `suggestedPrice`, y `ManyToOne` a `ProductCategory`. Restriccion unica **compuesta**
+  `uk_producto_tenant_code` sobre `(tenant_id, codigo_producto)`, mismo criterio que
+  `(tenant_id, username)` en `User`: dos talleres distintos pueden usar cada uno el codigo
+  `LLA-001` para productos que no tienen nada que ver.
+
+  La unicidad se defiende en dos capas. `InventoryService.saveProduct` consulta
+  `findByCodeAndTenantId` antes del INSERT y lanza `DuplicateProductCodeException`, que
+  `GlobalExceptionHandler` traduce a **409 Conflict** con un mensaje legible. La
+  restriccion de base queda igual como red de seguridad para cualquier escritura que no
+  pase por el service. Al editar, la validacion excluye el propio registro: volver a
+  guardar un producto sin cambiarle el codigo no es un duplicado.
+* `FinancialSettings` (`CONFIGURACION_FINANCIERA`): `expensesRate`, `dianRate`, `icaRate`,
+  `cardCommissionRate`. En Autollantas es un singleton con id fijo 1; aqui es **una fila
+  por tenant**, porque cada negocio tiene sus propios porcentajes.
+
+**Calculo de precios** (`InventoryService.recalculatePrices`, portado de Autollantas)
+
+```java
+taxAmount     = purchaseCost * suma(rates de la categoria con isVat true)
+k             = (1 - expensesRate) * (1 - dianRate)
+divisor       = k - icaRate - targetMargin
+suggestedPrice= divisor > 0 ? purchaseCost * k / divisor : purchaseCost
+```
+
+`suggestedPrice` esta portado sin cambios: el margen es sobre el **precio de venta**, no
+sobre el costo, y por eso aparece despejado en el divisor. Cuando el margen mas el ICA
+superan lo que dejan Gastos y DIAN no existe precio finito que cumpla, y se usa el costo
+como piso.
+
+`taxAmount` es la **unica divergencia deliberada** respecto de Autollantas: alli suma
+todas las rates de la categoria, aqui solo las marcadas `isVat`. Motivo en
+[03-DECISIONS.md](03-DECISIONS.md).
+
+`updateCategoryMargin` es el equivalente del tab Margenes de Utilidad: cambia el margen de
+la categoria y rehace el precio sugerido de todos sus productos.
+
+**Endpoints** (todos requieren JWT)
+
+* `GET` y `POST` `/api/inventory/categories`
+* `GET` y `POST` `/api/inventory/products`
+* `GET /api/inventory/products/{id}`
+
+Las respuestas van siempre por DTO (`CategoryResponse`, `ProductResponse`,
+`TaxTypeResponse`), nunca la entidad JPA: exponerla arrastraria `tenantId` y las
+relaciones EAGER completas al cliente.
+
+**Nota sobre `recalculateMinSalePrice`.** La documentacion previa describia un metodo
+`recalculateMinSalePrice` con un campo `minSalePrice` y un IVA fijo de 0.19. Ese metodo ya
+no existe en Autollantas: fue reemplazado por `recalculatePrices`, y `minSalePrice` no
+existe como campo en ninguna parte del repo. ServiBox porto la version vigente. No
+reintroducir `minSalePrice` sin revisar antes el codigo real.
+
 ## Base de datos

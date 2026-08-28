@@ -1,6 +1,7 @@
 package com.servibox.backend.shared;
 
 import com.servibox.backend.auth.InvalidCredentialsException;
+import com.servibox.backend.inventory.service.DuplicateProductCodeException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +22,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ErrorResponse> manejarEstadoInvalido(IllegalStateException ex) {
         log.warn("Peticion rechazada por estado invalido: {}", ex.getMessage());
+        return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** Choque con una restriccion de unicidad, por ejemplo dos productos con el mismo codigo. */
+    @ExceptionHandler(DuplicateProductCodeException.class)
+    public ResponseEntity<ErrorResponse> manejarDuplicado(DuplicateProductCodeException ex) {
+        return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** Referencia a algo que no existe, por ejemplo una categoria o producto por id. */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> manejarArgumentoInvalido(IllegalArgumentException ex) {
         return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 

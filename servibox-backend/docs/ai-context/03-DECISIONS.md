@@ -12,6 +12,27 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-08-28: taxAmount solo suma los impuestos marcados como IVA
+
+* Decision: en `InventoryService.recalculatePrices`, `taxAmount` es
+  `purchaseCost * suma(rates de la categoria con isVat true)`. Si ningun impuesto de la
+  categoria tiene `isVat`, `taxAmount` es 0. El resto del metodo, incluido todo el calculo
+  de `suggestedPrice`, se porto sin tocar.
+* Alternativas consideradas: copiar Autollantas tal cual, donde `taxAmount` suma **todas**
+  las rates de la categoria sin mirar `isVat`.
+* Motivo: `taxAmount` representa el IVA del producto, que es un impuesto **recuperable**:
+  se descuenta contra el IVA cobrado en ventas. Las retenciones tipo ReteICA no son
+  recuperables, son un costo. Sumarlas dentro de `taxAmount` mezcla dos cosas que
+  contablemente van a cuentas distintas, e infla el IVA declarable. En una categoria con
+  IVA 19 por ciento mas ReteICA 3 por ciento sobre un costo de 25000, Autollantas reporta
+  5500 de IVA cuando el IVA real es 4750. El campo `isVat` ya existe en `TaxType`
+  justamente para hacer esa distincion, solo que el calculo no lo estaba usando.
+* Nota sobre el estado real del codigo: la documentacion previa describia este calculo
+  como un `0.19` hardcodeado dentro de un metodo `recalculateMinSalePrice`. Eso ya no es
+  cierto. Autollantas hoy suma las rates de la categoria (el hardcode desaparecio), el
+  metodo se llama `recalculatePrices`, y `minSalePrice` no existe. La divergencia que
+  introduce ServiBox es unicamente el filtro por `isVat`.
+
 ## 2026-08-28: Verificar el estado del usuario en cada request
 
 * Decision: `JwtAuthenticationFilter` consulta `USUARIOS` en cada request autenticado y
