@@ -153,10 +153,10 @@ class TreasuryTenantIsolationTest {
     void losMovimientosDeUnaCuentaAjenaNoSeVenNiPorId() throws Exception {
         Long cuentaDeUno = crearCuenta(tokenUno, "Caja General", "CASH");
 
-        // El filtro de Hibernate no encuentra la cuenta para el otro tenant.
+        // Para el otro tenant esa cuenta no existe: 404, nunca los movimientos ajenos.
         mockMvc.perform(get("/api/treasury/accounts/" + cuentaDeUno + "/movements")
                         .header("Authorization", "Bearer " + tokenDos))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isNotFound());
     }
 
     @Test

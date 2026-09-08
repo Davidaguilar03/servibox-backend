@@ -24,6 +24,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -126,6 +127,20 @@ class InventoryTenantIsolationTest {
                 .andExpect(status().isCreated());
     }
 
+    private Long crearProductoYDevolverId(String token, Long categoriaId, String codigo) throws Exception {
+        String body = """
+                {"code":"%s","description":"Producto","purchaseCost":25000,"quantity":5,"categoryId":%d}
+                """.formatted(codigo, categoriaId);
+        MvcResult result = mockMvc.perform(post("/api/inventory/products")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Integer id = JsonPath.read(result.getResponse().getContentAsString(), "$.id");
+        return id.longValue();
+    }
+
     private List<String> codigosVisiblesPara(String token) throws Exception {
         MvcResult result = mockMvc.perform(get("/api/inventory/products")
                         .header("Authorization", "Bearer " + token))
@@ -158,6 +173,43 @@ class InventoryTenantIsolationTest {
         List<String> nombres = JsonPath.read(result.getResponse().getContentAsString(), "$[*].name");
 
         assertThat(nombres).containsExactly("LLANTAS");
+    }
+
+    /**
+     * El hueco que esto cubre: findProductById usaba el findById heredado de
+     * JpaRepository, y el @Filter de Hibernate no se aplica a EntityManager.find(). El
+     * GET por id devolvia 200 con el producto de otro tenant. Ver 03-DECISIONS.md.
+     */
+    @Test
+    void unProductoDeOtroTenantNoSeDevuelvePorId() throws Exception {
+        Long categoriaUno = crearCategoria(tokenUno, "LLANTAS");
+        Long productoDeUno = crearProductoYDevolverId(tokenUno, categoriaUno, "SOLO-TENANT-UNO");
+
+        mockMvc.perform(get("/api/inventory/products/" + productoDeUno)
+                        .header("Authorization", "Bearer " + tokenDos))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").doesNotExist());
+
+        // Su dueno si lo ve, para que el 404 no sea por un id inexistente.
+        mockMvc.perform(get("/api/inventory/products/" + productoDeUno)
+                        .header("Authorization", "Bearer " + tokenUno))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SOLO-TENANT-UNO"));
+    }
+
+    @Test
+    void unaCategoriaDeOtroTenantNoSirveParaCrearleProductos() throws Exception {
+        Long categoriaDeUno = crearCategoria(tokenUno, "LLANTAS");
+
+        // findCategoryById tenia el mismo hueco: sin el fix, el producto se creaba en el
+        // tenant dos colgando de una categoria del tenant uno.
+        mockMvc.perform(post("/api/inventory/products")
+                        .header("Authorization", "Bearer " + tokenDos)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"code":"ROBADO","description":"Producto","purchaseCost":25000,"quantity":5,"categoryId":%d}
+                                """.formatted(categoriaDeUno)))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

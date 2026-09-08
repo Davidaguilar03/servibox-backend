@@ -8,6 +8,7 @@ import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
 import com.servibox.backend.inventory.entity.TaxType;
 import com.servibox.backend.inventory.service.InventoryService;
+import com.servibox.backend.shared.ResourceNotFoundException;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -56,7 +57,7 @@ public class InventoryController {
     public ProductResponse obtenerProducto(@PathVariable Long id) {
         return inventoryService.findProductById(id)
                 .map(ProductResponse::from)
-                .orElseThrow(() -> new IllegalArgumentException("Producto no encontrado: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado: " + id));
     }
 
     @PostMapping("/products")

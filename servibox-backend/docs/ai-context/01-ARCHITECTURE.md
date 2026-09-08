@@ -185,6 +185,7 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | `IllegalStateException` (tipicamente el `@PrePersist` sin tenant activo) | 400 | mensaje de la excepcion |
 | `InvalidCredentialsException` y `AuthenticationException` | 401 | "Credenciales invalidas" |
 | `MethodArgumentNotValidException` (fallo de `@Valid`) | 400 | "Peticion invalida" |
+| `ResourceNotFoundException` | 404 | mensaje de la excepcion |
 | `NoResourceFoundException` | 404 | "Recurso no encontrado" |
 | `Exception` (ultimo recurso) | 500 | "Error interno del servidor" |
 
@@ -377,6 +378,10 @@ del tenant equivocado respondia 200 con lista vacia (la lista de movimientos si 
 filtrada, porque es una consulta derivada) en vez de rechazar la cuenta ajena. Cualquier
 busqueda por id de una entidad de negocio tiene el mismo problema: **no usar `findById`
 directo en un service multi-tenant.**
+
+El barrido posterior encontro el mismo hueco en los 3 `findById` de `InventoryService`,
+uno de ellos con consecuencia de escritura. Todos corregidos, ver
+[03-DECISIONS.md](03-DECISIONS.md).
 
 **Endpoints** (todos requieren JWT)
 

@@ -30,9 +30,18 @@ public class InventoryService {
         return productRepository.findAll();
     }
 
+    /**
+     * No usa productRepository.findById: el @Filter de Hibernate no se aplica a
+     * EntityManager.find(), asi que ese camino devuelve productos de otros tenants.
+     * Verificado con InventoryTenantIsolationTest.
+     */
     @Transactional(readOnly = true)
     public Optional<Product> findProductById(Long id) {
-        return productRepository.findById(id);
+        Long tenantId = TenantContext.getTenantId();
+        if (tenantId == null) {
+            return Optional.empty();
+        }
+        return productRepository.findByIdAndTenantId(id, tenantId);
     }
 
     @Transactional(readOnly = true)
@@ -45,9 +54,14 @@ public class InventoryService {
         return productCategoryRepository.findAll();
     }
 
+    /** Mismo motivo que findProductById: findById se salta el filtro por tenant. */
     @Transactional(readOnly = true)
     public Optional<ProductCategory> findCategoryById(Long id) {
-        return productCategoryRepository.findById(id);
+        Long tenantId = TenantContext.getTenantId();
+        if (tenantId == null) {
+            return Optional.empty();
+        }
+        return productCategoryRepository.findByIdAndTenantId(id, tenantId);
     }
 
     @Transactional(readOnly = true)
@@ -172,7 +186,7 @@ public class InventoryService {
      */
     @Transactional
     public ProductCategory updateCategoryMargin(Long categoryId, Double targetMargin) {
-        ProductCategory category = productCategoryRepository.findById(categoryId)
+        ProductCategory category = findCategoryById(categoryId)
                 .orElseThrow(() -> new IllegalArgumentException("Categoria no encontrada: " + categoryId));
         category.setTargetMargin(targetMargin);
         ProductCategory guardada = saveCategory(category);
