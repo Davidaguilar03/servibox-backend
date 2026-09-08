@@ -12,6 +12,78 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-09-08: Gastos operativos, con edicion (revertir y recrear) y eliminacion
+
+Cierra la nota *Donde vive OperationalExpense, para la proxima migracion* (2026-09-07).
+
+* Hallazgo, verificado leyendo `treasury/model/OperationalExpense.java`,
+  `treasury/controller/OperationalExpenseFormController.java`,
+  `treasury/controller/OperationalExpensesController.java` y los metodos
+  `saveOperationalExpense` / `deleteOperationalExpense` de `TreasuryService` en Autollantas:
+
+  * **Campos:** `concept` (`concepto_gasto`), `amount` (`monto_gasto`), `account`
+    (`id_cuenta`), `date` (`fecha_gasto`) y `notes` (columna `notes`, sin `@Column`).
+    Ninguno lleva `nullable = false`; la obligatoriedad vive en el formulario, y su
+    `validateFields()` exige **concepto, monto, cuenta y fecha**. **`notes` NO se valida**:
+    es el campo "Observaciones" y es **opcional**. Se porta como opcional.
+  * **Creacion:** si, registra un EGRESO igual que `OccasionalIncome` registra un INGRESO.
+    `saveOperationalExpense` resta del `currentBalance` y crea un `Movement` "Egreso" con
+    `sourceTable = "GASTOS_OPERATIVOS"`.
+  * **Autollantas tiene LAS DOS: edicion y eliminacion.** El menu contextual de
+    `OperationalExpensesController` ofrece "Editar" (abre el formulario, que llama a
+    `saveOperationalExpense(expense, editMode = true)`) y "Eliminar" (con dialogo de
+    confirmacion, llama a `deleteOperationalExpense`). Es el **unico** registro de su
+    tesoreria con modo edicion: `OccasionalIncome` solo tiene eliminacion.
+  * **Mecanismo exacto de la edicion**, y coincide con lo que se suponia: es
+    **revertir y recrear**, no un ajuste por la diferencia. En modo edicion,
+    `saveOperationalExpense` recorre `findBySourceIdAndSourceTable(id, "GASTOS_OPERATIVOS")`
+    y por cada movimiento viejo le **suma de vuelta** su importe a `old.getAccount()` (la
+    cuenta **del movimiento**, no la del gasto que se esta guardando) y lo **borra**; luego
+    guarda el gasto con los campos nuevos y cae en el mismo bloque que la creacion, que
+    resta el monto nuevo y crea un `Movement` nuevo.
+  * **Mecanismo de la eliminacion:** `deleteOperationalExpense` suma el importe de vuelta al
+    saldo, borra los `Movement` del gasto y **borra la fila**. Es el mismo patron que
+    `deleteOccasionalIncome`: borrado, no estado `ANULADA`.
+  * **Fechas:** el ultimo commit que toca cualquiera de estos archivos es `8b29f7e`
+    (2026-08-04), anterior a las notas de esta migracion (2026-09-07), asi que no hay
+    conflicto que resolver: lo documentado se derivo de este mismo codigo y se confirmo
+    linea por linea antes de portarlo.
+
+* Decision: se migra **dentro de `treasury`**, no en un modulo propio, aunque en la interfaz
+  de Autollantas aparezca bajo Egresos. Se implementan **las dos** operaciones:
+  `editarGastoOperativo` y `anularGastoOperativo`.
+* La edicion reutiliza el `revertir(...)` privado que ya usaban la anulacion de ventas, la
+  de compras y la de ingresos ocasionales, en vez de una segunda logica de reversion. Ese
+  metodo ya hace exactamente lo que hace Autollantas en modo edicion, incluido lo importante:
+  devuelve el importe a la cuenta **del movimiento**, lo que hace que **cambiar de cuenta**
+  al editar salga bien. Cubierto por
+  `editarUnGastoCambiandoDeCuentaDevuelveElDineroALaCuentaOriginal`.
+* Alternativas consideradas para la edicion: aplicar solo la **diferencia** al saldo; o
+  dejar el movimiento viejo y agregar un contra-movimiento.
+* Motivo: la diferencia se rompe en cuanto la edicion cambia de cuenta, que es justo el caso
+  que el codigo real resuelve bien. El contra-movimiento dejaria tres renglones en el
+  historial de la cuenta por un gasto que se corrigio una vez, y el historial de tesoreria
+  es una lista que alguien lee. Autollantas borra y recrea; se replica.
+* **Se estreno el enum `MovementSourceType` con `OPERATIONAL_EXPENSE`**, y costo lo que la
+  decision del 2026-09-07 prometia: **una linea**, sin columna nueva, sin migracion de
+  esquema y sin tocar la firma de `aplicarMovimiento`. Con el diseno anterior (una relacion
+  `ManyToOne` opcional por origen) habria sido la quinta columna nullable y el quinto
+  parametro. Es la validacion practica de aquel refactor.
+* Divergencia consciente: **`registrarGastoOperativo` no exige saldo suficiente**, a
+  diferencia de `registrarEgresoDeCompra`. Autollantas tampoco lo hace aqui (su formulario
+  solo valida concepto, monto, cuenta y fecha), asi que una cuenta puede quedar en negativo
+  por un gasto operativo. Se replica el comportamiento real y **queda anotado como punto
+  abierto**: si se decide que ningun egreso pueda dejar una cuenta en negativo, el sitio es
+  este metodo, y hay que decidirlo para gastos e ingresos a la vez, no solo aqui.
+* Sobre `notes`: es el unico registro de tesoreria migrado que lo trae. `OccasionalIncome`
+  tiene el campo en Autollantas y **no** se porto (decision del 2026-09-07); aqui si, porque
+  el alcance lo pedia y porque el formulario de gastos lo usa de verdad. Queda la asimetria
+  entre las dos entidades espejo, anotada a proposito.
+* Cubierto por `OperationalExpenseTest` (9 casos): registro y efecto en el saldo, gasto sin
+  observaciones, edicion que revierte y recrea, edicion cambiando de cuenta, eliminacion,
+  aislamiento por tenant en el listado y en el balance, PUT y DELETE sobre el gasto de otro
+  tenant (404), el ciclo completo por HTTP y el rechazo sin JWT.
+
 ## 2026-09-08: Comprar reescribe el costo del producto, y anular no lo deshace
 
 Cierra la omision marcada como "la mas importante de esta migracion" en la entrada
@@ -239,7 +311,7 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
   compartirse con `sales`: son dos y tres valores fijos, y una clase comun obligaria a que
   los dos modulos dependieran entre si o de un paquete compartido por cinco constantes.
 
-## 2026-09-07: Donde vive OperationalExpense, para la proxima migracion
+## 2026-09-07: Donde vive OperationalExpense, para la proxima migracion (RESUELTO el 2026-09-08)
 
 * Ubicacion en Autollantas: **`treasury`**, no `purchases`, aunque en la interfaz aparezca
   bajo Egresos junto a las facturas de compra. Archivos:
@@ -257,6 +329,11 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
 * Consecuencia para el diseno: al migrarlo hara falta un **quinto** origen en `Movement`,
   que es justo el punto en el que la decision de arriba dice que hay que reevaluar el
   patron antes de seguir agregando columnas.
+
+> **Resuelto el 2026-09-08**, ver *Gastos operativos, con edicion (revertir y recrear) y
+> eliminacion*. La reevaluacion ya se habia hecho: el quinto origen fue un valor mas en
+> `MovementSourceType`, no una quinta columna. Se confirmo ademas que **tiene edicion y
+> eliminacion**, y el mecanismo exacto de la edicion.
 
 ## 2026-09-07: Ingresos ocasionales, con eliminacion porque Autollantas la tiene
 

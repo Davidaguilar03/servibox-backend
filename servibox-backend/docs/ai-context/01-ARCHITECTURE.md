@@ -361,11 +361,13 @@ Todas sus entidades extienden `TenantAwareEntity`.
   | `SALE` | `Sale` | el INGRESO del contado y el de cada abono |
   | `PURCHASE` | `Purchase` | el EGRESO del contado y el de cada pago |
   | `OCCASIONAL_INCOME` | `OccasionalIncome` | su INGRESO |
+  | `OPERATIONAL_EXPENSE` | `OperationalExpense` | su EGRESO |
   | null | — | movimiento suelto |
 
   Sustituye a cuatro relaciones `ManyToOne` opcionales, una por origen, que era el diseno
   anterior. **Agregar un origen nuevo ahora es agregar un valor al enum y nada mas**: sin
   columna nueva, sin cambio de esquema y sin un parametro mas en `aplicarMovimiento`.
+  `OPERATIONAL_EXPENSE` fue el primero en estrenarlo, y costo exactamente eso: una linea.
   Motivo completo y la contrapartida (no hay clave foranea) en
   [03-DECISIONS.md](03-DECISIONS.md).
 
@@ -375,6 +377,14 @@ Todas sus entidades extienden `TenantAwareEntity`.
 * `OccasionalIncome` (`INGRESOS_OCASIONALES`): `concept`, `amount`, `ManyToOne` a
   `Account`, `date`. Ingreso puntual que no viene de una venta: reintegros, venta de
   chatarra, un aporte del socio. Autollantas tiene ademas un campo `notes` que no se porto.
+* `OperationalExpense` (`GASTOS_OPERATIVOS`): `concept` (`concepto_gasto`), `amount`
+  (`monto_gasto`), `ManyToOne` a `Account`, `date` (`fecha_gasto`) y `notes`. Gasto puntual
+  que no viene de una factura de compra: arriendo, servicios publicos, papeleria. Es la
+  imagen espejo de `OccasionalIncome` con el signo invertido. **Aqui `notes` si se porto**:
+  es el campo "Observaciones" del formulario de Autollantas y es **opcional** (su
+  `validateFields` solo exige concepto, monto, cuenta y fecha). En la interfaz de
+  Autollantas vive bajo Egresos, junto a las facturas de compra, pero el codigo esta en
+  `treasury` y aqui tambien.
 * `Transfer` (`TRANSFERENCIAS`): `ManyToOne` a `Account` origen y destino, `amount`,
   `concept`, `date`. Autollantas llama a esas relaciones `sourceAccount` /
   `destinationAccount`; aqui son `originAccount` / `destinationAccount`, que es como
@@ -409,6 +419,29 @@ Todas sus entidades extienden `TenantAwareEntity`.
   interfaz se llama "Eliminar". Ojo: a diferencia de una factura de venta, aqui no queda
   ningun estado `ANULADA`, el registro desaparece. Ver
   [03-DECISIONS.md](03-DECISIONS.md).
+* `registrarGastoOperativo(cuenta, concepto, monto, fecha, notas)`: guarda el
+  `OperationalExpense` y genera su `EGRESO` por `aplicarMovimiento`, con
+  `(OPERATIONAL_EXPENSE, id)`. Espejo exacto de `registrarIngresoOcasional`. **No exige
+  saldo suficiente**, a diferencia de `registrarEgresoDeCompra`: Autollantas tampoco, asi
+  que una cuenta puede quedar en negativo por un gasto. Ver
+  [03-DECISIONS.md](03-DECISIONS.md).
+* `editarGastoOperativo(id, cuenta, concepto, monto, fecha, notas)`: **el unico registro de
+  tesoreria que se puede editar.** El mecanismo es **revertir y recrear**, no ajustar la
+  diferencia:
+
+  1. Revierte el movimiento anterior con el mismo `revertir(...)` que usa la anulacion, que
+     le devuelve el importe a **la cuenta de ese movimiento**, y lo borra.
+  2. Actualiza los campos del gasto (misma fila, mismo id).
+  3. Registra un `EGRESO` nuevo por `aplicarMovimiento` con los valores actualizados.
+
+  Es lo que hace `saveOperationalExpense(expense, editMode = true)` de Autollantas. Que el
+  paso 1 mire la cuenta del movimiento viejo y no la del gasto ya editado es lo que hace
+  que **cambiar de cuenta** salga bien: el dinero vuelve de donde salio. Al terminar queda
+  **un solo movimiento**, el nuevo, no un par movimiento + contra-movimiento.
+* `anularGastoOperativo(id)`: borra el movimiento, devuelve el importe al saldo y **elimina
+  la fila**. Es `deleteOperationalExpense` de Autollantas, donde la accion se llama
+  "Eliminar". Mismo nombre enganoso y mismo criterio que `anularIngresoOcasional`: no queda
+  ningun estado `ANULADA`.
 * `balanceGlobal()`: suma de los `currentBalance` de todas las cuentas del tenant activo.
   Es el "Total Global" (`lblTotalGlobal`) de `Accounts.fxml`.
 
@@ -436,10 +469,18 @@ uno de ellos con consecuencia de escritura. Todos corregidos, ver
 * `POST /api/treasury/movements` (registra un ingreso o un egreso)
 * `POST /api/treasury/transfers`
 * `GET` y `POST` `/api/treasury/occasional-incomes`
+* `GET` y `POST` `/api/treasury/operational-expenses`
+* `PUT /api/treasury/operational-expenses/{id}` — edita el gasto; 404 si no existe para el
+  tenant. `PUT` y no `PATCH` porque el cuerpo trae el gasto completo, igual que el
+  formulario de Autollantas, que reenvia todos los campos al guardar en modo edicion.
+* `DELETE /api/treasury/operational-expenses/{id}` — **204**; 404 si no existe para el
+  tenant. `DELETE` y no un `/annul` porque el registro desaparece, no queda en estado
+  `ANULADA`.
 * `GET /api/treasury/balance` (balance global)
 
 Las respuestas van siempre por DTO (`AccountResponse`, `MovementResponse`,
-`TransferResponse`, `OccasionalIncomeResponse`, `BalanceResponse`), nunca la entidad JPA.
+`TransferResponse`, `OccasionalIncomeResponse`, `OperationalExpenseResponse`,
+`BalanceResponse`), nunca la entidad JPA.
 `MovementResponse` incluye `sourceType` (como `String`) y `sourceId`, los dos null en los
 movimientos sueltos, para que el cliente distinga en el listado de que viene cada renglon.
 

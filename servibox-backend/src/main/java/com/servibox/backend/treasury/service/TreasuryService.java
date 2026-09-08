@@ -9,10 +9,12 @@ import com.servibox.backend.treasury.entity.Movement;
 import com.servibox.backend.treasury.entity.MovementSourceType;
 import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.entity.OccasionalIncome;
+import com.servibox.backend.treasury.entity.OperationalExpense;
 import com.servibox.backend.treasury.entity.Transfer;
 import com.servibox.backend.treasury.repository.AccountRepository;
 import com.servibox.backend.treasury.repository.MovementRepository;
 import com.servibox.backend.treasury.repository.OccasionalIncomeRepository;
+import com.servibox.backend.treasury.repository.OperationalExpenseRepository;
 import com.servibox.backend.treasury.repository.TransferRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -30,6 +32,7 @@ public class TreasuryService {
     private final MovementRepository movementRepository;
     private final TransferRepository transferRepository;
     private final OccasionalIncomeRepository occasionalIncomeRepository;
+    private final OperationalExpenseRepository operationalExpenseRepository;
 
     @Transactional(readOnly = true)
     public List<Account> findAllAccounts() {
@@ -252,6 +255,113 @@ public class TreasuryService {
 
         revertir(movimientosDe(MovementSourceType.OCCASIONAL_INCOME, ingreso.getId()));
         occasionalIncomeRepository.delete(ingreso);
+    }
+
+    @Transactional(readOnly = true)
+    public List<OperationalExpense> findAllOperationalExpenses() {
+        return operationalExpenseRepository.findAll();
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<OperationalExpense> findOperationalExpenseById(Long id) {
+        Long tenantId = TenantContext.getTenantId();
+        if (tenantId == null) {
+            return Optional.empty();
+        }
+        return operationalExpenseRepository.findByIdAndTenantId(id, tenantId);
+    }
+
+    /**
+     * Gasto puntual que no viene de una factura de compra. Imagen espejo de
+     * registrarIngresoOcasional: pasa por aplicarMovimiento como todo lo demas, solo que
+     * el movimiento es un EGRESO.
+     *
+     * **No exige saldo suficiente**, a diferencia de registrarEgresoDeCompra. Autollantas
+     * tampoco: su formulario solo valida concepto, monto, cuenta y fecha, y
+     * saveOperationalExpense resta del saldo sin comprobar nada, asi que una cuenta puede
+     * quedar en negativo. Ver 03-DECISIONS.md.
+     */
+    @Transactional
+    public OperationalExpense registrarGastoOperativo(Account cuenta, String concepto, Double monto,
+                                                      LocalDate fecha, String notas) {
+        if (cuenta == null) {
+            throw new IllegalArgumentException("El gasto operativo necesita una cuenta");
+        }
+        if (monto == null || monto <= 0) {
+            throw new IllegalArgumentException("El monto del gasto debe ser mayor a cero");
+        }
+
+        Account gestionada = recargar(cuenta);
+
+        OperationalExpense gasto = new OperationalExpense();
+        gasto.setConcept(concepto);
+        gasto.setAmount(monto);
+        gasto.setAccount(gestionada);
+        gasto.setDate(fecha != null ? fecha : LocalDate.now());
+        gasto.setNotes(notas);
+        OperationalExpense guardado = operationalExpenseRepository.save(gasto);
+
+        aplicarMovimiento(gestionada, MovementType.EGRESO, concepto, monto,
+                MovementSourceType.OPERATIONAL_EXPENSE, guardado.getId());
+
+        return guardado;
+    }
+
+    /**
+     * Edita un gasto ya registrado. El mecanismo es **revertir y recrear**, no ajustar la
+     * diferencia: se revierte el movimiento anterior (devolviendole su importe a **la
+     * cuenta de ese movimiento**, que no tiene por que ser la nueva), se borra, se
+     * actualizan los campos del gasto y se registra un EGRESO nuevo con los valores
+     * actualizados.
+     *
+     * Es exactamente lo que hace `saveOperationalExpense(expense, editMode = true)` de
+     * Autollantas, el unico registro de su tesoreria que tiene modo edicion. Que la
+     * reversion mire la cuenta del movimiento viejo y no la del gasto editado es lo que
+     * hace que cambiar de cuenta salga bien: el dinero vuelve de donde salio.
+     */
+    @Transactional
+    public OperationalExpense editarGastoOperativo(Long gastoId, Account nuevaCuenta, String nuevoConcepto,
+                                                   Double nuevoMonto, LocalDate nuevaFecha, String nuevasNotas) {
+        OperationalExpense gasto = findOperationalExpenseById(gastoId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Gasto operativo no encontrado: " + gastoId));
+        if (nuevaCuenta == null) {
+            throw new IllegalArgumentException("El gasto operativo necesita una cuenta");
+        }
+        if (nuevoMonto == null || nuevoMonto <= 0) {
+            throw new IllegalArgumentException("El monto del gasto debe ser mayor a cero");
+        }
+
+        revertir(movimientosDe(MovementSourceType.OPERATIONAL_EXPENSE, gasto.getId()));
+
+        Account gestionada = recargar(nuevaCuenta);
+        gasto.setConcept(nuevoConcepto);
+        gasto.setAmount(nuevoMonto);
+        gasto.setAccount(gestionada);
+        gasto.setDate(nuevaFecha != null ? nuevaFecha : LocalDate.now());
+        gasto.setNotes(nuevasNotas);
+        OperationalExpense guardado = operationalExpenseRepository.save(gasto);
+
+        aplicarMovimiento(gestionada, MovementType.EGRESO, nuevoConcepto, nuevoMonto,
+                MovementSourceType.OPERATIONAL_EXPENSE, guardado.getId());
+
+        return guardado;
+    }
+
+    /**
+     * Deshace un gasto operativo: borra su movimiento, devuelve el importe al saldo y
+     * **elimina la fila**. Mismo criterio y mismo nombre enganoso que
+     * anularIngresoOcasional: en Autollantas la accion se llama "Eliminar" y
+     * `deleteOperationalExpense` borra el registro, no lo marca. Ver 03-DECISIONS.md.
+     */
+    @Transactional
+    public void anularGastoOperativo(Long gastoId) {
+        OperationalExpense gasto = findOperationalExpenseById(gastoId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Gasto operativo no encontrado: " + gastoId));
+
+        revertir(movimientosDe(MovementSourceType.OPERATIONAL_EXPENSE, gasto.getId()));
+        operationalExpenseRepository.delete(gasto);
     }
 
     /**
