@@ -17,5 +17,6 @@ public enum MovementSourceType {
     TRANSFER,
     SALE,
     PURCHASE,
-    OCCASIONAL_INCOME
+    OCCASIONAL_INCOME,
+    OPERATIONAL_EXPENSE
 }
