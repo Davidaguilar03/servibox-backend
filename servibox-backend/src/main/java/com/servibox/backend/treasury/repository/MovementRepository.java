@@ -8,4 +8,7 @@ import java.util.List;
 public interface MovementRepository extends JpaRepository<Movement, Long> {
 
     List<Movement> findByAccountIdOrderByDateDesc(Long accountId);
+
+    /** Los movimientos que genero una venta: el ingreso del contado y los de sus abonos. */
+    List<Movement> findBySourceSaleId(Long saleId);
 }

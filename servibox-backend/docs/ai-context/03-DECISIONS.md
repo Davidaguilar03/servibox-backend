@@ -12,6 +12,105 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-09-07: Anular una factura muta el balance directamente, saltandose aplicarMovimiento
+
+* Decision: `TreasuryService.revertirMovimientosDeVenta(Sale)` **borra** los movimientos
+  de la venta y ajusta `currentBalance` a mano, al reves de cada movimiento borrado. Es la
+  unica excepcion a la regla de que `aplicarMovimiento` es el unico punto que toca el
+  saldo. Vive en `TreasuryService` y no en `SalesService` a proposito.
+* Alternativas consideradas: registrar un `EGRESO` compensatorio en vez de borrar, que
+  mantendria la regla intacta; o dejar el movimiento y solo marcar la factura `ANULADA`.
+* Motivo: es el comportamiento real de Autollantas (`SalesService.cancelSale`), y no es un
+  detalle de implementacion sino una decision contable del negocio: una factura anulada
+  **no ocurrio**, asi que su rastro sale del extracto en vez de quedar como dos renglones
+  que se cancelan. Un contra-movimiento seria mas limpio de codigo y peor de leer para el
+  usuario: el extracto de la caja mostraria un ingreso y un egreso por una venta que nunca
+  existio, y los reportes por periodo tendrian que aprender a ignorar pares. Dejar el
+  movimiento sin mas descuadraria la caja contra la realidad.
+
+  Que viva en `TreasuryService` es el limite que si se mantiene: si el saldo se va a mover
+  por fuera del camino normal, que al menos sea dentro del modulo que es dueno del saldo, y
+  no repartido por cada modulo que quiera revertir algo. `SalesService` pide la reversion,
+  no la ejecuta.
+
+  **Diferencia con Autollantas, deliberada:** alli `cancelSale` solo revierte tesoreria si
+  la factura es `Contado` **y** esta `PAGADA`, asi que anular una factura a credito con
+  abonos ya recibidos deja ese dinero sumado en la caja y descuadra. Aqui se revierten
+  todos los movimientos ligados a la venta, abonos incluidos, lo que ademas sale gratis
+  porque la relacion es `Movement.sourceSale`. Cubierto por
+  `anularUnaFacturaConAbonosRevierteEsosAbonos`.
+
+## 2026-09-07: El numero de factura lleva restriccion de base, no solo validacion
+
+* Decision: `Sale` lleva `uk_venta_tenant_invoice_number` sobre
+  `(tenant_id, numero_factura_venta)`, ademas de la validacion en
+  `SalesService.crearFactura` que lanza `DuplicateInvoiceNumberException` (**409**). Lo
+  mismo con `Customer` y `uk_cliente_tenant_document`.
+* Alternativas consideradas: copiar Autollantas, que valida el numero con
+  `existsByInvoiceNumberIgnoreCase` antes de guardar y **no tiene indice unico** en
+  `ventas` (su propia documentacion lo dice explicito).
+* Motivo: en Autollantas la unica via de escritura es el formulario, con un solo usuario en
+  una maquina; la validacion de aplicacion alcanza. ServiBox es una API multi-tenant con
+  varios clientes concurrentes: dos peticiones simultaneas con el mismo numero pasan las
+  dos la comprobacion previa y las dos insertan, porque entre el `SELECT` y el `INSERT` no
+  hay nada que lo impida. Un numero de factura repetido no es un problema estetico, es un
+  documento fiscal duplicado. La restriccion de base es lo unico que cierra esa ventana.
+  La validacion en el service se mantiene igualmente para dar un 409 legible en vez del
+  error crudo de constraint violation: misma estructura de dos capas que
+  `Product.code` y `Account.name`. Verificado que la restriccion existe de verdad en el
+  DDL con `SalesDatabaseConstraintsTest`.
+
+## 2026-09-07: Movement.sourceSale, y que treasury conozca a sales
+
+* Decision: `Movement` gana un `ManyToOne` **opcional** a `Sale`
+  (`id_venta_origen`, nullable), hermano de `sourceTransfer`. Entre los dos cubren los dos
+  origenes automaticos que hoy existen. `MovementResponse` expone `sourceSaleId`.
+* Alternativas consideradas: volver al par polimorfico `(tabla_origen, id_origen)` de
+  Autollantas ahora que hay un segundo origen, que era la duda que quedo abierta al
+  introducir `sourceTransfer`; o poner la relacion al reves, de `Sale` al `Movement`.
+* Motivo: la duda abierta era si al aparecer el segundo origen convenia generalizar. Con
+  dos casos a la vista, dos relaciones opcionales siguen siendo mejor que el par
+  polimorfico: la base valida las dos, no hace falta ningun `switch` sobre nombres de tabla
+  en `String`, y borrar los movimientos de una venta es una consulta derivada
+  (`findBySourceSaleId`) en vez de un filtro por dos columnas sin indice. El precio es que
+  `treasury` ahora importa de `sales`. Es la misma direccion de dependencia que ya tiene
+  Autollantas, donde `Collection` vive en `treasury` y referencia `Sale`. Si algun dia
+  hacen falta cuatro o cinco origenes, ahi si conviene revisar; con dos, generalizar es
+  pagar por adelantado.
+
+  Al reves (de `Sale` al movimiento) no sirve: una venta genera varios movimientos a lo
+  largo del tiempo, el del contado y despues uno por cada abono. La cardinalidad manda.
+
+## 2026-09-07: Diferencias entre lo migrado de Sales y el codigo de Autollantas
+
+* Decision: se dejan anotadas las divergencias del modulo Sales que no tienen entrada
+  propia, para no tener que redescubrirlas leyendo los dos repos.
+* Detalle:
+  * **`subtotal` e `ivaPorPagar` son columnas.** En Autollantas no existen como campos: la
+    factura solo persiste `total`, y el subtotal y el IVA por pagar se recalculan en la UI
+    (`calculateSubtotalSinIva`, `calculateDiferenciaIva`). Persistirlos sigue el mismo
+    criterio que congelar `ivaAmount`: los totales de una factura emitida son un dato
+    historico, no un calculo que deba dar distinto si cambian los impuestos manana.
+  * **El saldo pendiente no es columna.** Autollantas lo guarda en `saldo_pendiente` y lo
+    recalcula a mano en cinco sitios; aqui se deriva de la suma de abonos. Un denormalizado
+    que se recalcula en cinco sitios es cinco oportunidades de desincronizarlo. Si algun
+    dia el volumen lo pide, se materializa.
+  * **`getIvaRateForProduct` no tiene la rama de servicios.** El de Autollantas mira
+    primero `InventoryService.isService(p)` y, si lo es, usa `taxAmount / basePrice`.
+    ServiBox no tiene todavia `itemType` ni `basePrice` en `Product`, asi que no hay
+    servicios que distinguir. Cuando se migren, esa rama hay que traerla.
+  * **Suma las rates con `isVat` en vez de quedarse con la primera.** Autollantas usa
+    `findFirst()`; aqui se mantiene la semantica de suma que ya tenia `vatRateOf`, por
+    coherencia con la decision de `taxAmount` del 2026-08-28.
+  * **`Collection` vive en `sales`, no en `treasury`.** En Autollantas esta en `treasury`
+    aunque solo tenga sentido colgando de una factura.
+  * **`Customer` no tiene `documentType`.** Autollantas guarda tipo y numero de documento;
+    aqui solo el numero, que es lo que pedia el alcance. Si hace falta discriminar CC de
+    NIT, se agrega.
+  * **La factura no se puede editar ni restaurar todavia.** Autollantas tiene
+    `saveSaleWithDetails` en modo edicion y `restoreSale` desde la papelera, las dos con
+    su propia reversion de stock y de caja. Fuera del alcance de esta migracion.
+
 ## 2026-09-07: La transferencia genera sus dos movimientos, con relacion al Transfer
 
 * Decision: `registrarTransferencia` ya no toca `currentBalance` directamente. Guarda el

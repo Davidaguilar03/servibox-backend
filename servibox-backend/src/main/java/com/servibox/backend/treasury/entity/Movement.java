@@ -1,5 +1,6 @@
 package com.servibox.backend.treasury.entity;
 
+import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.shared.TenantAwareEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -59,4 +60,17 @@ public class Movement extends TenantAwareEntity {
     @ManyToOne
     @JoinColumn(name = "id_transferencia_origen")
     private Transfer sourceTransfer;
+
+    /**
+     * La venta que genero este movimiento, o null si no viene de una venta. Hermana de
+     * sourceTransfer: entre las dos cubren los dos origenes automaticos que hoy existen.
+     *
+     * Que treasury conozca a sales no es ideal, pero es la misma direccion de dependencia
+     * que ya tiene Autollantas (su Collection, en treasury, referencia Sale) y evita
+     * volver al par polimorfico (tabla_origen, id_origen) sin integridad referencial.
+     * Ver 03-DECISIONS.md.
+     */
+    @ManyToOne
+    @JoinColumn(name = "id_venta_origen")
+    private Sale sourceSale;
 }

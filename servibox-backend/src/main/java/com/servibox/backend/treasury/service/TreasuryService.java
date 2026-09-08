@@ -1,5 +1,6 @@
 package com.servibox.backend.treasury.service;
 
+import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
@@ -92,7 +93,16 @@ public class TreasuryService {
      */
     @Transactional
     public Movement registrarMovimiento(Account cuenta, MovementType tipo, String concepto, Double monto) {
-        return aplicarMovimiento(recargar(cuenta), tipo, concepto, monto, null);
+        return aplicarMovimiento(recargar(cuenta), tipo, concepto, monto, null, null);
+    }
+
+    /**
+     * Ingreso generado por una venta: el del contado al facturar, o el de un abono. Queda
+     * ligado a la factura por Movement.sourceSale para poder revertirlo al anularla.
+     */
+    @Transactional
+    public Movement registrarIngresoDeVenta(Account cuenta, String concepto, Double monto, Sale venta) {
+        return aplicarMovimiento(recargar(cuenta), MovementType.INGRESO, concepto, monto, null, venta);
     }
 
     /**
@@ -106,7 +116,7 @@ public class TreasuryService {
      * rutas se desincronicen.
      */
     private Movement aplicarMovimiento(Account cuenta, MovementType tipo, String concepto,
-                                       Double monto, Transfer origen) {
+                                       Double monto, Transfer origen, Sale ventaOrigen) {
         Movement movimiento = new Movement();
         movimiento.setAccount(cuenta);
         movimiento.setType(tipo);
@@ -114,6 +124,7 @@ public class TreasuryService {
         movimiento.setAmount(monto);
         movimiento.setDate(LocalDate.now());
         movimiento.setSourceTransfer(origen);
+        movimiento.setSourceSale(ventaOrigen);
         Movement guardado = movementRepository.save(movimiento);
 
         double saldo = saldoDe(cuenta);
@@ -158,11 +169,38 @@ public class TreasuryService {
         Transfer guardada = transferRepository.save(transferencia);
 
         aplicarMovimiento(origen, MovementType.EGRESO,
-                "Transferencia a " + destino.getName(), monto, guardada);
+                "Transferencia a " + destino.getName(), monto, guardada, null);
         aplicarMovimiento(destino, MovementType.INGRESO,
-                "Transferencia desde " + origen.getName(), monto, guardada);
+                "Transferencia desde " + origen.getName(), monto, guardada, null);
 
         return guardada;
+    }
+
+    /**
+     * Borra los movimientos que genero una venta y deshace su efecto sobre el saldo de la
+     * cuenta. Es lo que hace `SalesService.cancelSale` de Autollantas al anular.
+     *
+     * **Es la unica excepcion a la regla de que aplicarMovimiento es el unico punto que
+     * toca currentBalance**, y esta aqui y no en SalesService a proposito: si el saldo se
+     * va a mover por fuera del camino normal, que al menos sea dentro del modulo que es
+     * dueno del saldo. El motivo de que sea una excepcion y no un contra-movimiento esta
+     * en 03-DECISIONS.md.
+     */
+    @Transactional
+    public void revertirMovimientosDeVenta(Sale venta) {
+        for (Movement movimiento : movementRepository.findBySourceSaleId(venta.getId())) {
+            Account cuenta = movimiento.getAccount();
+            double monto = movimiento.getAmount() != null ? movimiento.getAmount() : 0.0;
+            if (cuenta != null) {
+                Account gestionada = recargar(cuenta);
+                // Al revés del movimiento: un INGRESO se resta, un EGRESO se suma.
+                gestionada.setCurrentBalance(movimiento.getType() == MovementType.INGRESO
+                        ? saldoDe(gestionada) - monto
+                        : saldoDe(gestionada) + monto);
+                accountRepository.save(gestionada);
+            }
+            movementRepository.delete(movimiento);
+        }
     }
 
     /**
