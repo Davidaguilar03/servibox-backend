@@ -2,6 +2,8 @@ package com.servibox.backend.shared;
 
 import com.servibox.backend.auth.InvalidCredentialsException;
 import com.servibox.backend.inventory.service.DuplicateProductCodeException;
+import com.servibox.backend.treasury.service.DuplicateAccountNameException;
+import com.servibox.backend.treasury.service.InvalidTransferException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -29,6 +31,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DuplicateProductCodeException.class)
     public ResponseEntity<ErrorResponse> manejarDuplicado(DuplicateProductCodeException ex) {
         return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** Dos cuentas del mismo tenant con el mismo nombre. */
+    @ExceptionHandler(DuplicateAccountNameException.class)
+    public ResponseEntity<ErrorResponse> manejarCuentaDuplicada(DuplicateAccountNameException ex) {
+        return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** Transferencia sin sentido: misma cuenta en los dos extremos, o monto no positivo. */
+    @ExceptionHandler(InvalidTransferException.class)
+    public ResponseEntity<ErrorResponse> manejarTransferenciaInvalida(InvalidTransferException ex) {
+        return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     /** Referencia a algo que no existe, por ejemplo una categoria o producto por id. */
