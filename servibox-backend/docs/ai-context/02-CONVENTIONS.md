@@ -36,7 +36,9 @@ esta tabla.
 | `date` | Fecha **de negocio**, `LocalDate` | No confundir con `createdAt` / `updatedAt`, que son `LocalDateTime` y son auditoria. Autollantas usa `LocalDate` en `fecha_movimiento` y `fecha_transferencia`; se conserva |
 | `INGRESO` / `EGRESO` | Entrada y salida de dinero de una cuenta | En Autollantas son los literales `String` `"Ingreso"` y `"Egreso"`; aqui son un enum, ver [03-DECISIONS.md](03-DECISIONS.md) |
 | `originAccount` / `destinationAccount` | Los dos extremos de una transferencia | Autollantas los llama `sourceAccount` / `destinationAccount`. Se renombro el origen para que coincida con la vista (columnas Origin / Destination) |
-| `sourceTransfer` | La transferencia que genero un movimiento | Nullable: null en un ingreso o egreso suelto. Es la version acotada del `(tabla_origen, id_origen)` de Autollantas, ver [03-DECISIONS.md](03-DECISIONS.md) |
+| **Ingreso ocasional** | Ingreso puntual que no viene de una venta: reintegros, venta de chatarra, aporte del socio | Es una entidad propia (`OccasionalIncome`, tabla `INGRESOS_OCASIONALES`), no un movimiento suelto. En la interfaz de Autollantas vive bajo Ingresos > Ingresos Ocasionales |
+| Eliminar un ingreso ocasional | Deshacer el ingreso: se borra su movimiento, se resta el saldo y **desaparece la fila** | En Autollantas la accion se llama "Eliminar", no "Anular". **No deja estado `ANULADA` como una factura de venta**: un ingreso ocasional no es un documento fiscal, no hay nada que conservar |
+| `sourceTransfer` / `sourceSale` / `sourceOccasionalIncome` | El origen automatico de un movimiento | Los tres nullables y **excluyentes**: un movimiento tiene como mucho uno. Los tres null es un movimiento suelto, registrado a mano. Son la version acotada del `(tabla_origen, id_origen)` de Autollantas, ver [03-DECISIONS.md](03-DECISIONS.md) |
 | Balance global | Suma de los `currentBalance` del tenant | Es el "Total Global" (`lblTotalGlobal`) de `Accounts.fxml` |
 | `CASH` / `BANK` | Tipo de cuenta | Las 2 cuentas por defecto de Autollantas son `Caja General` (CASH) y `Bancolombia` (BANK) |
 

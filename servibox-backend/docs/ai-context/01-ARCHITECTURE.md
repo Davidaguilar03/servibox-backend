@@ -349,12 +349,17 @@ Todas sus entidades extienden `TenantAwareEntity`.
   [03-DECISIONS.md](03-DECISIONS.md): el tipo es enum y no `String`, y `concept` es una
   columna real y no una descripcion derivada de `(tabla_origen, id_origen)`.
 
-  `sourceTransfer` es null en un movimiento suelto (un ingreso o egreso registrado a
-  mano) y apunta al `Transfer` en los dos movimientos que genera una transferencia. Es la
-  version acotada del par `(tabla_origen, id_origen)` de Autollantas: mientras el unico
-  origen automatico sea la transferencia, una relacion real con integridad referencial
-  dice lo mismo sin el `switch` sobre nombres de tabla en `String`. Cuando existan Sales y
-  Purchases habra que decidir como se generaliza.
+  Un movimiento lleva **como mucho un origen**, y los tres son nullables:
+  `sourceTransfer` (los dos movimientos de una transferencia), `sourceSale` (el ingreso
+  del contado y los de cada abono) y `sourceOccasionalIncome`. Los tres null significa
+  movimiento suelto, registrado a mano. Son la version acotada del par
+  `(tabla_origen, id_origen)` de Autollantas: relaciones reales con integridad
+  referencial, sin el `switch` sobre nombres de tabla en `String`. Cuando aparezca
+  Purchases habra que decidir si se sigue agregando una relacion por origen o se
+  generaliza, ver [03-DECISIONS.md](03-DECISIONS.md).
+* `OccasionalIncome` (`INGRESOS_OCASIONALES`): `concept`, `amount`, `ManyToOne` a
+  `Account`, `date`. Ingreso puntual que no viene de una venta: reintegros, venta de
+  chatarra, un aporte del socio. Autollantas tiene ademas un campo `notes` que no se porto.
 * `Transfer` (`TRANSFERENCIAS`): `ManyToOne` a `Account` origen y destino, `amount`,
   `concept`, `date`. Autollantas llama a esas relaciones `sourceAccount` /
   `destinationAccount`; aqui son `originAccount` / `destinationAccount`, que es como
@@ -379,6 +384,16 @@ Todas sus entidades extienden `TenantAwareEntity`.
   el balance global del tenant queda igual que antes. Rechaza con
   `InvalidTransferException` (**400**) si las dos cuentas son la misma o si el monto no es
   mayor a cero; en ese caso no se mueve ningun saldo ni queda ningun movimiento colgando.
+* `registrarIngresoOcasional(cuenta, concepto, monto, fecha)`: guarda el
+  `OccasionalIncome` y genera su `INGRESO` por `aplicarMovimiento`, con
+  `sourceOccasionalIncome` apuntando al registro. **No toca `currentBalance` por su
+  cuenta**: el saldo lo mueve el movimiento, igual que la transferencia. Rechaza monto no
+  positivo y cuenta ausente.
+* `anularIngresoOcasional(id)`: borra el movimiento, resta el importe del saldo y
+  **elimina la fila**. Es `deleteOccasionalIncome` de Autollantas, donde la accion en la
+  interfaz se llama "Eliminar". Ojo: a diferencia de una factura de venta, aqui no queda
+  ningun estado `ANULADA`, el registro desaparece. Ver
+  [03-DECISIONS.md](03-DECISIONS.md).
 * `balanceGlobal()`: suma de los `currentBalance` de todas las cuentas del tenant activo.
   Es el "Total Global" (`lblTotalGlobal`) de `Accounts.fxml`.
 
@@ -405,10 +420,11 @@ uno de ellos con consecuencia de escritura. Todos corregidos, ver
 * `GET /api/treasury/accounts/{id}/movements`
 * `POST /api/treasury/movements` (registra un ingreso o un egreso)
 * `POST /api/treasury/transfers`
+* `GET` y `POST` `/api/treasury/occasional-incomes`
 * `GET /api/treasury/balance` (balance global)
 
 Las respuestas van siempre por DTO (`AccountResponse`, `MovementResponse`,
-`TransferResponse`, `BalanceResponse`), nunca la entidad JPA. `MovementResponse` incluye
+`TransferResponse`, `OccasionalIncomeResponse`, `BalanceResponse`), nunca la entidad JPA. `MovementResponse` incluye
 `sourceTransferId`, null en los movimientos sueltos, para que el cliente distinga en el
 listado que renglones vienen de una transferencia.
 
