@@ -12,6 +12,48 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-09-07: Ingresos ocasionales, con eliminacion porque Autollantas la tiene
+
+* Decision: `OccasionalIncome` vive **dentro de `treasury`**, no en un modulo propio.
+  `registrarIngresoOcasional` pasa por `aplicarMovimiento` como todo lo demas, y **si** se
+  implemento el deshacer (`anularIngresoOcasional`), con una tercera relacion opcional
+  `Movement.sourceOccasionalIncome`.
+* Investigacion previa: la duda era si Autollantas permite deshacer un ingreso ocasional ya
+  registrado, para no inventar funcionalidad que el sistema real no tiene. **Si la tiene**:
+  `OccasionalIncomeController` expone "Eliminar" en el menu contextual y en un boton
+  (`btnEliminarClick`, mas atajo de teclado), con dialogo de confirmacion, y llama a
+  `TreasuryService.deleteOccasionalIncome`, que resta el importe del saldo de la cuenta,
+  borra los `Movement` con `sourceTable = "INGRESOS_OCASIONALES"` y borra la fila. Por eso
+  se implementa.
+* Sobre las fechas: el paquete no se toca desde `8b29f7e` (2026-08-04) el controller,
+  `a0610cb` (2026-08-02) el formulario y `6b3e8ad` (2026-05-10) el modelo; la pagina de
+  Notion es posterior. Se contrastaron y coinciden, salvo que Notion lista los campos como
+  "concept, amount, account, date" y el modelo real tiene ademas `notes`.
+* Alternativas consideradas: no implementar el deshacer, que era la opcion por defecto si
+  la investigacion no lo encontraba; o dejar el registro con un estado `ANULADA` como se
+  hizo con las facturas de venta.
+* Motivo: se replica el comportamiento real, que es **borrado**, no anulacion con estado.
+  Un ingreso ocasional no es un documento fiscal con numeracion: nadie lo reclama ni lo
+  audita por numero, asi que no hay nada que conservar y una fila `ANULADA` seria ruido en
+  el listado. Una factura de venta si se conserva porque se entrego y se declaro. **Ojo con
+  el nombre del metodo:** se llama `anularIngresoOcasional` por consistencia con el resto
+  de la API, pero su efecto es eliminar, no marcar. Esta anotado en el javadoc y en
+  [02-CONVENTIONS.md](02-CONVENTIONS.md) para que nadie asuma lo contrario.
+
+  El deshacer comparte con la anulacion de ventas la excepcion a la regla de que
+  `aplicarMovimiento` es el unico punto que toca `currentBalance`, por el mismo motivo, y
+  vive igualmente dentro de `TreasuryService`.
+
+  **No se sembraron datos de prueba**: `BasicDataInitializer` de Autollantas no crea ningun
+  ingreso ocasional por defecto, asi que `DevDataInitializer` se dejo intacto.
+
+* Nota sobre los origenes de `Movement`: van tres relaciones opcionales
+  (`sourceTransfer`, `sourceSale`, `sourceOccasionalIncome`). Al introducir la segunda se
+  dejo dicho que con dos casos generalizar era pagar por adelantado; con tres la cuenta
+  sigue saliendo, porque cada una se borra con su propia consulta derivada y la base las
+  valida. Pero es el limite: **si Purchases trae una cuarta, toca revisar** si conviene una
+  jerarquia de origen o volver al par polimorfico con un indice compuesto.
+
 ## 2026-09-07: Anular una factura muta el balance directamente, saltandose aplicarMovimiento
 
 * Decision: `TreasuryService.revertirMovimientosDeVenta(Sale)` **borra** los movimientos
@@ -239,7 +281,10 @@ Formato de cada entrada:
   `TreasuryService.resolveDescription`.
 * Motivo: el par `(tabla_origen, id_origen)` es una referencia polimorfica a las tablas
   `VENTAS`, `COMPRAS`, `RECAUDOS`, `PAGOS`, `GASTOS_OPERATIVOS`, `INGRESOS_OCASIONALES` y
-  `TRANSFERENCIAS`. En ServiBox esos modulos todavia no existen: portarla ahora seria
+  `TRANSFERENCIAS` (de esas, `TRANSFERENCIAS`, `VENTAS`, `RECAUDOS` e
+  `INGRESOS_OCASIONALES` ya existen en ServiBox, cada una como su propia relacion opcional
+  en `Movement`). Cuando se escribio esta entrada ninguno de esos modulos existia: portarla
+  entonces habria sido
   copiar una clave foranea sin integridad referencial que apunta a tablas ausentes, y un
   `switch` sobre nombres de tabla en `String`. Una columna `concept` da la misma
   informacion al usuario, es lo que el `POST /api/treasury/movements` necesita hoy, y no

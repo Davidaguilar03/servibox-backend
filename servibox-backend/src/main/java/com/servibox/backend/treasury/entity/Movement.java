@@ -73,4 +73,13 @@ public class Movement extends TenantAwareEntity {
     @ManyToOne
     @JoinColumn(name = "id_venta_origen")
     private Sale sourceSale;
+
+    /**
+     * El ingreso ocasional que genero este movimiento, o null si no viene de uno. Tercera
+     * hermana de sourceTransfer y sourceSale. Existe porque Autollantas permite eliminar
+     * un ingreso ocasional revirtiendo su efecto, y hace falta saber que movimiento borrar.
+     */
+    @ManyToOne
+    @JoinColumn(name = "id_ingreso_ocasional_origen")
+    private OccasionalIncome sourceOccasionalIncome;
 }

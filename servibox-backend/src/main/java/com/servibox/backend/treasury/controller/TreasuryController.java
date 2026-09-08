@@ -5,6 +5,8 @@ import com.servibox.backend.treasury.dto.AccountResponse;
 import com.servibox.backend.treasury.dto.BalanceResponse;
 import com.servibox.backend.treasury.dto.MovementRequest;
 import com.servibox.backend.treasury.dto.MovementResponse;
+import com.servibox.backend.treasury.dto.OccasionalIncomeRequest;
+import com.servibox.backend.treasury.dto.OccasionalIncomeResponse;
 import com.servibox.backend.treasury.dto.TransferRequest;
 import com.servibox.backend.treasury.dto.TransferResponse;
 import com.servibox.backend.shared.ResourceNotFoundException;
@@ -68,6 +70,22 @@ public class TreasuryController {
         Account destino = cuentaObligatoria(request.destinationAccountId());
         return TransferResponse.from(treasuryService.registrarTransferencia(
                 origen, destino, request.concept(), request.amount()));
+    }
+
+    @GetMapping("/occasional-incomes")
+    public List<OccasionalIncomeResponse> listarIngresosOcasionales() {
+        return treasuryService.findAllOccasionalIncomes().stream()
+                .map(OccasionalIncomeResponse::from)
+                .toList();
+    }
+
+    @PostMapping("/occasional-incomes")
+    @ResponseStatus(HttpStatus.CREATED)
+    public OccasionalIncomeResponse registrarIngresoOcasional(
+            @Valid @RequestBody OccasionalIncomeRequest request) {
+        Account cuenta = cuentaObligatoria(request.accountId());
+        return OccasionalIncomeResponse.from(treasuryService.registrarIngresoOcasional(
+                cuenta, request.concept(), request.amount(), request.date()));
     }
 
     @GetMapping("/balance")

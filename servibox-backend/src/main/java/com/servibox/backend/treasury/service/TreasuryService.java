@@ -5,9 +5,11 @@ import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
 import com.servibox.backend.treasury.entity.MovementType;
+import com.servibox.backend.treasury.entity.OccasionalIncome;
 import com.servibox.backend.treasury.entity.Transfer;
 import com.servibox.backend.treasury.repository.AccountRepository;
 import com.servibox.backend.treasury.repository.MovementRepository;
+import com.servibox.backend.treasury.repository.OccasionalIncomeRepository;
 import com.servibox.backend.treasury.repository.TransferRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,7 @@ public class TreasuryService {
     private final AccountRepository accountRepository;
     private final MovementRepository movementRepository;
     private final TransferRepository transferRepository;
+    private final OccasionalIncomeRepository occasionalIncomeRepository;
 
     @Transactional(readOnly = true)
     public List<Account> findAllAccounts() {
@@ -93,7 +96,7 @@ public class TreasuryService {
      */
     @Transactional
     public Movement registrarMovimiento(Account cuenta, MovementType tipo, String concepto, Double monto) {
-        return aplicarMovimiento(recargar(cuenta), tipo, concepto, monto, null, null);
+        return aplicarMovimiento(recargar(cuenta), tipo, concepto, monto, null, null, null);
     }
 
     /**
@@ -102,7 +105,7 @@ public class TreasuryService {
      */
     @Transactional
     public Movement registrarIngresoDeVenta(Account cuenta, String concepto, Double monto, Sale venta) {
-        return aplicarMovimiento(recargar(cuenta), MovementType.INGRESO, concepto, monto, null, venta);
+        return aplicarMovimiento(recargar(cuenta), MovementType.INGRESO, concepto, monto, null, venta, null);
     }
 
     /**
@@ -116,7 +119,8 @@ public class TreasuryService {
      * rutas se desincronicen.
      */
     private Movement aplicarMovimiento(Account cuenta, MovementType tipo, String concepto,
-                                       Double monto, Transfer origen, Sale ventaOrigen) {
+                                       Double monto, Transfer origen, Sale ventaOrigen,
+                                       OccasionalIncome ingresoOrigen) {
         Movement movimiento = new Movement();
         movimiento.setAccount(cuenta);
         movimiento.setType(tipo);
@@ -125,6 +129,7 @@ public class TreasuryService {
         movimiento.setDate(LocalDate.now());
         movimiento.setSourceTransfer(origen);
         movimiento.setSourceSale(ventaOrigen);
+        movimiento.setSourceOccasionalIncome(ingresoOrigen);
         Movement guardado = movementRepository.save(movimiento);
 
         double saldo = saldoDe(cuenta);
@@ -169,11 +174,86 @@ public class TreasuryService {
         Transfer guardada = transferRepository.save(transferencia);
 
         aplicarMovimiento(origen, MovementType.EGRESO,
-                "Transferencia a " + destino.getName(), monto, guardada, null);
+                "Transferencia a " + destino.getName(), monto, guardada, null, null);
         aplicarMovimiento(destino, MovementType.INGRESO,
-                "Transferencia desde " + origen.getName(), monto, guardada, null);
+                "Transferencia desde " + origen.getName(), monto, guardada, null, null);
 
         return guardada;
+    }
+
+    @Transactional(readOnly = true)
+    public List<OccasionalIncome> findAllOccasionalIncomes() {
+        return occasionalIncomeRepository.findAll();
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<OccasionalIncome> findOccasionalIncomeById(Long id) {
+        Long tenantId = TenantContext.getTenantId();
+        if (tenantId == null) {
+            return Optional.empty();
+        }
+        return occasionalIncomeRepository.findByIdAndTenantId(id, tenantId);
+    }
+
+    /**
+     * Ingreso puntual que no viene de una venta. Pasa por aplicarMovimiento como todo lo
+     * demas: el saldo lo mueve el Movement, no este metodo.
+     */
+    @Transactional
+    public OccasionalIncome registrarIngresoOcasional(Account cuenta, String concepto,
+                                                      Double monto, LocalDate fecha) {
+        if (cuenta == null) {
+            throw new IllegalArgumentException("El ingreso ocasional necesita una cuenta");
+        }
+        if (monto == null || monto <= 0) {
+            throw new IllegalArgumentException("El monto del ingreso debe ser mayor a cero");
+        }
+
+        Account gestionada = recargar(cuenta);
+
+        OccasionalIncome ingreso = new OccasionalIncome();
+        ingreso.setConcept(concepto);
+        ingreso.setAmount(monto);
+        ingreso.setAccount(gestionada);
+        ingreso.setDate(fecha != null ? fecha : LocalDate.now());
+        OccasionalIncome guardado = occasionalIncomeRepository.save(ingreso);
+
+        aplicarMovimiento(gestionada, MovementType.INGRESO, concepto, monto, null, null, guardado);
+
+        return guardado;
+    }
+
+    /**
+     * Deshace un ingreso ocasional: borra su movimiento, resta el importe del saldo y
+     * **elimina la fila**. Es lo que hace `deleteOccasionalIncome` de Autollantas, donde la
+     * accion en la interfaz se llama "Eliminar".
+     *
+     * Ojo con el nombre: aqui "anular" no deja un estado ANULADA como en una factura de
+     * venta, el registro desaparece. Un ingreso ocasional no es un documento fiscal, no hay
+     * nada que conservar. Ver 03-DECISIONS.md.
+     *
+     * Comparte con la anulacion de ventas la excepcion a la regla de que aplicarMovimiento
+     * es el unico punto que toca currentBalance, y por el mismo motivo.
+     */
+    @Transactional
+    public void anularIngresoOcasional(Long ingresoId) {
+        OccasionalIncome ingreso = findOccasionalIncomeById(ingresoId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Ingreso ocasional no encontrado: " + ingresoId));
+
+        for (Movement movimiento : movementRepository.findBySourceOccasionalIncomeId(ingreso.getId())) {
+            Account cuenta = movimiento.getAccount();
+            double monto = movimiento.getAmount() != null ? movimiento.getAmount() : 0.0;
+            if (cuenta != null) {
+                Account gestionada = recargar(cuenta);
+                gestionada.setCurrentBalance(saldoDe(gestionada) - monto);
+                accountRepository.save(gestionada);
+            }
+            // El Movement se borra antes que el ingreso: la FK apunta en esa direccion.
+            movementRepository.delete(movimiento);
+        }
+
+        occasionalIncomeRepository.delete(ingreso);
     }
 
     /**
