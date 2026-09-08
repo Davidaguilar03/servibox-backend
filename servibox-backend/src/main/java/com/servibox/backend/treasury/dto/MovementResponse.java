@@ -12,7 +12,9 @@ public record MovementResponse(
         MovementType type,
         String concept,
         Double amount,
-        LocalDate date
+        LocalDate date,
+        /** Id del Transfer que genero el movimiento, o null si es un movimiento suelto. */
+        Long sourceTransferId
 ) {
 
     public static MovementResponse from(Movement movement) {
@@ -23,7 +25,8 @@ public record MovementResponse(
                 movement.getType(),
                 movement.getConcept(),
                 movement.getAmount(),
-                movement.getDate()
+                movement.getDate(),
+                movement.getSourceTransfer() != null ? movement.getSourceTransfer().getId() : null
         );
     }
 }

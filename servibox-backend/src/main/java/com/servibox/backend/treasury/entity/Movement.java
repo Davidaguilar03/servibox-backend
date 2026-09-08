@@ -44,4 +44,19 @@ public class Movement extends TenantAwareEntity {
     /** Fecha de negocio, no de auditoria. createdAt de la clase base es otra cosa. */
     @Column(name = "fecha_movimiento")
     private LocalDate date;
+
+    /**
+     * La transferencia que genero este movimiento, o null si el movimiento es suelto
+     * (un ingreso o egreso registrado a mano).
+     *
+     * Es la version acotada del par (tabla_origen, id_origen) de Autollantas: alli el
+     * origen es una referencia polimorfica a siete tablas resuelta con un switch sobre
+     * nombres en String. Aqui, mientras el unico origen automatico sea la transferencia,
+     * una relacion real con integridad referencial dice lo mismo y la base la puede
+     * validar. Cuando existan Sales y Purchases habra que decidir como se generaliza, ver
+     * 03-DECISIONS.md.
+     */
+    @ManyToOne
+    @JoinColumn(name = "id_transferencia_origen")
+    private Transfer sourceTransfer;
 }

@@ -88,26 +88,37 @@ public class TreasuryService {
     }
 
     /**
-     * Registra un ingreso o egreso y deja aplicado el efecto sobre el saldo de la cuenta.
-     * Las dos cosas van juntas a proposito: un movimiento guardado sin mover el saldo, o
-     * un saldo movido sin movimiento que lo explique, es una descuadre silencioso.
+     * Registra un ingreso o egreso suelto, de los que no vienen de una transferencia.
      */
     @Transactional
     public Movement registrarMovimiento(Account cuenta, MovementType tipo, String concepto, Double monto) {
-        Account cuentaGestionada = recargar(cuenta);
+        return aplicarMovimiento(recargar(cuenta), tipo, concepto, monto, null);
+    }
 
+    /**
+     * Unico sitio donde se crea un Movement y se mueve el saldo de su cuenta. Las dos
+     * cosas van juntas a proposito: un movimiento guardado sin mover el saldo, o un saldo
+     * movido sin movimiento que lo explique, es un descuadre silencioso.
+     *
+     * Por eso tampoco hay una segunda via para tocar currentBalance: la transferencia
+     * pasa por aqui igual que el movimiento suelto, solo que con el Transfer de origen.
+     * Mientras el signo del saldo se decida en un unico `if`, no hay forma de que las dos
+     * rutas se desincronicen.
+     */
+    private Movement aplicarMovimiento(Account cuenta, MovementType tipo, String concepto,
+                                       Double monto, Transfer origen) {
         Movement movimiento = new Movement();
-        movimiento.setAccount(cuentaGestionada);
+        movimiento.setAccount(cuenta);
         movimiento.setType(tipo);
         movimiento.setConcept(concepto);
         movimiento.setAmount(monto);
         movimiento.setDate(LocalDate.now());
+        movimiento.setSourceTransfer(origen);
         Movement guardado = movementRepository.save(movimiento);
 
-        double saldo = saldoDe(cuentaGestionada);
-        cuentaGestionada.setCurrentBalance(
-                tipo == MovementType.INGRESO ? saldo + monto : saldo - monto);
-        accountRepository.save(cuentaGestionada);
+        double saldo = saldoDe(cuenta);
+        cuenta.setCurrentBalance(tipo == MovementType.INGRESO ? saldo + monto : saldo - monto);
+        accountRepository.save(cuenta);
 
         return guardado;
     }
@@ -116,6 +127,11 @@ public class TreasuryService {
      * Debita el origen y acredita el destino por el mismo monto, en una sola transaccion:
      * o se mueven los dos saldos o no se mueve ninguno. El dinero se conserva, el balance
      * global del tenant queda igual que antes.
+     *
+     * Los saldos no se tocan aqui directamente: la transferencia genera un EGRESO en el
+     * origen y un INGRESO en el destino, los dos apuntando al Transfer con sourceTransfer,
+     * y son esos movimientos los que mueven el saldo. Asi el historial de una cuenta
+     * explica todos sus cambios de saldo, igual que en Autollantas.
      */
     @Transactional
     public Transfer registrarTransferencia(Account cuentaOrigen, Account cuentaDestino,
@@ -141,10 +157,10 @@ public class TreasuryService {
         transferencia.setDate(LocalDate.now());
         Transfer guardada = transferRepository.save(transferencia);
 
-        origen.setCurrentBalance(saldoDe(origen) - monto);
-        destino.setCurrentBalance(saldoDe(destino) + monto);
-        accountRepository.save(origen);
-        accountRepository.save(destino);
+        aplicarMovimiento(origen, MovementType.EGRESO,
+                "Transferencia a " + destino.getName(), monto, guardada);
+        aplicarMovimiento(destino, MovementType.INGRESO,
+                "Transferencia desde " + origen.getName(), monto, guardada);
 
         return guardada;
     }

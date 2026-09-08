@@ -36,6 +36,7 @@ esta tabla.
 | `date` | Fecha **de negocio**, `LocalDate` | No confundir con `createdAt` / `updatedAt`, que son `LocalDateTime` y son auditoria. Autollantas usa `LocalDate` en `fecha_movimiento` y `fecha_transferencia`; se conserva |
 | `INGRESO` / `EGRESO` | Entrada y salida de dinero de una cuenta | En Autollantas son los literales `String` `"Ingreso"` y `"Egreso"`; aqui son un enum, ver [03-DECISIONS.md](03-DECISIONS.md) |
 | `originAccount` / `destinationAccount` | Los dos extremos de una transferencia | Autollantas los llama `sourceAccount` / `destinationAccount`. Se renombro el origen para que coincida con la vista (columnas Origin / Destination) |
+| `sourceTransfer` | La transferencia que genero un movimiento | Nullable: null en un ingreso o egreso suelto. Es la version acotada del `(tabla_origen, id_origen)` de Autollantas, ver [03-DECISIONS.md](03-DECISIONS.md) |
 | Balance global | Suma de los `currentBalance` del tenant | Es el "Total Global" (`lblTotalGlobal`) de `Accounts.fxml` |
 | `CASH` / `BANK` | Tipo de cuenta | Las 2 cuentas por defecto de Autollantas son `Caja General` (CASH) y `Bancolombia` (BANK) |
 

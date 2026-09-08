@@ -17,6 +17,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -115,6 +117,62 @@ class TreasuryMovementsTest {
         assertThat(transferencia.getId()).isNotNull();
         assertThat(transferencia.getOriginAccount().getId()).isEqualTo(cuentaA.getId());
         assertThat(transferencia.getDestinationAccount().getId()).isEqualTo(cuentaB.getId());
+    }
+
+    /**
+     * La transferencia deja rastro en el historial de las dos cuentas. Antes movia los
+     * saldos directamente y no generaba ningun Movement, asi que el extracto de una
+     * cuenta no explicaba todos sus cambios de saldo. Ver 03-DECISIONS.md.
+     */
+    @Test
+    void unaTransferenciaGeneraElEgresoYElIngresoApuntandoAlTransfer() {
+        treasuryService.registrarMovimiento(cuentaA, MovementType.INGRESO, "Saldo de apertura", 30000.0);
+
+        Transfer transferencia = treasuryService.registrarTransferencia(
+                cuentaA, cuentaB, "Consignacion del dia", 10000.0);
+
+        Movement egreso = treasuryService.findMovementsByAccountId(cuentaA.getId()).stream()
+                .filter(m -> m.getSourceTransfer() != null)
+                .findFirst()
+                .orElseThrow();
+        assertThat(egreso.getType()).isEqualTo(MovementType.EGRESO);
+        assertThat(egreso.getAmount()).isEqualTo(10000.0);
+        assertThat(egreso.getConcept()).isEqualTo("Transferencia a Bancolombia");
+        assertThat(egreso.getSourceTransfer().getId()).isEqualTo(transferencia.getId());
+        assertThat(egreso.getAccount().getId()).isEqualTo(cuentaA.getId());
+
+        List<Movement> deB = treasuryService.findMovementsByAccountId(cuentaB.getId());
+        assertThat(deB).hasSize(1);
+        Movement ingreso = deB.get(0);
+        assertThat(ingreso.getType()).isEqualTo(MovementType.INGRESO);
+        assertThat(ingreso.getAmount()).isEqualTo(10000.0);
+        assertThat(ingreso.getConcept()).isEqualTo("Transferencia desde Caja General");
+        assertThat(ingreso.getSourceTransfer().getId()).isEqualTo(transferencia.getId());
+        assertThat(ingreso.getAccount().getId()).isEqualTo(cuentaB.getId());
+
+        // Los dos movimientos salen del mismo Transfer.
+        assertThat(egreso.getSourceTransfer().getId()).isEqualTo(ingreso.getSourceTransfer().getId());
+    }
+
+    /** Un ingreso o egreso registrado a mano no viene de ninguna transferencia. */
+    @Test
+    void unMovimientoSueltoNoTieneTransferDeOrigen() {
+        treasuryService.registrarMovimiento(cuentaA, MovementType.INGRESO, "Venta de contado", 50000.0);
+
+        assertThat(treasuryService.findMovementsByAccountId(cuentaA.getId()))
+                .singleElement()
+                .extracting(Movement::getSourceTransfer)
+                .isNull();
+    }
+
+    /** Una transferencia rechazada no deja movimientos colgando. */
+    @Test
+    void unaTransferenciaRechazadaNoGeneraMovimientos() {
+        assertThatThrownBy(() -> treasuryService.registrarTransferencia(cuentaA, cuentaB, "Cero", 0.0))
+                .isInstanceOf(InvalidTransferException.class);
+
+        assertThat(treasuryService.findMovementsByAccountId(cuentaA.getId())).isEmpty();
+        assertThat(treasuryService.findMovementsByAccountId(cuentaB.getId())).isEmpty();
     }
 
     @Test

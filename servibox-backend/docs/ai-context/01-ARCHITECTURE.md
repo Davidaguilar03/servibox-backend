@@ -342,10 +342,18 @@ Todas sus entidades extienden `TenantAwareEntity`.
   Una cuenta nueva arranca con `currentBalance` igual a su `initialBalance`: mientras no
   haya movimientos, el saldo vivo es el saldo de apertura.
 * `Movement` (`MOVIMIENTOS`): `ManyToOne` a `Account`, `type` (enum `MovementType`,
-  `INGRESO` o `EGRESO`), `concept`, `amount`, `date` (`LocalDate`). Dos divergencias
-  deliberadas respecto de Autollantas, ambas en [03-DECISIONS.md](03-DECISIONS.md): el
-  tipo es enum y no `String`, y `concept` es una columna real y no una descripcion
-  derivada de `(tabla_origen, id_origen)`.
+  `INGRESO` o `EGRESO`), `concept`, `amount`, `date` (`LocalDate`), y `sourceTransfer`,
+  un `ManyToOne` **opcional** a `Transfer` (`id_transferencia_origen`, nullable). Dos
+  divergencias deliberadas respecto de Autollantas, ambas en
+  [03-DECISIONS.md](03-DECISIONS.md): el tipo es enum y no `String`, y `concept` es una
+  columna real y no una descripcion derivada de `(tabla_origen, id_origen)`.
+
+  `sourceTransfer` es null en un movimiento suelto (un ingreso o egreso registrado a
+  mano) y apunta al `Transfer` en los dos movimientos que genera una transferencia. Es la
+  version acotada del par `(tabla_origen, id_origen)` de Autollantas: mientras el unico
+  origen automatico sea la transferencia, una relacion real con integridad referencial
+  dice lo mismo sin el `switch` sobre nombres de tabla en `String`. Cuando existan Sales y
+  Purchases habra que decidir como se generaliza.
 * `Transfer` (`TRANSFERENCIAS`): `ManyToOne` a `Account` origen y destino, `amount`,
   `concept`, `date`. Autollantas llama a esas relaciones `sourceAccount` /
   `destinationAccount`; aqui son `originAccount` / `destinationAccount`, que es como
@@ -353,16 +361,23 @@ Todas sus entidades extienden `TenantAwareEntity`.
 
 **`TreasuryService`**
 
-* `registrarMovimiento(cuenta, tipo, concepto, monto)`: guarda el `Movement` y aplica el
-  efecto sobre `currentBalance` en la misma transaccion, sumando si es `INGRESO` y
-  restando si es `EGRESO`. Las dos cosas van juntas a proposito: un movimiento guardado
-  sin mover el saldo, o un saldo movido sin movimiento que lo explique, es un descuadre
-  silencioso.
-* `registrarTransferencia(origen, destino, concepto, monto)`: guarda el `Transfer`, debita
-  el origen y acredita el destino, todo en una transaccion. **El dinero se conserva**: el
-  balance global del tenant queda igual que antes. Rechaza con
+* `registrarMovimiento(cuenta, tipo, concepto, monto)`: registra un ingreso o egreso
+  suelto. Delega en `aplicarMovimiento` con `sourceTransfer` null.
+* `aplicarMovimiento(cuenta, tipo, concepto, monto, transferDeOrigen)` (privado): **el
+  unico sitio del modulo donde se crea un `Movement` y se mueve el `currentBalance` de su
+  cuenta.** Suma si es `INGRESO`, resta si es `EGRESO`. Las dos cosas van juntas a
+  proposito: un movimiento guardado sin mover el saldo, o un saldo movido sin movimiento
+  que lo explique, es un descuadre silencioso. Como no hay ninguna otra via para tocar
+  `currentBalance`, las dos rutas que lo mueven no se pueden desincronizar.
+* `registrarTransferencia(origen, destino, concepto, monto)`: guarda el `Transfer` y
+  genera **dos movimientos** por `aplicarMovimiento`, un `EGRESO` en el origen con
+  concepto "Transferencia a {destino}" y un `INGRESO` en el destino con concepto
+  "Transferencia desde {origen}", los dos con `sourceTransfer` apuntando al `Transfer`.
+  Son esos movimientos los que mueven los saldos; la transferencia no toca
+  `currentBalance` por su cuenta. Todo en una sola transaccion. **El dinero se conserva**:
+  el balance global del tenant queda igual que antes. Rechaza con
   `InvalidTransferException` (**400**) si las dos cuentas son la misma o si el monto no es
-  mayor a cero; en ese caso ningun saldo se mueve.
+  mayor a cero; en ese caso no se mueve ningun saldo ni queda ningun movimiento colgando.
 * `balanceGlobal()`: suma de los `currentBalance` de todas las cuentas del tenant activo.
   Es el "Total Global" (`lblTotalGlobal`) de `Accounts.fxml`.
 
@@ -392,7 +407,9 @@ uno de ellos con consecuencia de escritura. Todos corregidos, ver
 * `GET /api/treasury/balance` (balance global)
 
 Las respuestas van siempre por DTO (`AccountResponse`, `MovementResponse`,
-`TransferResponse`, `BalanceResponse`), nunca la entidad JPA.
+`TransferResponse`, `BalanceResponse`), nunca la entidad JPA. `MovementResponse` incluye
+`sourceTransferId`, null en los movimientos sueltos, para que el cliente distinga en el
+listado que renglones vienen de una transferencia.
 
 **Semilla de desarrollo.** `DevDataInitializer` crea ademas las 2 cuentas por defecto de
 Autollantas para el tenant `demo`: `Caja General` (`CASH`) y `Bancolombia` (`BANK`), las
