@@ -18,6 +18,7 @@ import com.servibox.backend.sales.service.SalesService;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
+import com.servibox.backend.treasury.entity.MovementSourceType;
 import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.service.TreasuryService;
 import org.junit.jupiter.api.AfterEach;
@@ -124,13 +125,13 @@ class PurchasesFlowTest {
         assertThat(saldoDe(caja)).isEqualTo(1000000.0 - 595000.0);
         List<Movement> movimientos = treasuryService.findMovementsByAccountId(caja.getId());
         Movement egreso = movimientos.stream()
-                .filter(m -> m.getSourcePurchase() != null)
+                .filter(m -> m.getSourceType() == MovementSourceType.PURCHASE)
                 .findFirst()
                 .orElseThrow();
         assertThat(egreso.getType()).isEqualTo(MovementType.EGRESO);
         assertThat(egreso.getAmount()).isEqualTo(595000.0);
         assertThat(egreso.getConcept()).isEqualTo("Compra FAC-00001");
-        assertThat(egreso.getSourcePurchase().getId()).isEqualTo(compra.getId());
+        assertThat(egreso.getSourceId()).isEqualTo(compra.getId());
     }
 
     @Test
@@ -176,7 +177,7 @@ class PurchasesFlowTest {
         assertThat(saldoDe(caja)).isEqualTo(500000.0 - total);
 
         Movement egreso = treasuryService.findMovementsByAccountId(caja.getId()).stream()
-                .filter(m -> m.getSourcePurchase() != null)
+                .filter(m -> m.getSourceType() == MovementSourceType.PURCHASE)
                 .findFirst()
                 .orElseThrow();
         assertThat(egreso.getType()).isEqualTo(MovementType.EGRESO);
@@ -222,7 +223,7 @@ class PurchasesFlowTest {
         assertThat(stockDe(llanta)).isEqualTo(stockAntesDeLaCompra);
         assertThat(saldoDe(caja)).isEqualTo(saldoAntesDeLaCompra);
         assertThat(treasuryService.findMovementsByAccountId(caja.getId()).stream()
-                .filter(m -> m.getSourcePurchase() != null).toList()).isEmpty();
+                .filter(m -> m.getSourceType() == MovementSourceType.PURCHASE).toList()).isEmpty();
         assertThat(estadoDe(compra)).isEqualTo(PurchaseStatus.ANULADA);
     }
 
@@ -257,7 +258,7 @@ class PurchasesFlowTest {
 
         assertThat(saldoDe(caja)).isEqualTo(saldoAntesDelPago);
         assertThat(treasuryService.findMovementsByAccountId(caja.getId()).stream()
-                .filter(m -> m.getSourcePurchase() != null).toList()).isEmpty();
+                .filter(m -> m.getSourceType() == MovementSourceType.PURCHASE).toList()).isEmpty();
         assertThat(stockDe(llanta)).isEqualTo(10);
         assertThat(estadoDe(compra)).isEqualTo(PurchaseStatus.ANULADA);
     }

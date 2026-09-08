@@ -12,6 +12,66 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-09-07: El origen de un Movement pasa a ser (tipo, id)
+
+* Decision: se eliminan las cuatro relaciones `ManyToOne` opcionales de `Movement`
+  (`sourceTransfer`, `sourceSale`, `sourcePurchase`, `sourceOccasionalIncome`) y se
+  reemplazan por `sourceType` (enum `MovementSourceType`, nullable) y `sourceId` (`Long`,
+  nullable). `aplicarMovimiento` pasa de ocho parametros a seis y recibe el origen como
+  `(tipo, id)`. Los tres buscadores del repositorio se unifican en
+  `findBySourceTypeAndSourceIdAndTenantId`. `MovementResponse` expone `sourceType` y
+  `sourceId` en vez de cuatro campos `sourceXxxId`.
+* Alternativas consideradas: dejarlo como estaba y seguir agregando una relacion por
+  origen; una tabla puente `ORIGEN_MOVIMIENTO`; o una jerarquia de entidades de origen con
+  herencia JPA.
+* Motivo: el diseno anterior no escalaba y ya se habia anotado el limite al llegar al
+  cuarto. Cada origen nuevo obligaba a tocar cuatro sitios (entidad, repositorio, DTO y la
+  firma de `aplicarMovimiento`), la firma llevaba cuatro parametros de los que tres eran
+  siempre `null` en cada llamada, y nada impedia que dos vinieran poblados a la vez. Con el
+  par, **agregar `OPERATIONAL_EXPENSE` es agregar un valor al enum**: sin columna nueva,
+  sin cambio de esquema y sin tocar ninguna firma.
+
+  La tabla puente y la jerarquia resuelven lo mismo con una tabla o un arbol de clases de
+  mas, para un dato que solo se usa como "traeme los movimientos de esto para revertirlos".
+
+* **La contrapartida, y por que se acepta:** se pierde la clave foranea. `sourceId` apunta
+  a tablas distintas segun el tipo, asi que la base ya no valida que el id exista. La
+  seguridad de tipos, sin embargo, **nunca estuvo en la constraint**: esta en que ningun
+  sitio construye un `Movement` a mano. Todo pasa por metodos de `TreasuryService`
+  (`registrarIngresoDeVenta(… Sale venta)`, `registrarEgresoDeCompra(… Purchase compra)`,
+  `registrarIngresoOcasional`, `registrarTransferencia`) que reciben **la entidad tipada
+  real** y sacan el id de ella; `aplicarMovimiento` es privado. Un id suelto no entra al
+  sistema, asi que la FK estaba validando algo que el compilador ya garantizaba un nivel
+  mas arriba.
+
+  Lo que si se agrego para compensar: el buscador lleva `tenantId` explicito en el `where`
+  ademas del `@Filter` de Hibernate. Sin FK, ese `where` es la unica garantia de que no se
+  cruce un id de otro tenant.
+
+* Alcance del cambio: `MovementSourceType` (nuevo), `Movement`, `MovementRepository`,
+  `MovementResponse`, `TreasuryService`, y seis archivos de test. **`SalesService` y
+  `PurchasesService` no se tocaron**: ninguno consulta el repositorio de movimientos
+  directamente, los dos delegan en `TreasuryService.revertirMovimientos*`, que era el
+  unico sitio que sabia de los buscadores por origen. Que el refactor no los alcanzara
+  confirma que la frontera del modulo estaba bien puesta.
+* Verificacion: el suite quedo en **91 tests, exactamente los mismos que antes** del
+  refactor y clase por clase. No se agrego ni se quito cobertura: los tests verifican lo
+  mismo, expresado con los campos nuevos.
+
+## 2026-09-07: Estado de la gestion del esquema (sin migraciones formales)
+
+* Constatacion, no decision: **no hay Flyway ni Liquibase** en `pom.xml`, ni ninguna
+  carpeta de migraciones versionadas. Los tests corren sobre H2 en memoria con
+  `spring.jpa.hibernate.ddl-auto=create-drop` (`application-test.properties`), y
+  `application.properties` **no declara datasource ni `ddl-auto`**, asi que en local todo
+  depende de la autoconfiguracion de Spring Boot sobre la H2 embebida.
+* Consecuencia inmediata: refactors de esquema como el de `(tipo, id)` de arriba no
+  requieren migracion; el esquema se regenera solo.
+* **Pendiente para produccion:** el driver de PostgreSQL ya esta en el `pom.xml`. En cuanto
+  haya una base persistente, `create-drop` deja de servir y hace falta una herramienta de
+  migracion, con una linea base que refleje el esquema actual. A partir de ese momento
+  cambios como este si necesitan su migracion escrita a mano.
+
 ## 2026-09-07: El IVA de compras en Autollantas no esta hardcodeado, pero si diverge de ventas
 
 * Hallazgo: la documentacion de Notion describe el IVA de compras como `price*0.19` por
@@ -76,7 +136,13 @@ Formato de cada entrada:
   medias igual, pero validar antes de escribir da el mensaje correcto en vez de un fallo a
   mitad de camino.
 
-## 2026-09-07: Movement.sourcePurchase, cuarto origen y limite del patron
+## 2026-09-07: Movement.sourcePurchase, cuarto origen y limite del patron (RESUELTO el mismo dia)
+
+> **RESUELTO.** Se hizo el refactor que esta entrada dejaba pendiente: las cuatro
+> relaciones se reemplazaron por el par `sourceType` + `sourceId`. Ver la entrada "El
+> origen de un Movement pasa a ser (tipo, id)" mas arriba. La entrada original se conserva
+> por el razonamiento.
+
 
 * Decision: se agrega `Movement.sourcePurchase` siguiendo el mismo patron que los tres
   anteriores, sin cambiar el diseno.

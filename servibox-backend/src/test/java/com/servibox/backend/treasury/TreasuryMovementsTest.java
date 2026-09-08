@@ -6,6 +6,7 @@ import com.servibox.backend.tenant.TenantRepository;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.AccountType;
 import com.servibox.backend.treasury.entity.Movement;
+import com.servibox.backend.treasury.entity.MovementSourceType;
 import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.entity.Transfer;
 import com.servibox.backend.treasury.service.InvalidTransferException;
@@ -132,13 +133,13 @@ class TreasuryMovementsTest {
                 cuentaA, cuentaB, "Consignacion del dia", 10000.0);
 
         Movement egreso = treasuryService.findMovementsByAccountId(cuentaA.getId()).stream()
-                .filter(m -> m.getSourceTransfer() != null)
+                .filter(m -> m.getSourceType() == MovementSourceType.TRANSFER)
                 .findFirst()
                 .orElseThrow();
         assertThat(egreso.getType()).isEqualTo(MovementType.EGRESO);
         assertThat(egreso.getAmount()).isEqualTo(10000.0);
         assertThat(egreso.getConcept()).isEqualTo("Transferencia a Bancolombia");
-        assertThat(egreso.getSourceTransfer().getId()).isEqualTo(transferencia.getId());
+        assertThat(egreso.getSourceId()).isEqualTo(transferencia.getId());
         assertThat(egreso.getAccount().getId()).isEqualTo(cuentaA.getId());
 
         List<Movement> deB = treasuryService.findMovementsByAccountId(cuentaB.getId());
@@ -147,11 +148,12 @@ class TreasuryMovementsTest {
         assertThat(ingreso.getType()).isEqualTo(MovementType.INGRESO);
         assertThat(ingreso.getAmount()).isEqualTo(10000.0);
         assertThat(ingreso.getConcept()).isEqualTo("Transferencia desde Caja General");
-        assertThat(ingreso.getSourceTransfer().getId()).isEqualTo(transferencia.getId());
+        assertThat(ingreso.getSourceType()).isEqualTo(MovementSourceType.TRANSFER);
+        assertThat(ingreso.getSourceId()).isEqualTo(transferencia.getId());
         assertThat(ingreso.getAccount().getId()).isEqualTo(cuentaB.getId());
 
         // Los dos movimientos salen del mismo Transfer.
-        assertThat(egreso.getSourceTransfer().getId()).isEqualTo(ingreso.getSourceTransfer().getId());
+        assertThat(egreso.getSourceId()).isEqualTo(ingreso.getSourceId());
     }
 
     /** Un ingreso o egreso registrado a mano no viene de ninguna transferencia. */
@@ -161,8 +163,10 @@ class TreasuryMovementsTest {
 
         assertThat(treasuryService.findMovementsByAccountId(cuentaA.getId()))
                 .singleElement()
-                .extracting(Movement::getSourceTransfer)
-                .isNull();
+                .satisfies(m -> {
+                    assertThat(m.getSourceType()).isNull();
+                    assertThat(m.getSourceId()).isNull();
+                });
     }
 
     /** Una transferencia rechazada no deja movimientos colgando. */

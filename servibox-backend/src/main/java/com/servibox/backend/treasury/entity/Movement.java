@@ -1,7 +1,5 @@
 package com.servibox.backend.treasury.entity;
 
-import com.servibox.backend.purchases.entity.Purchase;
-import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.shared.TenantAwareEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -48,51 +46,25 @@ public class Movement extends TenantAwareEntity {
     private LocalDate date;
 
     /**
-     * La transferencia que genero este movimiento, o null si el movimiento es suelto
-     * (un ingreso o egreso registrado a mano).
+     * Que clase de cosa genero este movimiento, o null si es un movimiento suelto
+     * registrado a mano.
      *
-     * Es la version acotada del par (tabla_origen, id_origen) de Autollantas: alli el
-     * origen es una referencia polimorfica a siete tablas resuelta con un switch sobre
-     * nombres en String. Aqui, mientras el unico origen automatico sea la transferencia,
-     * una relacion real con integridad referencial dice lo mismo y la base la puede
-     * validar. Cuando existan Sales y Purchases habra que decidir como se generaliza, ver
-     * 03-DECISIONS.md.
+     * Junto con sourceId reemplaza a las cuatro relaciones ManyToOne opcionales
+     * (sourceTransfer, sourceSale, sourcePurchase, sourceOccasionalIncome) que habia
+     * antes. Ver 03-DECISIONS.md.
      */
-    @ManyToOne
-    @JoinColumn(name = "id_transferencia_origen")
-    private Transfer sourceTransfer;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "tipo_origen_movimiento")
+    private MovementSourceType sourceType;
 
     /**
-     * La venta que genero este movimiento, o null si no viene de una venta. Hermana de
-     * sourceTransfer: entre las dos cubren los dos origenes automaticos que hoy existen.
+     * Id del registro que genero el movimiento, interpretado segun sourceType. Null en un
+     * movimiento suelto, y siempre acompanado de sourceType cuando no lo es.
      *
-     * Que treasury conozca a sales no es ideal, pero es la misma direccion de dependencia
-     * que ya tiene Autollantas (su Collection, en treasury, referencia Sale) y evita
-     * volver al par polimorfico (tabla_origen, id_origen) sin integridad referencial.
-     * Ver 03-DECISIONS.md.
+     * **No es una clave foranea a proposito**: apunta a tablas distintas segun el tipo. La
+     * seguridad de tipos no se pierde porque nadie escribe un Movement con un id suelto:
+     * todo pasa por metodos de TreasuryService que reciben la entidad real.
      */
-    @ManyToOne
-    @JoinColumn(name = "id_venta_origen")
-    private Sale sourceSale;
-
-    /**
-     * El ingreso ocasional que genero este movimiento, o null si no viene de uno. Tercera
-     * hermana de sourceTransfer y sourceSale. Existe porque Autollantas permite eliminar
-     * un ingreso ocasional revirtiendo su efecto, y hace falta saber que movimiento borrar.
-     */
-    @ManyToOne
-    @JoinColumn(name = "id_ingreso_ocasional_origen")
-    private OccasionalIncome sourceOccasionalIncome;
-
-    /**
-     * La compra que genero este movimiento, o null. Cuarto origen, mismo patron que los
-     * tres anteriores por consistencia.
-     *
-     * **Este es el punto donde dijimos que tocaria reevaluar el diseno.** Cuatro columnas
-     * nullables excluyentes empiezan a pedir otra cosa; se mantiene el patron para no
-     * cambiarlo en medio de una migracion, pero hay que discutirlo. Ver 03-DECISIONS.md.
-     */
-    @ManyToOne
-    @JoinColumn(name = "id_compra_origen")
-    private Purchase sourcePurchase;
+    @Column(name = "id_origen_movimiento")
+    private Long sourceId;
 }

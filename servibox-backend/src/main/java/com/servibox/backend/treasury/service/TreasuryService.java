@@ -6,6 +6,7 @@ import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
+import com.servibox.backend.treasury.entity.MovementSourceType;
 import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.entity.OccasionalIncome;
 import com.servibox.backend.treasury.entity.Transfer;
@@ -98,16 +99,17 @@ public class TreasuryService {
      */
     @Transactional
     public Movement registrarMovimiento(Account cuenta, MovementType tipo, String concepto, Double monto) {
-        return aplicarMovimiento(recargar(cuenta), tipo, concepto, monto, null, null, null, null);
+        return aplicarMovimiento(recargar(cuenta), tipo, concepto, monto, null, null);
     }
 
     /**
      * Ingreso generado por una venta: el del contado al facturar, o el de un abono. Queda
-     * ligado a la factura por Movement.sourceSale para poder revertirlo al anularla.
+     * ligado a la factura por (SALE, id) para poder revertirlo al anularla.
      */
     @Transactional
     public Movement registrarIngresoDeVenta(Account cuenta, String concepto, Double monto, Sale venta) {
-        return aplicarMovimiento(recargar(cuenta), MovementType.INGRESO, concepto, monto, null, venta, null, null);
+        return aplicarMovimiento(recargar(cuenta), MovementType.INGRESO, concepto, monto,
+                MovementSourceType.SALE, venta.getId());
     }
 
     /**
@@ -116,23 +118,24 @@ public class TreasuryService {
      * movido sin movimiento que lo explique, es un descuadre silencioso.
      *
      * Por eso tampoco hay una segunda via para tocar currentBalance: la transferencia
-     * pasa por aqui igual que el movimiento suelto, solo que con el Transfer de origen.
+     * pasa por aqui igual que el movimiento suelto, solo que con su origen.
      * Mientras el signo del saldo se decida en un unico `if`, no hay forma de que las dos
      * rutas se desincronicen.
+     *
+     * El origen viaja como (tipo, id) y no como una entidad por cada clase posible. Los
+     * metodos publicos de arriba son los que reciben la entidad tipada y sacan el id de
+     * ella; aqui abajo ya da igual de que tabla venia.
      */
     private Movement aplicarMovimiento(Account cuenta, MovementType tipo, String concepto,
-                                       Double monto, Transfer origen, Sale ventaOrigen,
-                                       OccasionalIncome ingresoOrigen, Purchase compraOrigen) {
+                                       Double monto, MovementSourceType tipoOrigen, Long idOrigen) {
         Movement movimiento = new Movement();
         movimiento.setAccount(cuenta);
         movimiento.setType(tipo);
         movimiento.setConcept(concepto);
         movimiento.setAmount(monto);
         movimiento.setDate(LocalDate.now());
-        movimiento.setSourceTransfer(origen);
-        movimiento.setSourceSale(ventaOrigen);
-        movimiento.setSourceOccasionalIncome(ingresoOrigen);
-        movimiento.setSourcePurchase(compraOrigen);
+        movimiento.setSourceType(tipoOrigen);
+        movimiento.setSourceId(idOrigen);
         Movement guardado = movementRepository.save(movimiento);
 
         double saldo = saldoDe(cuenta);
@@ -148,7 +151,7 @@ public class TreasuryService {
      * global del tenant queda igual que antes.
      *
      * Los saldos no se tocan aqui directamente: la transferencia genera un EGRESO en el
-     * origen y un INGRESO en el destino, los dos apuntando al Transfer con sourceTransfer,
+     * origen y un INGRESO en el destino, los dos apuntando al Transfer con (TRANSFER, id),
      * y son esos movimientos los que mueven el saldo. Asi el historial de una cuenta
      * explica todos sus cambios de saldo, igual que en Autollantas.
      */
@@ -177,9 +180,11 @@ public class TreasuryService {
         Transfer guardada = transferRepository.save(transferencia);
 
         aplicarMovimiento(origen, MovementType.EGRESO,
-                "Transferencia a " + destino.getName(), monto, guardada, null, null, null);
+                "Transferencia a " + destino.getName(), monto,
+                MovementSourceType.TRANSFER, guardada.getId());
         aplicarMovimiento(destino, MovementType.INGRESO,
-                "Transferencia desde " + origen.getName(), monto, guardada, null, null, null);
+                "Transferencia desde " + origen.getName(), monto,
+                MovementSourceType.TRANSFER, guardada.getId());
 
         return guardada;
     }
@@ -221,7 +226,8 @@ public class TreasuryService {
         ingreso.setDate(fecha != null ? fecha : LocalDate.now());
         OccasionalIncome guardado = occasionalIncomeRepository.save(ingreso);
 
-        aplicarMovimiento(gestionada, MovementType.INGRESO, concepto, monto, null, null, guardado, null);
+        aplicarMovimiento(gestionada, MovementType.INGRESO, concepto, monto,
+                MovementSourceType.OCCASIONAL_INCOME, guardado.getId());
 
         return guardado;
     }
@@ -244,24 +250,13 @@ public class TreasuryService {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Ingreso ocasional no encontrado: " + ingresoId));
 
-        for (Movement movimiento : movementRepository.findBySourceOccasionalIncomeId(ingreso.getId())) {
-            Account cuenta = movimiento.getAccount();
-            double monto = movimiento.getAmount() != null ? movimiento.getAmount() : 0.0;
-            if (cuenta != null) {
-                Account gestionada = recargar(cuenta);
-                gestionada.setCurrentBalance(saldoDe(gestionada) - monto);
-                accountRepository.save(gestionada);
-            }
-            // El Movement se borra antes que el ingreso: la FK apunta en esa direccion.
-            movementRepository.delete(movimiento);
-        }
-
+        revertir(movimientosDe(MovementSourceType.OCCASIONAL_INCOME, ingreso.getId()));
         occasionalIncomeRepository.delete(ingreso);
     }
 
     /**
      * Egreso generado por una compra: el del contado al facturar, o el de un pago. Queda
-     * ligado a la factura por Movement.sourcePurchase para poder revertirlo al anularla.
+     * ligado a la factura por (PURCHASE, id) para poder revertirlo al anularla.
      *
      * Valida que la cuenta tenga saldo. En Autollantas esa comprobacion vive en el
      * formulario; aqui vive donde se mueve el dinero, que es el unico sitio por el que
@@ -271,7 +266,8 @@ public class TreasuryService {
     public Movement registrarEgresoDeCompra(Account cuenta, String concepto, Double monto, Purchase compra) {
         Account gestionada = recargar(cuenta);
         exigirSaldoSuficiente(gestionada, monto);
-        return aplicarMovimiento(gestionada, MovementType.EGRESO, concepto, monto, null, null, null, compra);
+        return aplicarMovimiento(gestionada, MovementType.EGRESO, concepto, monto,
+                MovementSourceType.PURCHASE, compra.getId());
     }
 
     /** Lanza InsufficientBalanceException si la cuenta no puede cubrir el monto. */
@@ -291,7 +287,7 @@ public class TreasuryService {
      */
     @Transactional
     public void revertirMovimientosDeCompra(Purchase compra) {
-        revertir(movementRepository.findBySourcePurchaseId(compra.getId()));
+        revertir(movimientosDe(MovementSourceType.PURCHASE, compra.getId()));
     }
 
     /**
@@ -306,7 +302,16 @@ public class TreasuryService {
      */
     @Transactional
     public void revertirMovimientosDeVenta(Sale venta) {
-        revertir(movementRepository.findBySourceSaleId(venta.getId()));
+        revertir(movimientosDe(MovementSourceType.SALE, venta.getId()));
+    }
+
+    /** Los movimientos de un origen concreto, dentro del tenant activo. */
+    private List<Movement> movimientosDe(MovementSourceType tipo, Long id) {
+        Long tenantId = TenantContext.getTenantId();
+        if (tenantId == null) {
+            return List.of();
+        }
+        return movementRepository.findBySourceTypeAndSourceIdAndTenantId(tipo, id, tenantId);
     }
 
     /** Deshace cada movimiento al reves: un INGRESO se resta, un EGRESO se suma. */

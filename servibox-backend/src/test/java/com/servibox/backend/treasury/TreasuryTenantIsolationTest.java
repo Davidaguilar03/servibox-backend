@@ -198,7 +198,7 @@ class TreasuryTenantIsolationTest {
 
     /**
      * El endpoint de movimientos tiene que mostrar tambien los que genera una
-     * transferencia, con su sourceTransferId. Ver 03-DECISIONS.md.
+     * transferencia, con su (sourceType, sourceId). Ver 03-DECISIONS.md.
      */
     @Test
     void elListadoDeMovimientosMuestraLosGeneradosPorUnaTransferencia() throws Exception {
@@ -222,7 +222,8 @@ class TreasuryTenantIsolationTest {
                 .andExpect(jsonPath("$[0].type").value("EGRESO"))
                 .andExpect(jsonPath("$[0].amount").value(10000.0))
                 .andExpect(jsonPath("$[0].concept").value("Transferencia a Bancolombia"))
-                .andExpect(jsonPath("$[0].sourceTransferId").value(transferId));
+                .andExpect(jsonPath("$[0].sourceType").value("TRANSFER"))
+                .andExpect(jsonPath("$[0].sourceId").value(transferId));
 
         mockMvc.perform(get("/api/treasury/accounts/" + bancolombia + "/movements")
                         .header("Authorization", "Bearer " + tokenUno))
@@ -231,7 +232,8 @@ class TreasuryTenantIsolationTest {
                 .andExpect(jsonPath("$[0].type").value("INGRESO"))
                 .andExpect(jsonPath("$[0].amount").value(10000.0))
                 .andExpect(jsonPath("$[0].concept").value("Transferencia desde Caja General"))
-                .andExpect(jsonPath("$[0].sourceTransferId").value(transferId));
+                .andExpect(jsonPath("$[0].sourceType").value("TRANSFER"))
+                .andExpect(jsonPath("$[0].sourceId").value(transferId));
     }
 
     @Test
