@@ -581,8 +581,28 @@ invertido: una compra **suma** stock y **saca** dinero.
    credito no saca dinero hoy, asi que no hay nada que validar. Es exactamente lo que hace
    Autollantas, solo que alli la comprobacion vive en el formulario y aqui en el service.
 4. **Suma** `Product.quantity` por cada linea, al reves de una venta.
-5. Si es `CONTADO`: estado `PAGADA` y un `EGRESO` por el total. Si es `CREDITO`: estado
+5. **Sincroniza el costo del producto** por cada linea: `purchaseCost = price` de la linea
+   y `InventoryService.recalculatePrices(producto)`, el mismo metodo que usa
+   `saveProduct`. Comprar a un costo nuevo reescribe el costo del producto y rehace su
+   `taxAmount` y su `suggestedPrice`. Ver mas abajo.
+6. Si es `CONTADO`: estado `PAGADA` y un `EGRESO` por el total. Si es `CREDITO`: estado
    `PENDIENTE`, sin movimiento.
+
+**Sincronizacion del costo al comprar.** Portado de `savePurchaseWithDetails` de
+Autollantas, que por cada linea hace `realProduct.setPurchaseCost(unitPrice)` seguido de
+`inventoryService.recalculatePrices(realProduct)`. Detalles del comportamiento, todos
+verificados contra el codigo real de Autollantas:
+
+* Aplica a **todas** las compras, `CONTADO` y `CREDITO`. Alli el bloque que recorre los
+  detalles corre antes y fuera del `if ("Contado".equals(...))` que mueve la caja, asi que
+  el tipo de pago no lo condiciona.
+* Es el `price` de la linea (costo unitario sin IVA), no el total de la linea.
+* `recalculatePrices` es el **metodo completo**, no un subconjunto: recalcula `taxAmount` y
+  `suggestedPrice` y persiste. Es un no-op si el costo queda en cero.
+* Si dos lineas de la misma factura traen el **mismo producto** a precios distintos, gana
+  el de la **ultima linea procesada**: cada iteracion pisa el costo de la anterior. El
+  stock si acumula las dos. Cubierto por `conDosLineasDelMismoProductoGanaElPrecioDeLaUltima`.
+* **Anular no lo revierte**, ver mas abajo.
 
 Las lineas y el stock se tocan **despues** de la validacion de saldo a proposito: asi el
 saldo se compara contra el total definitivo y el rechazo ocurre sin haber escrito nada,
@@ -601,6 +621,10 @@ igual que en Sales.
   nombrando el producto. Pasa cuando parte de lo comprado ya se vendio.
 * Revierte **todos** los movimientos ligados a la compra, pagos incluidos.
 * Quita el stock que la compra habia sumado y deja la compra en `ANULADA`.
+* **No revierte el `purchaseCost` ni el `suggestedPrice` del producto**: se quedan como los
+  dejo la compra. Es lo que hace `cancelPurchase` de Autollantas y se hereda a proposito,
+  ver [03-DECISIONS.md](03-DECISIONS.md). Cubierto por
+  `anularNoRevierteElCostoDelProducto`.
 
 Una compra ya `ANULADA` no se puede volver a anular.
 

@@ -12,6 +12,59 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-09-08: Comprar reescribe el costo del producto, y anular no lo deshace
+
+Cierra la omision marcada como "la mas importante de esta migracion" en la entrada
+*Diferencias entre lo migrado de Purchases y el codigo de Autollantas* (2026-09-07).
+
+* Hallazgo, verificado leyendo `purchases/service/PurchasesService.java` e
+  `inventory/service/InventoryService.java` de Autollantas:
+  * `savePurchaseWithDetails`, por cada `PurchaseDetail`, hace
+    `realProduct.setQuantity(quantity + detail.getQuantity())` y, **si
+    `detail.getUnitPrice() != null`**, `realProduct.setPurchaseCost(detail.getUnitPrice())`
+    seguido de `inventoryService.recalculatePrices(realProduct)`.
+  * El campo que se pisa es **solo `purchaseCost`**; `recalculatePrices` es el **metodo
+    completo**, no un subconjunto: recalcula `taxAmount` y `suggestedPrice` y persiste.
+    (Autollantas no tiene `minSalePrice`; ServiBox tampoco. Los dos campos derivados del
+    costo son esos dos.)
+  * Ese bloque recorre **todas** las lineas y corre **antes y fuera** del
+    `if ("Contado".equals(purchase.getPaymentType()) && purchase.getAccount() != null)` que
+    mueve la caja. Es decir: pasa en **Contado y en Credito por igual**, no hay condicion
+    por tipo de pago que replicar.
+  * Con el mismo producto en dos lineas, cada iteracion pisa la anterior: **gana el precio
+    de la ultima linea procesada**.
+* Decision: se porta tal cual a `PurchasesService.crearFactura`, en el mismo bucle que ya
+  sumaba el stock (`sincronizarCosto`). Se llama a `InventoryService.recalculatePrices`, el
+  mismo metodo que usa `saveProduct`, y no una copia de la formula.
+* Motivo: es una regla de negocio real, no un efecto secundario accidental. El precio
+  sugerido existe para responder "a cuanto vendo esto", y esa respuesta cambia cuando cambia
+  lo que costo reponerlo. Dejarlo fuera hacia que el precio sugerido envejeciera en silencio
+  contra el costo de la ultima compra.
+* Diferencia menor y consciente: Autollantas salta la linea si `unitPrice` es `null`; aqui
+  `crearFactura` ya normaliza el precio ausente a `0.0` antes de armar el detalle, asi que
+  una linea sin precio deja `purchaseCost` en cero. `recalculatePrices` es un no-op con
+  costo cero, de modo que el precio sugerido no se degrada. Es el mismo resultado que da
+  Autollantas para `unitPrice = 0.0`.
+* **Anular NO revierte el costo**, y se hereda a proposito: `cancelPurchase` de Autollantas
+  solo resta `product.setQuantity(quantity - detail.getQuantity())` y toca tesoreria; no
+  hay ni una linea que toque `purchaseCost` ni que vuelva a llamar a `recalculatePrices`
+  (`restorePurchase` tampoco: repone el stock y el movimiento, y deja el costo como
+  estaba). Anular una compra deshace el stock y el dinero pero **deja el producto con el
+  costo y el precio sugerido que esa compra le puso**.
+  * Alternativas consideradas: guardar el costo anterior en la compra para restaurarlo al
+    anular; o recalcular el costo desde la ultima compra no anulada.
+  * Motivo para no hacerlo: las dos inventan un historico de costos que el sistema real no
+    tiene, y la segunda cambia el significado de `purchaseCost` (pasaria de "lo que costo la
+    ultima vez que compre" a "lo que costo la ultima compra vigente"). Es una omision real
+    de Autollantas, no un descuido de esta migracion: queda documentada aqui y en el javadoc
+    de `anularFactura`, y **fijada por el test** `anularNoRevierteElCostoDelProducto`, para
+    que nadie la "arregle" por accidente creyendo que es un bug de ServiBox.
+* Cubierto por `PurchasesCostSyncTest`: costo y precio sugerido tras comprar (a credito y de
+  contado), el precio de la ultima linea cuando el producto se repite, y la no reversion al
+  anular. Ningun test previo de Purchases hubo que ajustarlo: todos compran al mismo precio
+  que ya tenia el producto (100000.0), asi que el costo no cambia de valor, y ninguno
+  afirmaba nada sobre `suggestedPrice`.
+
 ## 2026-09-07: El origen de un Movement pasa a ser (tipo, id)
 
 * Decision: se eliminan las cuatro relaciones `ManyToOne` opcionales de `Movement`
@@ -173,12 +226,13 @@ Formato de cada entrada:
   `impuesto_compra` el IVA **por unidad** (asi lo muestra la columna "IVA/Unidad"). Se
   unifico con el criterio de `SaleDetail.ivaAmount` para que las dos lineas signifiquen lo
   mismo y no haya que recordar cual es cual.
-* **No se porto la actualizacion del costo del producto.** En Autollantas
-  `savePurchaseWithDetails` hace, por cada linea, `realProduct.setPurchaseCost(unitPrice)`
-  y `inventoryService.recalculatePrices(realProduct)`: comprar a un costo nuevo **reescribe
-  el costo del producto y rehace su precio sugerido**. Es una regla de negocio real y
-  quedo fuera porque el alcance pedia solo incrementar `quantity`. **Es la omision mas
-  importante de esta migracion**, hay que decidir si se trae.
+* ~~**No se porto la actualizacion del costo del producto.**~~ **RESUELTO el 2026-09-08**:
+  se porto. En Autollantas `savePurchaseWithDetails` hace, por cada linea,
+  `realProduct.setPurchaseCost(unitPrice)` y `inventoryService.recalculatePrices(realProduct)`:
+  comprar a un costo nuevo **reescribe el costo del producto y rehace su precio sugerido**.
+  Era una regla de negocio real y quedo fuera porque el alcance pedia solo incrementar
+  `quantity`. Ver la entrada *Comprar reescribe el costo del producto, y anular no lo
+  deshace* (2026-09-08), que ademas documenta que la anulacion **no** revierte ese costo.
 * **No hay edicion ni restauracion** de compras (`savePurchaseWithDetails` en modo edicion,
   `restorePurchase` desde la papelera), igual que en Sales.
 * Los enums `PaymentType` y `PurchaseStatus` se duplican en `purchases` en vez de

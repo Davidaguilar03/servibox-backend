@@ -174,6 +174,7 @@ public class PurchasesService {
             purchaseDetailRepository.save(detalle);
             // Al reves de una venta: comprar SUMA stock.
             aumentarStock(detalle.getProduct(), detalle.getQuantity());
+            sincronizarCosto(detalle.getProduct(), detalle.getPrice());
         }
 
         guardada.setSubtotal(subtotal);
@@ -244,6 +245,12 @@ public class PurchasesService {
      * solo revierte si es contado y esta pagada, lo que deja los pagos de una compra a
      * credito sin devolver; es el mismo defecto que tenia su anulacion de ventas y se
      * corrige igual. Ver 03-DECISIONS.md.
+     *
+     * **No revierte el `purchaseCost` del producto.** Anular deshace el stock y el dinero,
+     * pero el costo y el precio sugerido se quedan como los dejo la compra. Es lo que hace
+     * `cancelPurchase` de Autollantas y se hereda a proposito: sin historico de costos no
+     * hay a que valor volver. Documentado en 03-DECISIONS.md y cubierto por
+     * `anularNoRevierteElCostoDelProducto`.
      */
     @Transactional
     public Purchase anularFactura(Long purchaseId) {
@@ -314,6 +321,26 @@ public class PurchasesService {
                 .ifPresent(existente -> {
                     throw new DuplicatePurchaseInvoiceNumberException(invoiceNumber);
                 });
+    }
+
+    /**
+     * Comprar a un costo nuevo **reescribe** el costo del producto y rehace su precio
+     * sugerido. Portado de `savePurchaseWithDetails` de Autollantas, que por cada linea
+     * hace `realProduct.setPurchaseCost(unitPrice)` seguido de `recalculatePrices`.
+     *
+     * Aplica a **todas** las compras, contado y credito: en Autollantas ese bloque corre
+     * sobre la lista de detalles antes y fuera del `if ("Contado".equals(...))` que mueve
+     * la caja, asi que el tipo de pago no lo condiciona.
+     *
+     * Si dos lineas de la misma factura traen el mismo producto a precios distintos, gana
+     * la ultima procesada, igual que alli. Ver 03-DECISIONS.md.
+     */
+    private void sincronizarCosto(Product producto, Double precio) {
+        if (producto == null || precio == null) {
+            return;
+        }
+        producto.setPurchaseCost(precio);
+        inventoryService.recalculatePrices(producto);
     }
 
     private void aumentarStock(Product producto, Integer cantidad) {
