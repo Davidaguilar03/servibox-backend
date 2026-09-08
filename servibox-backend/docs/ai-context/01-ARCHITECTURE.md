@@ -249,7 +249,8 @@ Base: `com.servibox.backend`. Un paquete por modulo de negocio, mas tres transve
 | `auth` | `JwtService`, `JwtAuthenticationFilter`, `AuthController`, mas `entity` / `repository` / `dto` |
 | `inventory` | primer modulo de negocio migrado, ver abajo |
 | `treasury` | segundo modulo de negocio migrado, ver abajo |
-| `sales`, `purchases`, `reporting` | vacios todavia |
+| `sales` | tercer modulo de negocio migrado, ver abajo |
+| `purchases`, `reporting` | vacios todavia |
 
 Los modulos de negocio usan siempre las mismas cinco capas:
 `controller`, `service`, `repository`, `entity`, `dto`.
@@ -414,5 +415,99 @@ listado que renglones vienen de una transferencia.
 **Semilla de desarrollo.** `DevDataInitializer` crea ademas las 2 cuentas por defecto de
 Autollantas para el tenant `demo`: `Caja General` (`CASH`) y `Bancolombia` (`BANK`), las
 dos con saldo inicial 0.
+
+### Modulo Sales
+
+Migrado desde el paquete `sales` de Autollantas. Es el primer modulo que **cruza los otros
+dos**: una factura descuenta inventario y mueve tesoreria.
+
+**Entidades**
+
+* `Customer` (`CLIENTES`): `name`, `document`, `email`, `phone`. Es una entidad propia, no
+  campos sueltos dentro de la venta, igual que en Autollantas. Restriccion unica
+  `uk_cliente_tenant_document` sobre `(tenant_id, numero_documento_cliente)`: el mismo NIT
+  puede ser cliente de dos talleres distintos. `document` es nullable porque Autollantas
+  permite facturar sin documento, y en SQL varios NULL no chocan entre si.
+* `Sale` (`VENTAS`): `invoiceNumber`, `ManyToOne` a `Customer`, `invoiceDate`, `dueDate`,
+  `paymentType` (enum `CONTADO` / `CREDITO`), `ManyToOne` **nullable** a `Account` (una
+  factura a credito no tiene cuenta hasta que se le abona), `paymentMethod`, `status`
+  (enum `PAGADA` / `PENDIENTE` / `ANULADA`), `subtotal`, `ivaPorPagar`, `total`.
+  Restriccion unica `uk_venta_tenant_invoice_number` sobre
+  `(tenant_id, numero_factura_venta)` — **divergencia deliberada**: Autollantas valida el
+  numero solo en la aplicacion y no tiene indice unico. Ver
+  [03-DECISIONS.md](03-DECISIONS.md).
+* `SaleDetail` (`DETALLE_VENTAS`): `ManyToOne` a `Sale` y a `Product`, `quantity`, `price`
+  (unitario sin IVA) e `ivaAmount`, **congelado al facturar**. Cambiarle el IVA a un
+  producto no puede mover el IVA de una factura ya emitida, porque esa factura ya se
+  entrego y se declaro. Es el mismo campo `iva_generado_linea` de Autollantas.
+* `Collection` (`RECAUDOS`): `ManyToOne` a `Sale` y a `Account`, `amount`, `date`. Es un
+  **abono**, ver [02-CONVENTIONS.md](02-CONVENTIONS.md). En Autollantas esta clase vive en
+  `treasury`; aqui vive en `sales`, junto a la factura a la que pertenece.
+
+**Flujo factura -> inventario -> tesoreria**
+
+`SalesService.crearFactura` hace todo esto en **una sola transaccion**:
+
+1. Valida que el `invoiceNumber` no exista ya en el tenant y lanza
+   `DuplicateInvoiceNumberException` (**409**) si existe. La restriccion de base queda como
+   red de seguridad.
+2. Por cada linea: resuelve el producto, comprueba que haya stock suficiente
+   (`InsufficientStockException`, **409**, si no alcanza) y **descuenta**
+   `Product.quantity`.
+3. Calcula el IVA de la linea como `price * quantity * InventoryService.getIvaRateForProduct(producto)`
+   y lo **congela** en `SaleDetail.ivaAmount`.
+4. Totaliza la factura, con las mismas formulas de Autollantas:
+
+   ```
+   subtotal    = suma(price * quantity)                 // sin IVA
+   ivaGenerado = suma(ivaAmount de cada linea)
+   ivaFavor    = suma(producto.taxAmount * quantity)    // IVA ya pagado al comprar
+   ivaPorPagar = ivaGenerado - ivaFavor
+   total       = subtotal + ivaGenerado
+   ```
+
+5. Si es `CONTADO`: estado `PAGADA` y `TreasuryService.registrarIngresoDeVenta` mete un
+   `INGRESO` por el total en la cuenta. Si es `CREDITO`: estado `PENDIENTE` y tesoreria no
+   se toca, porque todavia no entro dinero.
+
+**Abonos.** `registrarAbono(saleId, accountId, monto)` crea el `Collection`, registra el
+`INGRESO` en tesoreria y, si con eso el saldo pendiente queda cubierto, pasa la factura a
+`PAGADA`. Rechaza (`InvalidSaleOperationException`, **400**) abonar a una factura que no
+este `PENDIENTE` y abonos que excedan el saldo pendiente.
+
+El saldo pendiente **no es un campo**: se calcula como `total` menos la suma de abonos.
+Autollantas lo guarda denormalizado en `saldo_pendiente` y lo recalcula a mano en cinco
+sitios distintos. La tolerancia de un peso de Autollantas si se porto: un pendiente por
+debajo de 1 peso cuenta como saldado, porque los centavos del IVA no pueden dejar una
+factura eternamente `PENDIENTE` por 0,4 pesos.
+
+**Anulacion.** `anularFactura(saleId)`:
+
+* Revierte en tesoreria **todos** los movimientos ligados a la venta y deshace su efecto
+  sobre el saldo de la cuenta (`TreasuryService.revertirMovimientosDeVenta`).
+* Devuelve el stock de cada linea.
+* Deja la factura en `ANULADA`.
+
+Una factura ya `ANULADA` no se puede volver a anular: devolveria el stock por segunda vez.
+Una `PENDIENTE` sin abonos no genero ningun movimiento, asi que el primer paso no hace
+nada y en la practica solo se devuelve el stock, que es el comportamiento de Autollantas.
+
+**Endpoints** (todos requieren JWT)
+
+* `POST /api/sales` (emitir factura)
+* `GET /api/sales`
+* `GET /api/sales/{id}` — 404 si no existe para el tenant
+* `POST /api/sales/{id}/collections` (abono)
+* `POST /api/sales/{id}/annul`
+
+Las respuestas van por DTO (`SaleResponse`, `SaleDetailResponse`, `CollectionResponse`),
+nunca la entidad JPA. `SaleResponse` incluye `pendingBalance` calculado.
+
+**Tasa de IVA: una sola implementacion.** `InventoryService.getIvaRateForProduct(Product)`
+es publico y es de donde la toman tanto el calculo de precios de Inventory como Sales. En
+Autollantas ese `getIvaRate(Product)` esta copiado identico en cuatro sitios
+(`SaleFormController`, `SaleDetailsController`, `ProductsController` y
+`SaleDetailRow.ivaRate()`) y la propia documentacion del proyecto lo marca como candidato
+a centralizar. **No volver a copiarlo.**
 
 ## Base de datos

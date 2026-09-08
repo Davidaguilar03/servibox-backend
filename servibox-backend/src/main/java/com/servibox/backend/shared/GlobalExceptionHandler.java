@@ -2,6 +2,9 @@ package com.servibox.backend.shared;
 
 import com.servibox.backend.auth.InvalidCredentialsException;
 import com.servibox.backend.inventory.service.DuplicateProductCodeException;
+import com.servibox.backend.sales.service.DuplicateInvoiceNumberException;
+import com.servibox.backend.sales.service.InsufficientStockException;
+import com.servibox.backend.sales.service.InvalidSaleOperationException;
 import com.servibox.backend.treasury.service.DuplicateAccountNameException;
 import com.servibox.backend.treasury.service.InvalidTransferException;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +40,24 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DuplicateAccountNameException.class)
     public ResponseEntity<ErrorResponse> manejarCuentaDuplicada(DuplicateAccountNameException ex) {
         return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** Dos facturas del mismo tenant con el mismo numero. */
+    @ExceptionHandler(DuplicateInvoiceNumberException.class)
+    public ResponseEntity<ErrorResponse> manejarFacturaDuplicada(DuplicateInvoiceNumberException ex) {
+        return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** No alcanza el stock para facturar lo pedido. */
+    @ExceptionHandler(InsufficientStockException.class)
+    public ResponseEntity<ErrorResponse> manejarStockInsuficiente(InsufficientStockException ex) {
+        return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** Operacion que no cuadra con el estado de la factura (abono o anulacion invalida). */
+    @ExceptionHandler(InvalidSaleOperationException.class)
+    public ResponseEntity<ErrorResponse> manejarVentaInvalida(InvalidSaleOperationException ex) {
+        return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     /** Transferencia sin sentido: misma cuenta en los dos extremos, o monto no positivo. */

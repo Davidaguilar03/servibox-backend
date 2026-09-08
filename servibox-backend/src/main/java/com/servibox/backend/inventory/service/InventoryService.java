@@ -135,7 +135,7 @@ public class InventoryService {
         }
         double purchaseCost = product.getPurchaseCost();
 
-        product.setTaxAmount(purchaseCost * vatRateOf(product.getCategory()));
+        product.setTaxAmount(purchaseCost * getIvaRateForProduct(product));
 
         double margin = (product.getCategory() != null && product.getCategory().getTargetMargin() != null)
                 ? product.getCategory().getTargetMargin()
@@ -164,6 +164,24 @@ public class InventoryService {
         product.setSuggestedPrice(suggestedPrice);
 
         productRepository.save(product);
+    }
+
+    /**
+     * Tasa de IVA que aplica a un producto, como fraccion (0.19 es 19 por ciento).
+     *
+     * Es el equivalente del `getIvaRate(Product)` de Autollantas, que alli esta copiado
+     * identico en cuatro sitios (`SaleFormController`, `SaleDetailsController`,
+     * `ProductsController` y `SaleDetailRow.ivaRate()`); la propia documentacion del
+     * proyecto lo marca como candidato a centralizar. Aqui vive una sola vez y es de donde
+     * lo toman tanto el calculo de precios como Sales.
+     *
+     * Dos diferencias con Autollantas, las dos heredadas de decisiones ya tomadas:
+     * suma las rates con isVat en vez de quedarse con la primera, y no tiene la rama de
+     * servicios (`isService`), porque ServiBox no tiene todavia `itemType` ni `basePrice`
+     * en Product. Ver 03-DECISIONS.md.
+     */
+    public double getIvaRateForProduct(Product product) {
+        return product != null ? vatRateOf(product.getCategory()) : 0.0;
     }
 
     /** Solo los impuestos marcados como IVA entran en el taxAmount del producto. */

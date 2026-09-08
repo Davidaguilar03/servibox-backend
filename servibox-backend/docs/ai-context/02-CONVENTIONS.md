@@ -45,6 +45,24 @@ Los campos de fecha de negocio en Autollantas se nombran `fecha_<entidad>`
 siempre `date`. Los de concepto se nombran `concepto_<entidad>` y en Java son siempre
 `concept`. La convencion se mantiene en ServiBox.
 
+### Sales
+
+| Termino | Significado | Cuidado |
+|-|-|-|
+| **Abono** | Pago parcial de una factura a credito | **Se dice abono, NO pago y NO cobro.** Es explicito en la documentacion de Autollantas: ventana "Registrar Abono", boton "Confirmar Abono", campo "Valor Abonado". En codigo la clase se llama `Collection` (tabla `RECAUDOS`), heredado de Autollantas; el termino de negocio de cara al usuario es abono |
+| `invoiceNumber` | Numero de factura (`numero_factura_venta`) | Unico por tenant, y aqui **si** con restriccion de base, a diferencia de Autollantas. Ver [03-DECISIONS.md](03-DECISIONS.md) |
+| `invoiceDate` | Fecha de la factura | En Autollantas el campo se llama `saleDate` (`fecha_venta`); aqui `invoiceDate`, que es como lo llama el formulario. La columna sigue siendo `fecha_venta` |
+| `ivaAmount` (linea) | IVA generado por la linea | **Congelado al facturar.** No se recalcula nunca desde el producto: editar el IVA de un producto no puede mover el IVA de una factura ya emitida |
+| `ivaPorPagar` | IVA generado menos IVA descontable | No es el IVA de la factura: es la diferencia contra el IVA que ya se pago al comprar esos productos (`producto.taxAmount`). En Autollantas se llama `ivaDifference` / "IVA por Pagar" |
+| `subtotal` | Suma de precio por cantidad, **sin** IVA | En Autollantas no es un campo, se calcula en la UI (`calculateSubtotalSinIva`) |
+| Saldo pendiente | `total` menos la suma de abonos | **No es un campo** en ServiBox, se calcula. Autollantas lo guarda en `saldo_pendiente` |
+| `CONTADO` / `CREDITO` | Forma de pago | En Autollantas son los literales `String` `"Contado"` y `"Credito"` (con tilde); aqui enum |
+| `PAGADA` / `PENDIENTE` / `ANULADA` | Estado de la factura | Mismos nombres que Autollantas, pero enum en vez de `String` |
+
+Una factura anulada **no se borra**: queda en `ANULADA` con el stock ya devuelto. En
+Autollantas se sigue viendo desde la papelera y se puede restaurar; ServiBox todavia no
+tiene la restauracion.
+
 ### Unicidad en entidades multi-tenant
 
 Toda restriccion de unicidad de una entidad de negocio es **compuesta con `tenant_id`**,
@@ -57,6 +75,8 @@ justamente lo normal entre negocios que no se conocen.
 | `User` | `(tenant_id, username)` | `uk_usuario_tenant_username` |
 | `Product` | `(tenant_id, codigo_producto)` | `uk_producto_tenant_code` |
 | `Account` | `(tenant_id, nombre_cuenta)` | `uk_cuenta_tenant_name` |
+| `Customer` | `(tenant_id, numero_documento_cliente)` | `uk_cliente_tenant_document` |
+| `Sale` | `(tenant_id, numero_factura_venta)` | `uk_venta_tenant_invoice_number` |
 
 Ademas de la restriccion de base, el service valida antes de guardar y lanza una excepcion
 legible; el error crudo de constraint violation no le sirve al usuario final. Al editar,
@@ -68,13 +88,21 @@ la validacion siempre excluye el propio registro.
 aplica a `EntityManager.find()`, asi que devuelve la fila aunque sea de otro tenant. Usar
 una consulta derivada, por convencion `findByIdAndTenantId(id, TenantContext.getTenantId())`.
 Detalle y como se detecto en [01-ARCHITECTURE.md](01-ARCHITECTURE.md), seccion Modulo
-Treasury. Aplicado ya en `Account`, `Product` y `ProductCategory`; no queda ningun
-`findById` heredado sobre una entidad `TenantAware`.
+Treasury. Aplicado ya en `Account`, `Product`, `ProductCategory`, `Sale` y `Customer`; no
+queda ningun `findById` heredado sobre una entidad `TenantAware`.
 
 Y el codigo de respuesta: un recurso pedido **por la ruta** que no aparece para el tenant
 activo es `ResourceNotFoundException` (**404**, el mismo para "no existe" y para "es de
 otro tenant"). Un id que llega **dentro del cuerpo** y no resuelve es
 `IllegalArgumentException` (**400**): ahi el problema si es la peticion.
+
+### Calculos que no se copian
+
+La tasa de IVA de un producto sale **solo** de
+`InventoryService.getIvaRateForProduct(Product)`. En Autollantas esa funcion esta copiada
+identica en cuatro sitios y su propia documentacion la marca como candidato a centralizar;
+aqui vive una sola vez. Antes de escribir `getTaxTypes().stream()...` en cualquier modulo
+nuevo, usar ese metodo.
 
 `minSalePrice` **no es terminologia vigente.** Existio en Autollantas y ya no; no
 introducirlo en ServiBox.
