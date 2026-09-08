@@ -6,6 +6,9 @@ import com.servibox.backend.auth.repository.UserRepository;
 import com.servibox.backend.inventory.entity.ProductCategory;
 import com.servibox.backend.inventory.entity.TaxType;
 import com.servibox.backend.inventory.service.InventoryService;
+import com.servibox.backend.treasury.entity.Account;
+import com.servibox.backend.treasury.entity.AccountType;
+import com.servibox.backend.treasury.service.TreasuryService;
 import com.servibox.backend.tenant.Tenant;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.tenant.TenantRepository;
@@ -44,10 +47,17 @@ public class DevDataInitializer implements CommandLineRunner {
             "OTROS", "#95a5a6"
     );
 
+    /** Las 2 cuentas por defecto de Autollantas, con su tipo. */
+    private static final Map<String, AccountType> CUENTAS_POR_DEFECTO = Map.of(
+            "Caja General", AccountType.CASH,
+            "Bancolombia", AccountType.BANK
+    );
+
     private final TenantRepository tenantRepository;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final InventoryService inventoryService;
+    private final TreasuryService treasuryService;
 
     @Override
     public void run(String... args) {
@@ -68,12 +78,13 @@ public class DevDataInitializer implements CommandLineRunner {
             sembrarAdmin();
             TaxType iva = sembrarIva();
             sembrarCategorias(iva);
+            sembrarCuentas();
         } finally {
             TenantContext.clear();
         }
 
-        log.info("Perfil dev: tenant [{}], usuario [{}], IVA y {} categorias creados",
-                TENANT_SLUG, ADMIN_USERNAME, CATEGORIAS_POR_DEFECTO.size());
+        log.info("Perfil dev: tenant [{}], usuario [{}], IVA, {} categorias y {} cuentas creados",
+                TENANT_SLUG, ADMIN_USERNAME, CATEGORIAS_POR_DEFECTO.size(), CUENTAS_POR_DEFECTO.size());
     }
 
     private void sembrarAdmin() {
@@ -94,6 +105,16 @@ public class DevDataInitializer implements CommandLineRunner {
         iva.setAppliesToTransaction(Boolean.TRUE);
         iva.setIsVat(Boolean.TRUE);
         return inventoryService.saveTaxType(iva);
+    }
+
+    private void sembrarCuentas() {
+        CUENTAS_POR_DEFECTO.forEach((nombre, tipo) -> {
+            Account cuenta = new Account();
+            cuenta.setName(nombre);
+            cuenta.setType(tipo);
+            cuenta.setInitialBalance(0.0);
+            treasuryService.saveAccount(cuenta);
+        });
     }
 
     private void sembrarCategorias(TaxType iva) {

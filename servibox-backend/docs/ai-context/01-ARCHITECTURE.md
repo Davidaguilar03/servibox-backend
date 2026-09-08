@@ -247,7 +247,8 @@ Base: `com.servibox.backend`. Un paquete por modulo de negocio, mas tres transve
 | `shared` | `TenantAwareEntity`, `ErrorResponse`, `GlobalExceptionHandler` |
 | `auth` | `JwtService`, `JwtAuthenticationFilter`, `AuthController`, mas `entity` / `repository` / `dto` |
 | `inventory` | primer modulo de negocio migrado, ver abajo |
-| `sales`, `purchases`, `treasury`, `reporting` | vacios todavia |
+| `treasury` | segundo modulo de negocio migrado, ver abajo |
+| `sales`, `purchases`, `reporting` | vacios todavia |
 
 Los modulos de negocio usan siempre las mismas cinco capas:
 `controller`, `service`, `repository`, `entity`, `dto`.
@@ -316,5 +317,80 @@ relaciones EAGER completas al cliente.
 no existe en Autollantas: fue reemplazado por `recalculatePrices`, y `minSalePrice` no
 existe como campo en ninguna parte del repo. ServiBox porto la version vigente. No
 reintroducir `minSalePrice` sin revisar antes el codigo real.
+
+### Modulo Treasury
+
+Migrado desde el paquete `treasury` de Autollantas (`model` / `repository` / `service`).
+Todas sus entidades extienden `TenantAwareEntity`.
+
+**Entidades**
+
+* `Account` (`CUENTAS`): `name`, `initialBalance`, `currentBalance`, `type` (enum
+  `AccountType`, `CASH` o `BANK`). Restriccion unica **compuesta** `uk_cuenta_tenant_name`
+  sobre `(tenant_id, nombre_cuenta)`, mismo criterio que `(tenant_id, username)` en `User`
+  y `(tenant_id, codigo_producto)` en `Product`: cada taller tiene su propia "Caja
+  General".
+
+  Igual que con el codigo de producto, la unicidad se defiende en dos capas.
+  `TreasuryService.saveAccount` consulta `findByNameAndTenantId` antes del INSERT y lanza
+  `DuplicateAccountNameException`, que `GlobalExceptionHandler` traduce a **409 Conflict**
+  con un mensaje legible. La restriccion de base queda como red de seguridad para
+  cualquier escritura que no pase por el service. Al editar, la validacion excluye el
+  propio registro.
+
+  Una cuenta nueva arranca con `currentBalance` igual a su `initialBalance`: mientras no
+  haya movimientos, el saldo vivo es el saldo de apertura.
+* `Movement` (`MOVIMIENTOS`): `ManyToOne` a `Account`, `type` (enum `MovementType`,
+  `INGRESO` o `EGRESO`), `concept`, `amount`, `date` (`LocalDate`). Dos divergencias
+  deliberadas respecto de Autollantas, ambas en [03-DECISIONS.md](03-DECISIONS.md): el
+  tipo es enum y no `String`, y `concept` es una columna real y no una descripcion
+  derivada de `(tabla_origen, id_origen)`.
+* `Transfer` (`TRANSFERENCIAS`): `ManyToOne` a `Account` origen y destino, `amount`,
+  `concept`, `date`. Autollantas llama a esas relaciones `sourceAccount` /
+  `destinationAccount`; aqui son `originAccount` / `destinationAccount`, que es como
+  aparecen en la vista (columnas Origin / Destination de `tablaTransferencias`).
+
+**`TreasuryService`**
+
+* `registrarMovimiento(cuenta, tipo, concepto, monto)`: guarda el `Movement` y aplica el
+  efecto sobre `currentBalance` en la misma transaccion, sumando si es `INGRESO` y
+  restando si es `EGRESO`. Las dos cosas van juntas a proposito: un movimiento guardado
+  sin mover el saldo, o un saldo movido sin movimiento que lo explique, es un descuadre
+  silencioso.
+* `registrarTransferencia(origen, destino, concepto, monto)`: guarda el `Transfer`, debita
+  el origen y acredita el destino, todo en una transaccion. **El dinero se conserva**: el
+  balance global del tenant queda igual que antes. Rechaza con
+  `InvalidTransferException` (**400**) si las dos cuentas son la misma o si el monto no es
+  mayor a cero; en ese caso ningun saldo se mueve.
+* `balanceGlobal()`: suma de los `currentBalance` de todas las cuentas del tenant activo.
+  Es el "Total Global" (`lblTotalGlobal`) de `Accounts.fxml`.
+
+**Cuidado: el `@Filter` de Hibernate no cubre `findById`.**
+El filtro por tenant se aplica a las consultas (HQL, criteria, consultas derivadas de
+Spring Data), pero **no** a `EntityManager.find()`, que es lo que usa el `findById`
+heredado de `JpaRepository`. Es decir, `accountRepository.findById(id)` devuelve la cuenta
+aunque sea de otro tenant. Por eso `TreasuryService.findAccountById` usa la consulta
+derivada `findByIdAndTenantId` y no el `findById` heredado.
+
+Lo detecto el test de aislamiento: `GET /api/treasury/accounts/{id}/movements` con el token
+del tenant equivocado respondia 200 con lista vacia (la lista de movimientos si estaba
+filtrada, porque es una consulta derivada) en vez de rechazar la cuenta ajena. Cualquier
+busqueda por id de una entidad de negocio tiene el mismo problema: **no usar `findById`
+directo en un service multi-tenant.**
+
+**Endpoints** (todos requieren JWT)
+
+* `GET` y `POST` `/api/treasury/accounts`
+* `GET /api/treasury/accounts/{id}/movements`
+* `POST /api/treasury/movements` (registra un ingreso o un egreso)
+* `POST /api/treasury/transfers`
+* `GET /api/treasury/balance` (balance global)
+
+Las respuestas van siempre por DTO (`AccountResponse`, `MovementResponse`,
+`TransferResponse`, `BalanceResponse`), nunca la entidad JPA.
+
+**Semilla de desarrollo.** `DevDataInitializer` crea ademas las 2 cuentas por defecto de
+Autollantas para el tenant `demo`: `Caja General` (`CASH`) y `Bancolombia` (`BANK`), las
+dos con saldo inicial 0.
 
 ## Base de datos

@@ -12,6 +12,101 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-09-07: Nombre de cuenta unico por tenant
+
+* Decision: `Account` lleva la restriccion compuesta `uk_cuenta_tenant_name` sobre
+  `(tenant_id, nombre_cuenta)`, y `TreasuryService.saveAccount` valida con
+  `findByNameAndTenantId` antes del INSERT lanzando `DuplicateAccountNameException`, que
+  el `GlobalExceptionHandler` traduce a 409 con un mensaje legible.
+* Alternativas consideradas: no poner restriccion ninguna, que es lo que hace Autollantas
+  (su `CUENTAS` no tiene unique sobre el nombre); o `unique = true` sobre la columna sola;
+  o dejar solo la restriccion de base sin validacion en el service.
+* Motivo: en Autollantas las cuentas son dos, fijas, creadas por el inicializador, y el
+  unico usuario nunca crea una tercera; el problema no existia. En ServiBox el endpoint
+  `POST /api/treasury/accounts` deja crear cuentas libremente, y dos "Bancolombia" en el
+  mismo taller hacen que cualquier movimiento vaya a la cuenta equivocada sin que nadie lo
+  note, con el agravante de que el error se descubre cuadrando plata. `unique` sobre la
+  columna sola esta descartado por la misma razon que en `User` y `Product`: cada tenant
+  tiene su propia "Caja General". La validacion en el service ademas de la restriccion de
+  base es el mismo patron de `DuplicateProductCodeException`: la base es la red de
+  seguridad, el service es el que produce un mensaje que el usuario entiende.
+
+## 2026-09-07: El `@Filter` de Hibernate no cubre `findById`, y eso era un cruce de tenants
+
+* Decision: `TreasuryService.findAccountById` no usa el `findById` heredado de
+  `JpaRepository`, sino la consulta derivada `findByIdAndTenantId`. Queda como convencion
+  para toda busqueda por id de una entidad de negocio, ver
+  [02-CONVENTIONS.md](02-CONVENTIONS.md).
+* Alternativas consideradas: dejar `findById` y filtrar despues en el service comparando
+  `getTenantId()` contra `TenantContext`; o envolver el `EntityManager`.
+* Motivo: no es una preferencia de estilo, es un agujero real. El `@Filter` se aplica a
+  las consultas (HQL, criteria, consultas derivadas de Spring Data) pero **no** a
+  `EntityManager.find()`, que es lo que usa `findById`. Lo detecto el test de aislamiento
+  del modulo: `GET /api/treasury/accounts/{id}/movements` con el token del tenant
+  equivocado respondia 200 en vez de rechazar la cuenta ajena. Devolvia lista vacia solo
+  porque la consulta de movimientos si es derivada y si estaba filtrada; la cuenta en si
+  se resolvio cruzando el tenant. Filtrar a mano despues del `findById` funciona pero
+  depende de que nadie se olvide en la entidad numero veinte; la consulta derivada lo hace
+  imposible de olvidar porque el tenant esta en la firma del metodo. Envolver el
+  `EntityManager` ya se descarto antes por romper la gestion de transacciones, ver los
+  callejones sin salida en [01-ARCHITECTURE.md](01-ARCHITECTURE.md).
+* Pendiente conocido: `InventoryService.findProductById` tiene exactamente el mismo
+  patron (`productRepository.findById`) y por lo tanto el mismo cruce en
+  `GET /api/inventory/products/{id}`. No se toco aqui por quedar fuera del alcance de esta
+  migracion, pero hay que corregirlo con su propio test.
+
+## 2026-09-07: `Movement` con `concept` propio y `type` como enum
+
+* Decision: `Movement` lleva una columna `concepto_movimiento` y un enum `MovementType`
+  (`INGRESO`, `EGRESO`). Autollantas no tiene ninguna de las dos cosas: su
+  `MOVIMIENTOS.tipo_movimiento` es un `String` con los literales `"Ingreso"` y `"Egreso"`,
+  y la tabla no tiene columna de concepto.
+* Alternativas consideradas: portar el esquema tal cual, con `type` como `String` y la
+  descripcion derivada de `(tabla_origen_movimiento, id_origen_movimiento)` como hace
+  `TreasuryService.resolveDescription`.
+* Motivo: el par `(tabla_origen, id_origen)` es una referencia polimorfica a las tablas
+  `VENTAS`, `COMPRAS`, `RECAUDOS`, `PAGOS`, `GASTOS_OPERATIVOS`, `INGRESOS_OCASIONALES` y
+  `TRANSFERENCIAS`. En ServiBox esos modulos todavia no existen: portarla ahora seria
+  copiar una clave foranea sin integridad referencial que apunta a tablas ausentes, y un
+  `switch` sobre nombres de tabla en `String`. Una columna `concept` da la misma
+  informacion al usuario, es lo que el `POST /api/treasury/movements` necesita hoy, y no
+  bloquea agregar el origen despues cuando existan Sales y Purchases. El enum en `type`
+  sigue el mismo criterio que `Role` en `User`: `"Ingreso"` como `String` libre admite
+  `"ingreso"`, `"INGRESO"` y typos silenciosos en una columna de la que depende el signo
+  con el que se mueve la plata.
+
+## 2026-09-07: La transferencia no genera movimientos automaticos
+
+* Decision: `registrarTransferencia` guarda el `Transfer` y mueve los dos saldos, y nada
+  mas. Autollantas ademas crea dos `Movement`, un `"Egreso"` en el origen y un
+  `"Ingreso"` en el destino, marcados con `sourceTable = "TRANSFERENCIAS"`.
+* Alternativas consideradas: portar tambien la generacion de los dos movimientos.
+* Motivo: se implemento el alcance pedido para esta migracion, que define la transferencia
+  como Transfer mas los dos saldos. **Es una diferencia funcional real, no cosmetica:**
+  hoy `GET /api/treasury/accounts/{id}/movements` no muestra las transferencias, asi que
+  el extracto de una cuenta no explica todos sus cambios de saldo, mientras que en
+  Autollantas si. El dato no se pierde (queda en `TRANSFERENCIAS`, y
+  `findTransfersByAccountId` lo consulta), pero el ledger unificado que Autollantas arma
+  con `UnifiedMovementRow` todavia no existe aqui. Cuando se necesite, la salida es
+  generar los dos movimientos dentro de la misma transaccion, igual que Autollantas.
+
+## 2026-09-07: Notion estaba al dia para Accounts, al reves que con Inventory
+
+* Decision: se migro segun el codigo de Autollantas, y se confirmo que la pagina de Notion
+  "Module - Accounts" coincide con el.
+* Motivo: se dejo escrito porque con Inventory paso lo contrario y conviene no asumir la
+  misma regla las dos veces. El paquete `treasury` de Autollantas no se toca desde el
+  commit `8b29f7e` del 2026-08-04 (`fix/61-complete-module-reports-test`), y la pagina de
+  Notion se edito el 2026-08-12, o sea que **la documentacion es mas nueva que el codigo**,
+  al reves que en Inventory. Se contrastaron igual las dos fuentes campo por campo y no hay
+  conflicto: Notion describe correctamente `Account` (los cinco campos y sus columnas), las
+  dos cuentas semilla con saldo 0, el `type` de `MOVIMIENTOS` como `"Ingreso"` / `"Egreso"`
+  y el `lblTotalGlobal` como suma de saldos. El unico punto que se presta a confusion es
+  que Notion describe una columna "Concept" en la tabla de movimientos: esa columna de la
+  vista **no** es un campo de `MOVIMIENTOS`, es el resultado de
+  `TreasuryService.resolveDescription` sobre `(tabla_origen, id_origen)`. Verificado contra
+  el codigo, ver la decision sobre `Movement` en este mismo archivo.
+
 ## 2026-08-28: taxAmount solo suma los impuestos marcados como IVA
 
 * Decision: en `InventoryService.recalculatePrices`, `taxAmount` es
