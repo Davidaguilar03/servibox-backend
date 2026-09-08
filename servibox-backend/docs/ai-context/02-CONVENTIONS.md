@@ -38,7 +38,7 @@ esta tabla.
 | `originAccount` / `destinationAccount` | Los dos extremos de una transferencia | Autollantas los llama `sourceAccount` / `destinationAccount`. Se renombro el origen para que coincida con la vista (columnas Origin / Destination) |
 | **Ingreso ocasional** | Ingreso puntual que no viene de una venta: reintegros, venta de chatarra, aporte del socio | Es una entidad propia (`OccasionalIncome`, tabla `INGRESOS_OCASIONALES`), no un movimiento suelto. En la interfaz de Autollantas vive bajo Ingresos > Ingresos Ocasionales |
 | Eliminar un ingreso ocasional | Deshacer el ingreso: se borra su movimiento, se resta el saldo y **desaparece la fila** | En Autollantas la accion se llama "Eliminar", no "Anular". **No deja estado `ANULADA` como una factura de venta**: un ingreso ocasional no es un documento fiscal, no hay nada que conservar |
-| `sourceTransfer` / `sourceSale` / `sourceOccasionalIncome` | El origen automatico de un movimiento | Los tres nullables y **excluyentes**: un movimiento tiene como mucho uno. Los tres null es un movimiento suelto, registrado a mano. Son la version acotada del `(tabla_origen, id_origen)` de Autollantas, ver [03-DECISIONS.md](03-DECISIONS.md) |
+| `sourceTransfer` / `sourceSale` / `sourceOccasionalIncome` / `sourcePurchase` | El origen automatico de un movimiento | Los cuatro nullables y **excluyentes**: un movimiento tiene como mucho uno. Los cuatro null es un movimiento suelto, registrado a mano. Son la version acotada del `(tabla_origen, id_origen)` de Autollantas. **Con cuatro, el patron toca su limite**, ver [03-DECISIONS.md](03-DECISIONS.md) |
 | Balance global | Suma de los `currentBalance` del tenant | Es el "Total Global" (`lblTotalGlobal`) de `Accounts.fxml` |
 | `CASH` / `BANK` | Tipo de cuenta | Las 2 cuentas por defecto de Autollantas son `Caja General` (CASH) y `Bancolombia` (BANK) |
 
@@ -65,6 +65,21 @@ Una factura anulada **no se borra**: queda en `ANULADA` con el stock ya devuelto
 Autollantas se sigue viendo desde la papelera y se puede restaurar; ServiBox todavia no
 tiene la restauracion.
 
+### Purchases
+
+| Termino | Significado | Cuidado |
+|-|-|-|
+| **Pago** | Pago parcial o total de una factura de compra a credito | **En compras se dice pago; en ventas se dice abono.** No son sinonimos intercambiables: el abono es lo que el taller **recibe** de un cliente, el pago es lo que el taller **entrega** a un proveedor. Autollantas es explicito: ventana "Registrar Pago", boton "Confirmar Pago", campo "Valor a Pagar". La clase es `Payment` (tabla `PAGOS`) |
+| `Supplier` | Proveedor (`PROVEEDORES`) | Su `document` es el **NIT** (`numero_nit_proveedor`) |
+| `businessName` | Razon social | En Autollantas **no existe como campo aparte**: el formulario tiene un unico campo "Nombre/razon social" que va a `nombre_proveedor`. Ver [03-DECISIONS.md](03-DECISIONS.md) |
+| `price` (linea de compra) | Costo de compra unitario, sin IVA | En Autollantas se llama `unitPrice` (`precio_compra`) |
+| `ivaTotal` | IVA de la factura de compra | Es IVA **descontable**: se recupera contra el IVA de las ventas. No confundir con el `ivaPorPagar` de una venta, que ya es la diferencia |
+| Validacion de saldo | Una compra de **contado** exige `cuenta.currentBalance >= total` | **No aplica a credito**, que no saca dinero al facturar |
+
+Una compra suma stock; una venta lo resta. Al anular se invierte cada una, y por eso anular
+una compra puede fallar: si parte de lo comprado ya se vendio, quitar el stock dejaria al
+producto en negativo.
+
 ### Unicidad en entidades multi-tenant
 
 Toda restriccion de unicidad de una entidad de negocio es **compuesta con `tenant_id`**,
@@ -79,6 +94,8 @@ justamente lo normal entre negocios que no se conocen.
 | `Account` | `(tenant_id, nombre_cuenta)` | `uk_cuenta_tenant_name` |
 | `Customer` | `(tenant_id, numero_documento_cliente)` | `uk_cliente_tenant_document` |
 | `Sale` | `(tenant_id, numero_factura_venta)` | `uk_venta_tenant_invoice_number` |
+| `Supplier` | `(tenant_id, numero_nit_proveedor)` | `uk_proveedor_tenant_document` |
+| `Purchase` | `(tenant_id, numero_factura_compra)` | `uk_compra_tenant_invoice_number` |
 
 Ademas de la restriccion de base, el service valida antes de guardar y lanza una excepcion
 legible; el error crudo de constraint violation no le sirve al usuario final. Al editar,
@@ -90,8 +107,9 @@ la validacion siempre excluye el propio registro.
 aplica a `EntityManager.find()`, asi que devuelve la fila aunque sea de otro tenant. Usar
 una consulta derivada, por convencion `findByIdAndTenantId(id, TenantContext.getTenantId())`.
 Detalle y como se detecto en [01-ARCHITECTURE.md](01-ARCHITECTURE.md), seccion Modulo
-Treasury. Aplicado ya en `Account`, `Product`, `ProductCategory`, `Sale` y `Customer`; no
-queda ningun `findById` heredado sobre una entidad `TenantAware`.
+Treasury. Aplicado ya en `Account`, `Product`, `ProductCategory`, `Sale`, `Customer`,
+`Purchase`, `Supplier` y `OccasionalIncome`; no queda ningun `findById` heredado sobre una
+entidad `TenantAware`.
 
 Y el codigo de respuesta: un recurso pedido **por la ruta** que no aparece para el tenant
 activo es `ResourceNotFoundException` (**404**, el mismo para "no existe" y para "es de
@@ -102,9 +120,11 @@ otro tenant"). Un id que llega **dentro del cuerpo** y no resuelve es
 
 La tasa de IVA de un producto sale **solo** de
 `InventoryService.getIvaRateForProduct(Product)`. En Autollantas esa funcion esta copiada
-identica en cuatro sitios y su propia documentacion la marca como candidato a centralizar;
-aqui vive una sola vez. Antes de escribir `getTaxTypes().stream()...` en cualquier modulo
-nuevo, usar ese metodo.
+en **cinco** sitios, y la quinta (la de compras) **no calcula lo mismo que las otras
+cuatro**: suma todas las rates de la categoria sin filtrar por `isVat`. Aqui vive una sola
+vez y con una sola semantica, la de `isVat`, para Inventory, Sales y Purchases. Antes de
+escribir `getTaxTypes().stream()...` en cualquier modulo nuevo, usar ese metodo. Detalle en
+[03-DECISIONS.md](03-DECISIONS.md).
 
 `minSalePrice` **no es terminologia vigente.** Existio en Autollantas y ya no; no
 introducirlo en ServiBox.

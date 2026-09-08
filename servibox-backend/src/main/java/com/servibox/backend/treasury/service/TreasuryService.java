@@ -1,5 +1,7 @@
 package com.servibox.backend.treasury.service;
 
+import com.servibox.backend.purchases.entity.Purchase;
+import com.servibox.backend.purchases.service.InsufficientBalanceException;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
@@ -96,7 +98,7 @@ public class TreasuryService {
      */
     @Transactional
     public Movement registrarMovimiento(Account cuenta, MovementType tipo, String concepto, Double monto) {
-        return aplicarMovimiento(recargar(cuenta), tipo, concepto, monto, null, null, null);
+        return aplicarMovimiento(recargar(cuenta), tipo, concepto, monto, null, null, null, null);
     }
 
     /**
@@ -105,7 +107,7 @@ public class TreasuryService {
      */
     @Transactional
     public Movement registrarIngresoDeVenta(Account cuenta, String concepto, Double monto, Sale venta) {
-        return aplicarMovimiento(recargar(cuenta), MovementType.INGRESO, concepto, monto, null, venta, null);
+        return aplicarMovimiento(recargar(cuenta), MovementType.INGRESO, concepto, monto, null, venta, null, null);
     }
 
     /**
@@ -120,7 +122,7 @@ public class TreasuryService {
      */
     private Movement aplicarMovimiento(Account cuenta, MovementType tipo, String concepto,
                                        Double monto, Transfer origen, Sale ventaOrigen,
-                                       OccasionalIncome ingresoOrigen) {
+                                       OccasionalIncome ingresoOrigen, Purchase compraOrigen) {
         Movement movimiento = new Movement();
         movimiento.setAccount(cuenta);
         movimiento.setType(tipo);
@@ -130,6 +132,7 @@ public class TreasuryService {
         movimiento.setSourceTransfer(origen);
         movimiento.setSourceSale(ventaOrigen);
         movimiento.setSourceOccasionalIncome(ingresoOrigen);
+        movimiento.setSourcePurchase(compraOrigen);
         Movement guardado = movementRepository.save(movimiento);
 
         double saldo = saldoDe(cuenta);
@@ -174,9 +177,9 @@ public class TreasuryService {
         Transfer guardada = transferRepository.save(transferencia);
 
         aplicarMovimiento(origen, MovementType.EGRESO,
-                "Transferencia a " + destino.getName(), monto, guardada, null, null);
+                "Transferencia a " + destino.getName(), monto, guardada, null, null, null);
         aplicarMovimiento(destino, MovementType.INGRESO,
-                "Transferencia desde " + origen.getName(), monto, guardada, null, null);
+                "Transferencia desde " + origen.getName(), monto, guardada, null, null, null);
 
         return guardada;
     }
@@ -218,7 +221,7 @@ public class TreasuryService {
         ingreso.setDate(fecha != null ? fecha : LocalDate.now());
         OccasionalIncome guardado = occasionalIncomeRepository.save(ingreso);
 
-        aplicarMovimiento(gestionada, MovementType.INGRESO, concepto, monto, null, null, guardado);
+        aplicarMovimiento(gestionada, MovementType.INGRESO, concepto, monto, null, null, guardado, null);
 
         return guardado;
     }
@@ -257,6 +260,41 @@ public class TreasuryService {
     }
 
     /**
+     * Egreso generado por una compra: el del contado al facturar, o el de un pago. Queda
+     * ligado a la factura por Movement.sourcePurchase para poder revertirlo al anularla.
+     *
+     * Valida que la cuenta tenga saldo. En Autollantas esa comprobacion vive en el
+     * formulario; aqui vive donde se mueve el dinero, que es el unico sitio por el que
+     * pasan todos los egresos.
+     */
+    @Transactional
+    public Movement registrarEgresoDeCompra(Account cuenta, String concepto, Double monto, Purchase compra) {
+        Account gestionada = recargar(cuenta);
+        exigirSaldoSuficiente(gestionada, monto);
+        return aplicarMovimiento(gestionada, MovementType.EGRESO, concepto, monto, null, null, null, compra);
+    }
+
+    /** Lanza InsufficientBalanceException si la cuenta no puede cubrir el monto. */
+    @Transactional(readOnly = true)
+    public void exigirSaldoSuficiente(Account cuenta, Double monto) {
+        Account gestionada = recargar(cuenta);
+        double saldo = saldoDe(gestionada);
+        double requerido = monto != null ? monto : 0.0;
+        if (saldo < requerido) {
+            throw new InsufficientBalanceException(gestionada.getName(), saldo, requerido);
+        }
+    }
+
+    /**
+     * Deshace en tesoreria todo lo que genero una compra. Espejo de
+     * revertirMovimientosDeVenta, con la misma excepcion a la regla de aplicarMovimiento.
+     */
+    @Transactional
+    public void revertirMovimientosDeCompra(Purchase compra) {
+        revertir(movementRepository.findBySourcePurchaseId(compra.getId()));
+    }
+
+    /**
      * Borra los movimientos que genero una venta y deshace su efecto sobre el saldo de la
      * cuenta. Es lo que hace `SalesService.cancelSale` de Autollantas al anular.
      *
@@ -268,12 +306,16 @@ public class TreasuryService {
      */
     @Transactional
     public void revertirMovimientosDeVenta(Sale venta) {
-        for (Movement movimiento : movementRepository.findBySourceSaleId(venta.getId())) {
+        revertir(movementRepository.findBySourceSaleId(venta.getId()));
+    }
+
+    /** Deshace cada movimiento al reves: un INGRESO se resta, un EGRESO se suma. */
+    private void revertir(List<Movement> movimientos) {
+        for (Movement movimiento : movimientos) {
             Account cuenta = movimiento.getAccount();
             double monto = movimiento.getAmount() != null ? movimiento.getAmount() : 0.0;
             if (cuenta != null) {
                 Account gestionada = recargar(cuenta);
-                // Al revés del movimiento: un INGRESO se resta, un EGRESO se suma.
                 gestionada.setCurrentBalance(movimiento.getType() == MovementType.INGRESO
                         ? saldoDe(gestionada) - monto
                         : saldoDe(gestionada) + monto);

@@ -2,6 +2,9 @@ package com.servibox.backend.shared;
 
 import com.servibox.backend.auth.InvalidCredentialsException;
 import com.servibox.backend.inventory.service.DuplicateProductCodeException;
+import com.servibox.backend.purchases.service.DuplicatePurchaseInvoiceNumberException;
+import com.servibox.backend.purchases.service.InsufficientBalanceException;
+import com.servibox.backend.purchases.service.InvalidPurchaseOperationException;
 import com.servibox.backend.sales.service.DuplicateInvoiceNumberException;
 import com.servibox.backend.sales.service.InsufficientStockException;
 import com.servibox.backend.sales.service.InvalidSaleOperationException;
@@ -57,6 +60,24 @@ public class GlobalExceptionHandler {
     /** Operacion que no cuadra con el estado de la factura (abono o anulacion invalida). */
     @ExceptionHandler(InvalidSaleOperationException.class)
     public ResponseEntity<ErrorResponse> manejarVentaInvalida(InvalidSaleOperationException ex) {
+        return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** Dos facturas de compra del mismo tenant con el mismo numero. */
+    @ExceptionHandler(DuplicatePurchaseInvoiceNumberException.class)
+    public ResponseEntity<ErrorResponse> manejarCompraDuplicada(DuplicatePurchaseInvoiceNumberException ex) {
+        return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** La cuenta no tiene con que pagar el egreso pedido. */
+    @ExceptionHandler(InsufficientBalanceException.class)
+    public ResponseEntity<ErrorResponse> manejarSaldoInsuficiente(InsufficientBalanceException ex) {
+        return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** Operacion que no cuadra con el estado de la compra (pago o anulacion invalida). */
+    @ExceptionHandler(InvalidPurchaseOperationException.class)
+    public ResponseEntity<ErrorResponse> manejarCompraInvalida(InvalidPurchaseOperationException ex) {
         return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 

@@ -12,6 +12,132 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-09-07: El IVA de compras en Autollantas no esta hardcodeado, pero si diverge de ventas
+
+* Hallazgo: la documentacion de Notion describe el IVA de compras como `price*0.19` por
+  unidad y el total como `subtotal*0.19`. **En el codigo real no hay ningun `0.19` en todo
+  el paquete `purchases`** (verificado con grep sobre el paquete completo). Notion esta
+  desactualizada en ese punto; el codigo manda.
+* Lo que si hay es una **quinta copia** de `getIvaRate(Product)`, en
+  `PurchaseFormController`, y **no calcula lo mismo que las otras cuatro**:
+
+  ```java
+  // purchases: suma TODAS las rates de la categoria
+  return p.getCategory().getTaxTypes().stream()
+          .mapToDouble(t -> t.getRate() != null ? t.getRate() : 0.0)
+          .sum();
+
+  // sales: filtra isVat, se queda con la primera, y tiene rama de servicios
+  return p.getCategory().getTaxTypes().stream()
+          .filter(t -> Boolean.TRUE.equals(t.getIsVat()))
+          .mapToDouble(...).findFirst().orElse(0.0);
+  ```
+
+  O sea que en Autollantas una categoria con IVA 19 por ciento mas ReteICA 3 por ciento
+  produce 22 por ciento de "IVA" al comprar y 19 por ciento al vender, sobre el mismo
+  producto.
+* Decision: ServiBox usa `InventoryService.getIvaRateForProduct` tambien en Purchases, o
+  sea la semantica de `isVat`, la misma que Inventory y Sales.
+* Motivo: la consigna era no corregir un hardcode sin avisar; el hardcode no existe, asi
+  que esa condicion no aplica. Lo que hay es la inconsistencia entre modulos, y replicarla
+  significaria meter retenciones dentro de una cifra de IVA descontable en el modulo nuevo,
+  que es exactamente lo que la decision del 2026-08-28 sobre `taxAmount` ya rechazo por
+  inflar el IVA declarable. Sumar rates que no son IVA al comprar y no al vender no es una
+  regla de negocio, es una copia que se desincronizo. **Queda dicho para que se confirme:**
+  si el criterio del negocio fuera realmente ese, se revierte con un metodo aparte.
+
+## 2026-09-07: La anulacion de compras tenia el mismo defecto que la de ventas
+
+* Hallazgo: `PurchasesService.cancelPurchase` de Autollantas revierte tesoreria solo con
+  `"Contado".equals(paymentType) && "PAGADA".equals(status)`. Es la misma condicion, linea
+  por linea, que `SalesService.cancelSale`. Anular una compra a credito con pagos ya
+  hechos deja ese dinero descontado de la caja sin devolver.
+* Decision: se aplica **la misma correccion** que ya se hizo en Sales, no se trata como un
+  hallazgo nuevo: `anularFactura` revierte todos los movimientos ligados a la compra,
+  pagos incluidos, apoyandose en `Movement.sourcePurchase`. Cubierto por
+  `anularUnaCompraConPagosRevierteEsosPagos`.
+* Motivo: es el mismo defecto de la misma forma en el modulo espejo, casi seguro por copia
+  del uno al otro. Corregir uno y dejar el otro seria arbitrario.
+
+## 2026-09-07: Anular una compra puede fallar por stock ya vendido
+
+* Decision: `anularFactura` comprueba **todas** las lineas antes de tocar nada y rechaza
+  con un mensaje que nombra el producto y las cantidades si a alguno le quedan menos
+  unidades de las que habria que quitar.
+* Alternativas consideradas: copiar Autollantas, que resta sin mirar y deja el producto en
+  negativo; o dejar la cantidad en cero en vez de negativa.
+* Motivo: Autollantas no valida nada aqui, asi que anular una compra cuyas unidades ya se
+  vendieron deja stock negativo, que despues nadie sabe interpretar y que rompe la
+  siguiente venta. Dejarlo en cero es peor: oculta el descuadre y pierde la unica senal de
+  que algo no cuadra. Rechazar obliga a resolverlo, que es lo correcto: si esas unidades ya
+  salieron, la compra no se puede deshacer sin antes anular las ventas.
+
+  La comprobacion es previa y completa a proposito: la transaccion desharia una anulacion a
+  medias igual, pero validar antes de escribir da el mensaje correcto en vez de un fallo a
+  mitad de camino.
+
+## 2026-09-07: Movement.sourcePurchase, cuarto origen y limite del patron
+
+* Decision: se agrega `Movement.sourcePurchase` siguiendo el mismo patron que los tres
+  anteriores, sin cambiar el diseno.
+* Motivo: **este es el punto donde dijimos que tocaria reevaluar**, y se mantiene el patron
+  a proposito para no cambiar la forma de `Movement` en medio de una migracion. Pero la
+  cuenta ya no sale igual que con dos o tres: son cuatro columnas nullables mutuamente
+  excluyentes, ningun mecanismo impide que dos vengan pobladas a la vez, y cada origen
+  nuevo obliga a tocar la entidad, el repositorio, el DTO y la firma de
+  `aplicarMovimiento` (que ya lleva cuatro parametros de origen, tres de ellos siempre
+  null en cada llamada).
+
+  **Pendiente de discutir, no resuelto:** las salidas razonables son un par
+  `(tipoOrigen enum, idOrigen)` con indice compuesto, que recupera lo malo del polimorfico
+  pero acotado por un enum en vez de nombres de tabla en `String`; o una tabla puente
+  `ORIGEN_MOVIMIENTO`. Antes de agregar un quinto origen conviene decidirlo.
+
+## 2026-09-07: Diferencias entre lo migrado de Purchases y el codigo de Autollantas
+
+* **`subtotal` e `ivaTotal` son columnas**, igual que en `Sale`: Autollantas solo persiste
+  `total` y calcula el resto en la UI. Mismo criterio de congelar los totales de una
+  factura emitida.
+* **El saldo pendiente no es columna**: se deriva de la suma de pagos. Autollantas lo
+  guarda en `saldo_pendiente`.
+* **`businessName` no existe en Autollantas.** Su formulario tiene un unico campo
+  "Nombre/razon social" que va a `nombre_proveedor`; aqui van separados porque el alcance
+  lo pedia. `Supplier.name` sigue siendo el que se muestra.
+* **`ivaAmount` de la linea es el de la linea completa.** Autollantas guarda en
+  `impuesto_compra` el IVA **por unidad** (asi lo muestra la columna "IVA/Unidad"). Se
+  unifico con el criterio de `SaleDetail.ivaAmount` para que las dos lineas signifiquen lo
+  mismo y no haya que recordar cual es cual.
+* **No se porto la actualizacion del costo del producto.** En Autollantas
+  `savePurchaseWithDetails` hace, por cada linea, `realProduct.setPurchaseCost(unitPrice)`
+  y `inventoryService.recalculatePrices(realProduct)`: comprar a un costo nuevo **reescribe
+  el costo del producto y rehace su precio sugerido**. Es una regla de negocio real y
+  quedo fuera porque el alcance pedia solo incrementar `quantity`. **Es la omision mas
+  importante de esta migracion**, hay que decidir si se trae.
+* **No hay edicion ni restauracion** de compras (`savePurchaseWithDetails` en modo edicion,
+  `restorePurchase` desde la papelera), igual que en Sales.
+* Los enums `PaymentType` y `PurchaseStatus` se duplican en `purchases` en vez de
+  compartirse con `sales`: son dos y tres valores fijos, y una clase comun obligaria a que
+  los dos modulos dependieran entre si o de un paquete compartido por cinco constantes.
+
+## 2026-09-07: Donde vive OperationalExpense, para la proxima migracion
+
+* Ubicacion en Autollantas: **`treasury`**, no `purchases`, aunque en la interfaz aparezca
+  bajo Egresos junto a las facturas de compra. Archivos:
+  `treasury/model/OperationalExpense.java`, `treasury/repository/OperationalExpenseRepository.java`,
+  `treasury/controller/OperationalExpensesController.java` y
+  `OperationalExpenseFormController.java`, mas los metodos `saveOperationalExpense` y
+  `deleteOperationalExpense` en `TreasuryService`.
+* Campos del modelo: `concept` (`concepto_gasto`), `amount` (`monto_gasto`), `account`,
+  `date` (`fecha_gasto`) y `notes`. Es la imagen espejo de `OccasionalIncome`.
+* Comportamiento: **si**, genera egreso igual que `OccasionalIncome` genera ingreso.
+  `saveOperationalExpense` resta del `currentBalance` y crea un `Movement` "Egreso" con
+  `sourceTable = "GASTOS_OPERATIVOS"`; `deleteOperationalExpense` suma de vuelta y borra el
+  movimiento. Tiene ademas modo edicion, que revierte el movimiento viejo antes de aplicar
+  el nuevo, cosa que `OccasionalIncome` no tiene.
+* Consecuencia para el diseno: al migrarlo hara falta un **quinto** origen en `Movement`,
+  que es justo el punto en el que la decision de arriba dice que hay que reevaluar el
+  patron antes de seguir agregando columnas.
+
 ## 2026-09-07: Ingresos ocasionales, con eliminacion porque Autollantas la tiene
 
 * Decision: `OccasionalIncome` vive **dentro de `treasury`**, no en un modulo propio.

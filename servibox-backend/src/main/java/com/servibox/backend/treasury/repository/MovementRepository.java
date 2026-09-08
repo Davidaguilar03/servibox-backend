@@ -14,4 +14,7 @@ public interface MovementRepository extends JpaRepository<Movement, Long> {
 
     /** El movimiento que genero un ingreso ocasional, para poder revertirlo al eliminarlo. */
     List<Movement> findBySourceOccasionalIncomeId(Long occasionalIncomeId);
+
+    /** Los movimientos que genero una compra: el egreso del contado y los de sus pagos. */
+    List<Movement> findBySourcePurchaseId(Long purchaseId);
 }

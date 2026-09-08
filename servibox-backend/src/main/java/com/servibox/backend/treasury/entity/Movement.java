@@ -1,5 +1,6 @@
 package com.servibox.backend.treasury.entity;
 
+import com.servibox.backend.purchases.entity.Purchase;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.shared.TenantAwareEntity;
 import jakarta.persistence.Column;
@@ -82,4 +83,16 @@ public class Movement extends TenantAwareEntity {
     @ManyToOne
     @JoinColumn(name = "id_ingreso_ocasional_origen")
     private OccasionalIncome sourceOccasionalIncome;
+
+    /**
+     * La compra que genero este movimiento, o null. Cuarto origen, mismo patron que los
+     * tres anteriores por consistencia.
+     *
+     * **Este es el punto donde dijimos que tocaria reevaluar el diseno.** Cuatro columnas
+     * nullables excluyentes empiezan a pedir otra cosa; se mantiene el patron para no
+     * cambiarlo en medio de una migracion, pero hay que discutirlo. Ver 03-DECISIONS.md.
+     */
+    @ManyToOne
+    @JoinColumn(name = "id_compra_origen")
+    private Purchase sourcePurchase;
 }

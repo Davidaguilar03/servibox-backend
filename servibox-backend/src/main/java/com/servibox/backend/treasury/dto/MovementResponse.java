@@ -16,7 +16,9 @@ public record MovementResponse(
         /** Id del Transfer que genero el movimiento, o null si es un movimiento suelto. */
         Long sourceTransferId,
         /** Id de la Sale que genero el movimiento, o null si no viene de una venta. */
-        Long sourceSaleId
+        Long sourceSaleId,
+        /** Id de la Purchase que genero el movimiento, o null si no viene de una compra. */
+        Long sourcePurchaseId
 ) {
 
     public static MovementResponse from(Movement movement) {
@@ -29,7 +31,8 @@ public record MovementResponse(
                 movement.getAmount(),
                 movement.getDate(),
                 movement.getSourceTransfer() != null ? movement.getSourceTransfer().getId() : null,
-                movement.getSourceSale() != null ? movement.getSourceSale().getId() : null
+                movement.getSourceSale() != null ? movement.getSourceSale().getId() : null,
+                movement.getSourcePurchase() != null ? movement.getSourcePurchase().getId() : null
         );
     }
 }

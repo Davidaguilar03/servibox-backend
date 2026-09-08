@@ -250,7 +250,8 @@ Base: `com.servibox.backend`. Un paquete por modulo de negocio, mas tres transve
 | `inventory` | primer modulo de negocio migrado, ver abajo |
 | `treasury` | segundo modulo de negocio migrado, ver abajo |
 | `sales` | tercer modulo de negocio migrado, ver abajo |
-| `purchases`, `reporting` | vacios todavia |
+| `purchases` | cuarto modulo de negocio migrado, ver abajo |
+| `reporting` | vacio todavia |
 
 Los modulos de negocio usan siempre las mismas cinco capas:
 `controller`, `service`, `repository`, `entity`, `dto`.
@@ -349,14 +350,14 @@ Todas sus entidades extienden `TenantAwareEntity`.
   [03-DECISIONS.md](03-DECISIONS.md): el tipo es enum y no `String`, y `concept` es una
   columna real y no una descripcion derivada de `(tabla_origen, id_origen)`.
 
-  Un movimiento lleva **como mucho un origen**, y los tres son nullables:
+  Un movimiento lleva **como mucho un origen**, y los cuatro son nullables:
   `sourceTransfer` (los dos movimientos de una transferencia), `sourceSale` (el ingreso
-  del contado y los de cada abono) y `sourceOccasionalIncome`. Los tres null significa
-  movimiento suelto, registrado a mano. Son la version acotada del par
-  `(tabla_origen, id_origen)` de Autollantas: relaciones reales con integridad
-  referencial, sin el `switch` sobre nombres de tabla en `String`. Cuando aparezca
-  Purchases habra que decidir si se sigue agregando una relacion por origen o se
-  generaliza, ver [03-DECISIONS.md](03-DECISIONS.md).
+  del contado y los de cada abono), `sourceOccasionalIncome` y `sourcePurchase` (el egreso
+  del contado y los de cada pago). Los cuatro null significa movimiento suelto, registrado
+  a mano. Son la version acotada del par `(tabla_origen, id_origen)` de Autollantas:
+  relaciones reales con integridad referencial, sin el `switch` sobre nombres de tabla en
+  `String`. **Con cuatro columnas excluyentes el patron toca su limite y hay que
+  reevaluarlo**, ver [03-DECISIONS.md](03-DECISIONS.md).
 * `OccasionalIncome` (`INGRESOS_OCASIONALES`): `concept`, `amount`, `ManyToOne` a
   `Account`, `date`. Ingreso puntual que no viene de una venta: reintegros, venta de
   chatarra, un aporte del socio. Autollantas tiene ademas un campo `notes` que no se porto.
@@ -525,5 +526,76 @@ Autollantas ese `getIvaRate(Product)` esta copiado identico en cuatro sitios
 (`SaleFormController`, `SaleDetailsController`, `ProductsController` y
 `SaleDetailRow.ivaRate()`) y la propia documentacion del proyecto lo marca como candidato
 a centralizar. **No volver a copiarlo.**
+
+### Modulo Purchases
+
+Migrado desde el paquete `purchases` de Autollantas. Es el espejo de Sales con el signo
+invertido: una compra **suma** stock y **saca** dinero.
+
+**Entidades**
+
+* `Supplier` (`PROVEEDORES`): `name`, `businessName`, `document` (NIT), `email`, `phone`.
+  Restriccion unica `uk_proveedor_tenant_document` sobre `(tenant_id, numero_nit_proveedor)`.
+* `Purchase` (`COMPRAS`): `invoiceNumber`, `ManyToOne` a `Supplier`, `invoiceDate`,
+  `dueDate`, `paymentType` (enum `CONTADO` / `CREDITO`), `ManyToOne` **nullable** a
+  `Account`, `paymentMethod`, `status` (enum `PAGADA` / `PENDIENTE` / `ANULADA`),
+  `subtotal`, `ivaTotal`, `total`. Restriccion unica
+  `uk_compra_tenant_invoice_number`, misma divergencia deliberada que en `Sale`:
+  Autollantas valida el numero solo en la aplicacion.
+* `PurchaseDetail` (`DETALLE_COMPRAS`): `ManyToOne` a `Purchase` y a `Product`,
+  `quantity`, `price` (costo de compra unitario sin IVA) e `ivaAmount` de la linea.
+* `Payment` (`PAGOS`): `ManyToOne` a `Purchase` y a `Account`, `amount`, `date`. Es un
+  **pago**, no un abono, ver [02-CONVENTIONS.md](02-CONVENTIONS.md). En Autollantas esta
+  clase vive en `treasury`; aqui vive en `purchases`, junto a la factura.
+
+**Flujo factura -> inventario (suma) -> tesoreria (egreso)**
+
+`PurchasesService.crearFactura`, todo en **una transaccion**:
+
+1. Valida que el `invoiceNumber` no exista en el tenant
+   (`DuplicatePurchaseInvoiceNumberException`, **409**).
+2. Calcula las lineas y los totales **antes de tocar nada**:
+
+   ```
+   subtotal = suma(price * quantity)
+   ivaTotal = suma(price * quantity * InventoryService.getIvaRateForProduct(producto))
+   total    = subtotal + ivaTotal
+   ```
+
+3. Si es `CONTADO`, exige que la cuenta tenga saldo suficiente para el total
+   (`InsufficientBalanceException`, **409**). **No aplica a `CREDITO`**: una compra a
+   credito no saca dinero hoy, asi que no hay nada que validar. Es exactamente lo que hace
+   Autollantas, solo que alli la comprobacion vive en el formulario y aqui en el service.
+4. **Suma** `Product.quantity` por cada linea, al reves de una venta.
+5. Si es `CONTADO`: estado `PAGADA` y un `EGRESO` por el total. Si es `CREDITO`: estado
+   `PENDIENTE`, sin movimiento.
+
+Las lineas y el stock se tocan **despues** de la validacion de saldo a proposito: asi el
+saldo se compara contra el total definitivo y el rechazo ocurre sin haber escrito nada,
+aunque la transaccion lo desharia igual.
+
+**Pagos.** `registrarPago(purchaseId, accountId, monto)` crea el `Payment`, registra el
+`EGRESO` (que a su vez exige saldo suficiente) y, si con eso queda cubierto el pendiente,
+pasa la compra a `PAGADA`. Rechaza pagar una compra que no este `PENDIENTE` y pagos que
+excedan el saldo pendiente. El pendiente se calcula como `total` menos la suma de pagos,
+igual que en Sales.
+
+**Anulacion.** `anularFactura(purchaseId)`:
+
+* **Comprueba primero todo el stock**: si a algun producto le quedan menos unidades de las
+  que habria que quitar, rechaza con `InvalidPurchaseOperationException` (**400**)
+  nombrando el producto. Pasa cuando parte de lo comprado ya se vendio.
+* Revierte **todos** los movimientos ligados a la compra, pagos incluidos.
+* Quita el stock que la compra habia sumado y deja la compra en `ANULADA`.
+
+Una compra ya `ANULADA` no se puede volver a anular.
+
+**Endpoints** (todos requieren JWT)
+
+* `POST /api/purchases`
+* `GET /api/purchases`
+* `GET /api/purchases/{id}` — 404 si no existe para el tenant
+* `POST /api/purchases/{id}/payments`
+* `POST /api/purchases/{id}/annul`
 
 ## Base de datos
