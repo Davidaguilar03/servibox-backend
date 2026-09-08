@@ -7,6 +7,7 @@ import com.servibox.backend.treasury.dto.MovementRequest;
 import com.servibox.backend.treasury.dto.MovementResponse;
 import com.servibox.backend.treasury.dto.TransferRequest;
 import com.servibox.backend.treasury.dto.TransferResponse;
+import com.servibox.backend.shared.ResourceNotFoundException;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.service.TreasuryService;
 import jakarta.validation.Valid;
@@ -46,7 +47,7 @@ public class TreasuryController {
 
     @GetMapping("/accounts/{id}/movements")
     public List<MovementResponse> listarMovimientos(@PathVariable Long id) {
-        cuentaObligatoria(id);
+        cuentaDeRuta(id);
         return treasuryService.findMovementsByAccountId(id).stream()
                 .map(MovementResponse::from)
                 .toList();
@@ -75,8 +76,17 @@ public class TreasuryController {
     }
 
     /**
-     * El filtro de Hibernate ya limita la busqueda al tenant activo, asi que una cuenta de
-     * otro tenant no se encuentra y sale por aqui como 400, nunca como acceso cruzado.
+     * Cuenta pedida por la ruta: si no existe para este tenant, 404. El mismo 404 cubre
+     * "no existe" y "es de otro tenant", ver ResourceNotFoundException.
+     */
+    private Account cuentaDeRuta(Long id) {
+        return treasuryService.findAccountById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Cuenta no encontrada: " + id));
+    }
+
+    /**
+     * Cuenta referida desde el cuerpo de la peticion: si no resuelve, el problema es la
+     * peticion, asi que 400.
      */
     private Account cuentaObligatoria(Long id) {
         return treasuryService.findAccountById(id)

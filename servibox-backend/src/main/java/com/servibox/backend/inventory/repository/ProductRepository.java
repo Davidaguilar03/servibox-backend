@@ -13,4 +13,12 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     List<Product> findByCategoryId(Long categoryId);
 
     Optional<Product> findByCodeAndTenantId(String code, Long tenantId);
+
+    /**
+     * Busqueda por id que si respeta el tenant. El @Filter de Hibernate NO se aplica a
+     * EntityManager.find(), asi que el findById heredado de JpaRepository devuelve el
+     * producto aunque sea de otro tenant. Las consultas derivadas como esta si pasan por
+     * el filtro, y ademas el tenant va explicito en el where.
+     */
+    Optional<Product> findByIdAndTenantId(Long id, Long tenantId);
 }

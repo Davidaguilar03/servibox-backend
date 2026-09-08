@@ -12,6 +12,37 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-09-07: Barrido de `findById` en todos los services, y 404 para el recurso de ruta
+
+* Decision: se elimino todo uso del `findById` heredado de `JpaRepository` sobre entidades
+  `TenantAware`. Quedan **3 metodos corregidos, los 3 en Inventory** (`findProductById`,
+  `findCategoryById`, y la lectura dentro de `updateCategoryMargin`, que ahora reutiliza
+  `findCategoryById`), con `findByIdAndTenantId` nuevo en `ProductRepository` y
+  `ProductCategoryRepository`. Treasury ya estaba cubierto desde la entrada anterior.
+  Ademas, un recurso pedido **por la ruta** que no existe para el tenant activo responde
+  **404** (`shared.ResourceNotFoundException`), no 400.
+* Alternativas consideradas: corregir solo `findProductById`, que era el unico caso
+  anotado como pendiente; dejar el 400 que ya devolvia el `IllegalArgumentException`; o
+  responder 403 en vez de 404 cuando la fila existe pero es de otro tenant.
+* Motivo: al barrer el codigo aparecio que `findCategoryById` tenia el mismo hueco y era
+  **peor que el de lectura**: `POST /api/inventory/products` resuelve la categoria por id,
+  asi que sin el fix el tenant dos podia **crear** un producto colgando de una categoria
+  del tenant uno. Es una escritura cruzada, no solo una lectura. Los dos casos quedan
+  reproducidos en `InventoryTenantIsolationTest`
+  (`unProductoDeOtroTenantNoSeDevuelvePorId` y
+  `unaCategoriaDeOtroTenantNoSirveParaCrearleProductos`); verificado que ambos fallan al
+  revertir el fix, con 200 y 201 respectivamente.
+
+  Sobre el codigo de respuesta: 400 describia mal la situacion, porque la peticion estaba
+  bien formada. 403 se descarto porque confirmaria que el id existe en otra cuenta, que es
+  justo lo que el aislamiento tiene que ocultar; el mismo 404 cubre "no existe" y "es de
+  otro tenant", con el mismo criterio que el mensaje generico de login de
+  `AuthController`. El 400 se conserva cuando el id llega **dentro del cuerpo** de la
+  peticion (`POST /api/treasury/movements`, `POST /api/treasury/transfers`,
+  `POST /api/inventory/products`): ahi el problema si es la peticion. Por eso
+  `TreasuryController` tiene `cuentaDeRuta` (404) y `cuentaObligatoria` (400) separadas, y
+  el test de aislamiento de Treasury cambio su expectativa de 400 a 404.
+
 ## 2026-09-07: Nombre de cuenta unico por tenant
 
 * Decision: `Account` lleva la restriccion compuesta `uk_cuenta_tenant_name` sobre
@@ -50,10 +81,9 @@ Formato de cada entrada:
   imposible de olvidar porque el tenant esta en la firma del metodo. Envolver el
   `EntityManager` ya se descarto antes por romper la gestion de transacciones, ver los
   callejones sin salida en [01-ARCHITECTURE.md](01-ARCHITECTURE.md).
-* Pendiente conocido: `InventoryService.findProductById` tiene exactamente el mismo
-  patron (`productRepository.findById`) y por lo tanto el mismo cruce en
-  `GET /api/inventory/products/{id}`. No se toco aqui por quedar fuera del alcance de esta
-  migracion, pero hay que corregirlo con su propio test.
+* ~~Pendiente conocido: `InventoryService.findProductById` tiene el mismo patron.~~
+  **RESUELTO el 2026-09-07**, y el alcance real era mayor que el anotado: ver la entrada
+  "Barrido de `findById` en todos los services" mas arriba en este mismo archivo.
 
 ## 2026-09-07: `Movement` con `concept` propio y `type` como enum
 

@@ -8,4 +8,7 @@ import java.util.Optional;
 public interface ProductCategoryRepository extends JpaRepository<ProductCategory, Long> {
 
     Optional<ProductCategory> findByName(String name);
+
+    /** Ver la nota de findByIdAndTenantId en ProductRepository: findById cruza tenants. */
+    Optional<ProductCategory> findByIdAndTenantId(Long id, Long tenantId);
 }

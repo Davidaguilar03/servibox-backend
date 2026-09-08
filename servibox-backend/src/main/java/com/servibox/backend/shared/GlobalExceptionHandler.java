@@ -61,6 +61,12 @@ public class GlobalExceptionHandler {
         return construir(HttpStatus.BAD_REQUEST, "Peticion invalida");
     }
 
+    /** Recurso pedido por la ruta que no existe para el tenant activo. */
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ErrorResponse> manejarRecursoInexistente(ResourceNotFoundException ex) {
+        return construir(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ErrorResponse> manejarNoEncontrado(NoResourceFoundException ex) {
         return construir(HttpStatus.NOT_FOUND, "Recurso no encontrado");

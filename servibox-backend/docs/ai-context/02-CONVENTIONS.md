@@ -67,7 +67,13 @@ la validacion siempre excluye el propio registro.
 aplica a `EntityManager.find()`, asi que devuelve la fila aunque sea de otro tenant. Usar
 una consulta derivada, por convencion `findByIdAndTenantId(id, TenantContext.getTenantId())`.
 Detalle y como se detecto en [01-ARCHITECTURE.md](01-ARCHITECTURE.md), seccion Modulo
-Treasury.
+Treasury. Aplicado ya en `Account`, `Product` y `ProductCategory`; no queda ningun
+`findById` heredado sobre una entidad `TenantAware`.
+
+Y el codigo de respuesta: un recurso pedido **por la ruta** que no aparece para el tenant
+activo es `ResourceNotFoundException` (**404**, el mismo para "no existe" y para "es de
+otro tenant"). Un id que llega **dentro del cuerpo** y no resuelve es
+`IllegalArgumentException` (**400**): ahi el problema si es la peticion.
 
 `minSalePrice` **no es terminologia vigente.** Existio en Autollantas y ya no; no
 introducirlo en ServiBox.
