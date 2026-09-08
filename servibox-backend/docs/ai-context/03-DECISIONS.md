@@ -12,6 +12,50 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-09-07: La transferencia genera sus dos movimientos, con relacion al Transfer
+
+* Decision: `registrarTransferencia` ya no toca `currentBalance` directamente. Guarda el
+  `Transfer` y llama dos veces a `aplicarMovimiento`, un `EGRESO` en el origen y un
+  `INGRESO` en el destino, los dos con `sourceTransfer` apuntando al `Transfer`; son esos
+  movimientos los que mueven los saldos, todo en la misma transaccion. `Movement` gana un
+  `ManyToOne` **opcional** a `Transfer` (`id_transferencia_origen`, nullable), null en los
+  movimientos sueltos. `MovementResponse` expone `sourceTransferId`. Esto cierra la
+  limitacion anotada mas abajo en este mismo archivo.
+* Alternativas consideradas: portar el mecanismo de Autollantas tal cual, con
+  `sourceTable = "TRANSFERENCIAS"` mas `sourceId`; guardar el origen como un simple enum
+  o `String` sin relacion; o dejar que `registrarTransferencia` siguiera moviendo los
+  saldos y ademas insertara los movimientos "informativos".
+* Motivo: el problema de fondo era que el historial de una cuenta no explicaba todos sus
+  cambios de saldo: una transferencia movia la plata y solo quedaba registrada en
+  `TRANSFERENCIAS`, asi que el extracto mostraba un saldo que no cuadraba con sus propios
+  renglones. Generar los dos movimientos lo arregla y ademas alinea el comportamiento con
+  Autollantas.
+
+  Que la transferencia **no** mueva el saldo por su cuenta es la parte que importa del
+  refactor: `aplicarMovimiento` queda como el unico sitio del modulo donde se crea un
+  `Movement` y se toca `currentBalance`. La alternativa de mover los saldos ahi y ademas
+  insertar los movimientos deja dos caminos que calculan el mismo saldo, y basta con que
+  uno cambie de signo para que el extracto y el balance se separen sin que ningun test lo
+  note. Con un unico `if` decidiendo el signo eso no puede pasar.
+
+  Sobre representar el origen: `(tabla_origen, id_origen)` es una clave foranea
+  polimorfica que la base no puede validar, resuelta en Autollantas con un `switch` sobre
+  nombres de tabla en `String`. Mientras el unico origen automatico sea la transferencia,
+  una relacion real dice lo mismo con integridad referencial y sin el `switch`. La
+  contrapartida conocida: cuando existan Sales y Purchases, un `Movement` que venga de una
+  venta no cabe en `sourceTransfer` y habra que decidir si se agregan mas relaciones
+  opcionales o se vuelve al par polimorfico. Se prefiere pagar esa decision cuando exista
+  el segundo caso real y no adivinarla ahora con un campo generico que hoy no tiene con
+  que compararse.
+* Verificacion: el test de conservacion del dinero
+  (`unaTransferenciaDebitaElOrigenAcreditaElDestinoYConservaElDinero`) se dejo **sin
+  tocar** a proposito y sigue pasando con el refactor, que es la prueba de que mover el
+  saldo via `Movement` da el mismo resultado que moverlo a mano. Nuevos:
+  `unaTransferenciaGeneraElEgresoYElIngresoApuntandoAlTransfer` (servicio),
+  `elListadoDeMovimientosMuestraLosGeneradosPorUnaTransferencia` (HTTP, contra
+  `GET /api/treasury/accounts/{id}/movements`), `unMovimientoSueltoNoTieneTransferDeOrigen`
+  y `unaTransferenciaRechazadaNoGeneraMovimientos`.
+
 ## 2026-09-07: Barrido de `findById` en todos los services, y 404 para el recurso de ruta
 
 * Decision: se elimino todo uso del `findById` heredado de `JpaRepository` sobre entidades
@@ -105,7 +149,13 @@ Formato de cada entrada:
   `"ingreso"`, `"INGRESO"` y typos silenciosos en una columna de la que depende el signo
   con el que se mueve la plata.
 
-## 2026-09-07: La transferencia no genera movimientos automaticos
+## 2026-09-07: La transferencia no genera movimientos automaticos (RESUELTO el mismo dia)
+
+> **RESUELTO.** Se implemento la generacion de los dos movimientos, con una relacion
+> `Movement.sourceTransfer` que Autollantas no tiene. Ver la entrada "La transferencia
+> genera sus dos movimientos" mas arriba. La entrada original se conserva por el
+> razonamiento.
+
 
 * Decision: `registrarTransferencia` guarda el `Transfer` y mueve los dos saldos, y nada
   mas. Autollantas ademas crea dos `Movement`, un `"Egreso"` en el origen y un

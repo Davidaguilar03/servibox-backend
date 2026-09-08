@@ -196,6 +196,44 @@ class TreasuryTenantIsolationTest {
                         .value("La cuenta origen y la cuenta destino no pueden ser la misma"));
     }
 
+    /**
+     * El endpoint de movimientos tiene que mostrar tambien los que genera una
+     * transferencia, con su sourceTransferId. Ver 03-DECISIONS.md.
+     */
+    @Test
+    void elListadoDeMovimientosMuestraLosGeneradosPorUnaTransferencia() throws Exception {
+        Long cajaGeneral = crearCuenta(tokenUno, "Caja General", "CASH");
+        Long bancolombia = crearCuenta(tokenUno, "Bancolombia", "BANK");
+
+        MvcResult creada = mockMvc.perform(post("/api/treasury/transfers")
+                        .header("Authorization", "Bearer " + tokenUno)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"originAccountId":%d,"destinationAccountId":%d,"concept":"Consignacion del dia","amount":10000}
+                                """.formatted(cajaGeneral, bancolombia)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Integer transferId = JsonPath.read(creada.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(get("/api/treasury/accounts/" + cajaGeneral + "/movements")
+                        .header("Authorization", "Bearer " + tokenUno))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].type").value("EGRESO"))
+                .andExpect(jsonPath("$[0].amount").value(10000.0))
+                .andExpect(jsonPath("$[0].concept").value("Transferencia a Bancolombia"))
+                .andExpect(jsonPath("$[0].sourceTransferId").value(transferId));
+
+        mockMvc.perform(get("/api/treasury/accounts/" + bancolombia + "/movements")
+                        .header("Authorization", "Bearer " + tokenUno))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].type").value("INGRESO"))
+                .andExpect(jsonPath("$[0].amount").value(10000.0))
+                .andExpect(jsonPath("$[0].concept").value("Transferencia desde Caja General"))
+                .andExpect(jsonPath("$[0].sourceTransferId").value(transferId));
+    }
+
     @Test
     void laTesoreriaExigeAutenticacion() throws Exception {
         mockMvc.perform(get("/api/treasury/accounts")).andExpect(status().isUnauthorized());
