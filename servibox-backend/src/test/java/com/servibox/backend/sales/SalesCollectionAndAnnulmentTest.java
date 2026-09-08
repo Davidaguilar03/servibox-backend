@@ -11,6 +11,7 @@ import com.servibox.backend.sales.service.InvalidSaleOperationException;
 import com.servibox.backend.sales.service.SalesService;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
+import com.servibox.backend.treasury.entity.MovementSourceType;
 import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.service.TreasuryService;
 import org.junit.jupiter.api.AfterEach;
@@ -96,7 +97,8 @@ class SalesCollectionAndAnnulmentTest {
                     assertThat(m.getType()).isEqualTo(MovementType.INGRESO);
                     assertThat(m.getAmount()).isEqualTo(total);
                     assertThat(m.getConcept()).isEqualTo("Abono factura VEN-00010");
-                    assertThat(m.getSourceSale().getId()).isEqualTo(venta.getId());
+                    assertThat(m.getSourceType()).isEqualTo(MovementSourceType.SALE);
+                    assertThat(m.getSourceId()).isEqualTo(venta.getId());
                 });
     }
 

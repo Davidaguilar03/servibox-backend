@@ -10,6 +10,7 @@ import com.servibox.backend.tenant.TenantRepository;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.AccountType;
 import com.servibox.backend.treasury.entity.Movement;
+import com.servibox.backend.treasury.entity.MovementSourceType;
 import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.entity.OccasionalIncome;
 import com.servibox.backend.treasury.service.TreasuryService;
@@ -148,10 +149,8 @@ class OccasionalIncomeTest {
         assertThat(movimiento.getType()).isEqualTo(MovementType.INGRESO);
         assertThat(movimiento.getAmount()).isEqualTo(30000.0);
         assertThat(movimiento.getConcept()).isEqualTo("Venta de chatarra");
-        assertThat(movimiento.getSourceOccasionalIncome().getId()).isEqualTo(ingreso.getId());
-        // No viene ni de una transferencia ni de una venta.
-        assertThat(movimiento.getSourceTransfer()).isNull();
-        assertThat(movimiento.getSourceSale()).isNull();
+        assertThat(movimiento.getSourceType()).isEqualTo(MovementSourceType.OCCASIONAL_INCOME);
+        assertThat(movimiento.getSourceId()).isEqualTo(ingreso.getId());
 
         assertThat(treasuryService.balanceGlobal()).isEqualTo(30000.0);
     }
@@ -210,7 +209,7 @@ class OccasionalIncomeTest {
         Account caja = crearCuentaEn(tenantUno, "Caja General");
         TenantContext.clear();
 
-        mockMvc.perform(post("/api/treasury/occasional-incomes")
+        MvcResult creado = mockMvc.perform(post("/api/treasury/occasional-incomes")
                         .header("Authorization", "Bearer " + tokenUno)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -219,7 +218,9 @@ class OccasionalIncomeTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.concept").value("Venta de chatarra"))
                 .andExpect(jsonPath("$.amount").value(30000.0))
-                .andExpect(jsonPath("$.accountName").value("Caja General"));
+                .andExpect(jsonPath("$.accountName").value("Caja General"))
+                .andReturn();
+        Integer ingresoId = JsonPath.read(creado.getResponse().getContentAsString(), "$.id");
 
         mockMvc.perform(get("/api/treasury/occasional-incomes")
                         .header("Authorization", "Bearer " + tokenUno))
@@ -233,8 +234,8 @@ class OccasionalIncomeTest {
                 .andExpect(jsonPath("$[0].type").value("INGRESO"))
                 .andExpect(jsonPath("$[0].amount").value(30000.0))
                 .andExpect(jsonPath("$[0].concept").value("Venta de chatarra"))
-                .andExpect(jsonPath("$[0].sourceTransferId").doesNotExist())
-                .andExpect(jsonPath("$[0].sourceSaleId").doesNotExist());
+                .andExpect(jsonPath("$[0].sourceType").value("OCCASIONAL_INCOME"))
+                .andExpect(jsonPath("$[0].sourceId").value(ingresoId));
     }
 
     @Test
