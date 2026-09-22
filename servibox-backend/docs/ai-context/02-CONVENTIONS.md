@@ -84,6 +84,23 @@ Una compra suma stock; una venta lo resta. Al anular se invierte cada una, y por
 una compra puede fallar: si parte de lo comprado ya se vendio, quitar el stock dejaria al
 producto en negativo.
 
+### Reporting
+
+| Termino | Significado | Cuidado |
+|-|-|-|
+| KPIs globales / del periodo | Los mismos 5 indicadores sobre todo el historico o sobre `[desde, hasta]` | Global en Autollantas significa **otra cosa** (por cobrar, por pagar, saldo, alertas). Aqui global es "sin rango". Ver [03-DECISIONS.md](03-DECISIONS.md) |
+| `totalSales` / `totalPurchases` | Suma de `total` de las facturas, **con IVA** | Nunca incluyen facturas `ANULADA`. No confundir con `subtotal` |
+| `grossProfit` | `totalSales - totalPurchases` | Es utilidad de caja por documentos, no margen contable: compra y venta del mismo periodo no tienen por que ser de los mismos productos |
+| `operatingExpenses` | Suma de los gastos operativos | Solo `OperationalExpense`; las compras van en `totalPurchases` |
+| `netProfit` | `grossProfit - operatingExpenses` | Puede ser negativo. Los ingresos ocasionales **no** entran |
+| IVA Generado | Suma de `SaleDetail.ivaAmount` | El IVA cobrado al vender, congelado al facturar |
+| IVA Descontable | IVA ya pagado al comprar las unidades vendidas: `ivaAmount - ivaDifference` | Tambien llamado IVA a favor. **No es** el `ivaTotal` de las compras del periodo: es el de las unidades **vendidas** |
+| IVA Neto a Pagar | Generado menos Descontable, `SaleDetail.ivaDifference` | Por linea es el mismo concepto que `Sale.ivaPorPagar` por factura |
+| Movimiento (en Reporting) | Un documento de negocio resumido: `VENTA`, `COMPRA`, `GASTO`, `INGRESO` | **No es un `Movement` de tesoreria.** Una venta a credito es un movimiento del dashboard aunque no haya movido ninguna cuenta |
+
+Regla de exclusion en todo Reporting: `ANULADA` no cuenta, y el filtro es por estado, no
+por historia. Una factura restaurada a `PENDIENTE` vuelve a contar.
+
 ### Unicidad en entidades multi-tenant
 
 Toda restriccion de unicidad de una entidad de negocio es **compuesta con `tenant_id`**,

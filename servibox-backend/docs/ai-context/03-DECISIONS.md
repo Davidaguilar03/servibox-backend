@@ -12,6 +12,135 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-09-22: Reporting expone JSON, sin generacion de PDF ni Excel
+
+* Decision: el modulo Reporting **no genera PDF ni Excel**. Expone los datos ya calculados
+  como JSON en tres endpoints: `GET /api/reporting/kpis` (global, o del periodo con
+  `desde` / `hasta`), `GET /api/reporting/movements` y `GET /api/reporting/iva`. Es una
+  decision de alcance tomada a proposito, **no un pendiente olvidado**.
+* Que reemplaza a que: el Reporte de IVA en PDF y en Excel de Autollantas
+  (`generateReporteIvaPDF` / `generateReporteIvaExcel`) lo cubre `/api/reporting/iva`, con
+  las mismas cifras que su builder privado `buildReporteIva`. El dashboard lo cubren
+  `/kpis` y `/movements`. Los demas reportes de `ReportService` (estado de resultados, flujo
+  de caja, cartera por cobrar y por pagar, productos vendidos, inventario valorizado,
+  reporte diario de ventas) **no se migraron** en esta pasada, ni en JSON ni en archivo.
+* Alternativas consideradas: portar iText y Apache POI con los mismos formatos de
+  Autollantas; o generar el archivo en el servidor y devolverlo como descarga.
+* Motivo: ServiBox es una API; el formato de presentacion es asunto del cliente, que con el
+  JSON puede pintar una tabla o exportar lo que necesite. La mayor parte de las 1.773
+  lineas de `ReportService` es maquetacion de iText/POI (colores, celdas, pies de pagina,
+  el nombre de la empresa hardcodeado): seria arrastrar una capa de presentacion de
+  escritorio a un backend multi-tenant, donde ademas cada tenant tendria su propio
+  encabezado. Si un cliente llega a necesitar el archivo generado en el servidor, el punto
+  de entrada es reutilizar los metodos de `ReportingService`, que ya devuelven los datos
+  listos.
+
+## 2026-09-22: Diferencias entre el modulo de reportes de Autollantas, Notion y lo migrado
+
+* Fechas, para saber quien manda:
+  * `reporting/service/DashboardService.java`: ultimo commit `f70d9d3`, 2026-08-03 13:45
+    (-0500).
+  * `reporting/service/ReportService.java`: ultimo commit `e7bdec7`, 2026-09-05 20:27
+    (-0500), el del Reporte de IVA.
+  * Pagina de Notion "Module - Reporting": editada 2026-09-06 01:44 UTC, es decir
+    2026-09-05 20:44 (-0500).
+
+  **Notion es mas nueva que los dos archivos**: 17 minutos despues del commit del IVA y un
+  mes despues del ultimo cambio a `DashboardService`. Con la regla "si el codigo es mas
+  nuevo, el codigo manda", aqui no manda el codigo. Pero la edicion de Notion no pudo
+  reflejar ningun cambio de `DashboardService` posterior al 3 de agosto, porque no lo hay:
+  la tabla de KPIs de Notion **describe algo que el codigo nunca hizo**. Se implemento la
+  especificacion de Notion, que es tambien la que pedia la tarea, y cada diferencia con el
+  codigo queda aqui.
+
+* **1. Los KPIs no son los de Notion.** `DashboardService` no tiene Total Sales, Gross
+  Profit ni Net Profit. Lo que calcula de verdad:
+  * `getPeriodKpis(start, end)`: `totalIncome` = ventas **mas ingresos ocasionales**,
+    `totalCosts` = compras, `totalExpenses` = gastos operativos, y
+    `netResult = totalIncome - totalCosts - totalExpenses`. Son las tarjetas Ingresos,
+    Gastos, Costos y Neto de `Dashboard.fxml`. No existe un paso intermedio de utilidad
+    bruta.
+  * `getGlobalKpis()`: **no son los mismos KPIs sin rango.** Son cartera por cobrar
+    (`sumPendingReceivable`), cartera por pagar (`sumPendingPayable`), saldo total de
+    cuentas y numero de alertas de stock: las tarjetas Por Cobrar, Por Pagar, Saldo y
+    Alertas.
+
+  ServiBox: los 5 KPIs de Notion, en global (todo el historico) y en periodo, como dos
+  metodos separados que devuelven el mismo `KpisResponse`. `netProfit` sale igual que el
+  `netResult` de Autollantas **salvo por los ingresos ocasionales**, que aqui no entran en
+  ningun KPI (en la tabla de Notion tampoco). Los cuatro KPIs globales reales de
+  Autollantas no se portaron; el saldo total ya existe como `GET /api/treasury/balance`.
+  Tampoco los detalles por tarjeta (`getIncomeDetail`, `getCostDetail`,
+  `getReceivableDetail`, etc.).
+
+* **2. La regla de consistencia de Notion no se cumple en el dashboard de Autollantas.**
+  Notion dice que las `ANULADA` se excluyen de los totales. Verificado en el codigo:
+  * `SaleRepository.sumTotalByDateBetween` y `PurchaseRepository.sumTotalByDateBetween`
+    son `SUM(total)` **sin ninguna condicion de estado**. Una factura anulada sigue sumando
+    en Ingresos o Costos del periodo.
+  * `getMovements` y los detalles por tarjeta usan `findBySaleDateBetween` /
+    `findByPurchaseDateBetween`, tambien sin filtro: las anuladas aparecen en el listado.
+  * Solo por cobrar y por pagar las excluyen, y de rebote: filtran `status = PENDIENTE`.
+  * `ReportService` si las excluye: `buildEstadoResultados` y `buildReporteIva` saltan las
+    facturas con estado `ANULADA`.
+
+  Es decir, en Autollantas el dashboard y los reportes **no** reflejan el mismo estado,
+  justo lo contrario de lo que afirma Notion. `DashboardServiceTest` no lo podia detectar:
+  es un test de Mockito que simula el valor de `sumTotalByDateBetween`, nunca ejecuta la
+  consulta. En ServiBox el filtro esta en las consultas (`status <> ANULADA`) y lo cubre
+  `ventaAnuladaNoCuentaYAlVolverAPendienteVuelveAContar` contra la base real. **Queda
+  anotado como defecto de Autollantas**; no se toco ese repositorio.
+
+* **3. Restaurar.** Notion dice "restored (PENDIENTE) included again". En Autollantas
+  `restoreSale` deja la factura en `PAGADA` si es de contado y en `PENDIENTE` o `PAGADA`
+  segun el pendiente si es a credito; no siempre `PENDIENTE`. ServiBox todavia no tiene
+  restauracion (ver [02-CONVENTIONS.md](02-CONVENTIONS.md)). Como el filtro es por estado,
+  cualquier estado distinto de `ANULADA` vuelve a contar; el test simula la restauracion
+  poniendo `PENDIENTE` por el repositorio. Cuando se porte `restoreSale`, Reporting no
+  necesita ningun cambio.
+
+* **4. Fallback del Reporte de IVA: no se porto.** Autollantas, si `ivaAmount` es null,
+  recalcula el IVA desde la tasa **actual** del producto (lineas anteriores a que existiera
+  el campo). En ServiBox `SalesService.crearFactura` llena `ivaAmount` en todas las lineas
+  desde la migracion de Sales, es la unica via que crea un `SaleDetail`, y no hay datos
+  historicos importados: no existe ninguna linea sin el campo. Una linea con `ivaAmount`
+  null contaria como IVA cero y se ignoraria. Si algun dia se importa historico de
+  Autollantas, hay que resolverlo en la importacion, no aqui.
+
+* **5. El IVA descontable por linea no existia en ServiBox.** Notion no lo menciona, pero
+  `buildReporteIva` no saca el descontable de las compras del periodo: lo deduce linea por
+  linea como `ivaAmount - ivaDifference`, donde `ivaDifference` (`diferencia_iva_linea`) lo
+  congela `SaleFormController` al facturar como `ivaGenerado - ivaFavor(producto, cantidad)`.
+  ServiBox solo guardaba el agregado `Sale.ivaPorPagar`, que no se puede repartir por
+  categoria. Se agrego `SaleDetail.ivaDifference`, que `crearFactura` llena con
+  `ivaLinea - producto.taxAmount * cantidad`, la misma cuenta que ya hacia para el
+  agregado.
+  * Alternativa descartada: calcular el descontable al generar el reporte con el
+    `taxAmount` actual del producto. Comprar reescribe el costo del producto (decision del
+    2026-09-08), asi que el reporte de un mes ya declarado cambiaria con cada compra nueva.
+    Cubierto al final de `reporteIvaAgrupaPorCategoriaYNetoEsGeneradoMenosDescontable`.
+  * Sin migracion de esquema: se regenera con `create-drop` (ver *Estado de la gestion del
+    esquema*, 2026-09-07).
+
+* **6. Servicios.** Notion dice que el reporte incluye la categoria `SERVICIOS` y que a los
+  servicios no les aplica descontable. ServiBox no tiene el concepto de servicio
+  (`InventoryService.isService` no se porto), asi que no hay caso especial. Si se porta,
+  un servicio tendria `taxAmount` cero y su descontable saldria cero solo.
+
+* **7. Tests.** Notion dice 14 tests en `DashboardServiceTest` y es correcto: 14, en tres
+  grupos `@Nested` (movimientos, KPIs globales, KPIs del periodo), todos unitarios con
+  Mockito. ServiBox tiene 9 en `ReportingTest`, todos de integracion sobre H2 y varios con
+  MockMvc. La diferencia no es de cobertura: los 14 de Autollantas prueban sobre todo el
+  ensamblado de listas con repositorios simulados (6 solo para `getMovements`, 3 que
+  comprueban que se llame a la query SUM), y cada test de ServiBox verifica varias cifras
+  contra datos reales. Lo que ServiBox cubre y Autollantas no: exclusion de anuladas,
+  aislamiento por tenant, bordes del rango, Reporte de IVA y autenticacion.
+  No se porto `deberia_limitar_a_MAX_MOVEMENTS_cuando_hay_muchos_registros`: el corte a
+  100 si se porto, pero probarlo exige sembrar 101 facturas reales.
+
+* Menor: el concepto de un renglon de movimiento usa `" - "` como separador entre numero de
+  factura y tercero, en vez del punto medio de Autollantas.
+
 ## 2026-09-08: Gastos operativos, con edicion (revertir y recrear) y eliminacion
 
 Cierra la nota *Donde vive OperationalExpense, para la proxima migracion* (2026-09-07).

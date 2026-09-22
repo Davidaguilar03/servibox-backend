@@ -152,6 +152,8 @@ public class SalesService {
             double baseLinea = precio * cantidad;
             // Congelado aqui: la tasa que rige es la del momento de facturar.
             double ivaLinea = baseLinea * inventoryService.getIvaRateForProduct(producto);
+            // IVA a favor: el que ya se pago al comprar esas unidades.
+            double descontableLinea = (producto.getTaxAmount() != null ? producto.getTaxAmount() : 0.0) * cantidad;
 
             SaleDetail detalle = new SaleDetail();
             detalle.setSale(guardada);
@@ -159,12 +161,12 @@ public class SalesService {
             detalle.setQuantity(cantidad);
             detalle.setPrice(precio);
             detalle.setIvaAmount(ivaLinea);
+            detalle.setIvaDifference(ivaLinea - descontableLinea);
             saleDetailRepository.save(detalle);
 
             subtotal += baseLinea;
             ivaGenerado += ivaLinea;
-            // IVA a favor: el que ya se pago al comprar esas unidades.
-            ivaDescontable += (producto.getTaxAmount() != null ? producto.getTaxAmount() : 0.0) * cantidad;
+            ivaDescontable += descontableLinea;
         }
 
         guardada.setSubtotal(subtotal);
