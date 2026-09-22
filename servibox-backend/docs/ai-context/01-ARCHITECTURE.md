@@ -251,7 +251,7 @@ Base: `com.servibox.backend`. Un paquete por modulo de negocio, mas tres transve
 | `treasury` | segundo modulo de negocio migrado, ver abajo |
 | `sales` | tercer modulo de negocio migrado, ver abajo |
 | `purchases` | cuarto modulo de negocio migrado, ver abajo |
-| `reporting` | vacio todavia |
+| `reporting` | quinto paquete de negocio y ultimo modulo del roadmap, solo lectura, ver abajo |
 
 Los modulos de negocio usan siempre las mismas cinco capas:
 `controller`, `service`, `repository`, `entity`, `dto`.
@@ -512,6 +512,10 @@ dos**: una factura descuenta inventario y mueve tesoreria.
   (unitario sin IVA) e `ivaAmount`, **congelado al facturar**. Cambiarle el IVA a un
   producto no puede mover el IVA de una factura ya emitida, porque esa factura ya se
   entrego y se declaro. Es el mismo campo `iva_generado_linea` de Autollantas.
+  Lleva ademas `ivaDifference` (`diferencia_iva_linea`), el IVA **neto** de la linea
+  (`ivaAmount` menos `producto.taxAmount * quantity`), congelado igual. Lo agrego la
+  migracion de Reporting: el Reporte de IVA reparte el descontable por categoria y
+  necesita el de cada linea, no solo el agregado de la factura.
 * `Collection` (`RECAUDOS`): `ManyToOne` a `Sale` y a `Account`, `amount`, `date`. Es un
   **abono**, ver [02-CONVENTIONS.md](02-CONVENTIONS.md). En Autollantas esta clase vive en
   `treasury`; aqui vive en `sales`, junto a la factura a la que pertenece.
@@ -676,5 +680,76 @@ Una compra ya `ANULADA` no se puede volver a anular.
 * `GET /api/purchases/{id}` — 404 si no existe para el tenant
 * `POST /api/purchases/{id}/payments`
 * `POST /api/purchases/{id}/annul`
+
+### Modulo Reporting
+
+Septimo y ultimo modulo del roadmap original de migracion (Inventory, Treasury, Sales,
+ingresos ocasionales, Purchases, gastos operativos, Reporting). Migrado desde
+`reporting/service/DashboardService` y `ReportService.buildReporteIva` de Autollantas.
+
+**No tiene entidades propias ni escribe nada.** Agrega los datos de todos los modulos
+anteriores: `Sale` y `SaleDetail` (Sales), `Purchase` (Purchases), `OperationalExpense` y
+`OccasionalIncome` (Treasury), y la categoria de `Product` (Inventory). Las consultas viven
+en los repositorios de cada modulo (`sumTotalByStatusNot...`, `findBy...DateBetween...`),
+no en `reporting/repository`, que sigue vacio: la consulta pertenece a la entidad que lee.
+El aislamiento por tenant lo da el filtro de Hibernate, porque todas son consultas JPQL o
+derivadas; ninguna pasa por `findById`.
+
+**Regla de exclusion.** Las facturas de venta y de compra en `ANULADA` no cuentan en
+nada: ni KPIs, ni movimientos, ni Reporte de IVA. El filtro es por **estado**
+(`status <> ANULADA`), no por historia, asi que una factura que vuelva a `PENDIENTE`
+vuelve a contar sin mas. Gastos operativos e ingresos ocasionales no tienen estado: se
+eliminan, y al eliminarse desaparecen solos.
+
+**`ReportingService`**
+
+* `getGlobalKpis()`: los 5 KPIs sobre todo el historico del tenant.
+* `getPeriodKpis(desde, hasta)`: los mismos 5, por `invoiceDate` de la factura o `date`
+  del gasto dentro de `[desde, hasta]`, ambos inclusive. Dos metodos y dos consultas por
+  cifra, no uno con fechas opcionales: un `(:desde IS NULL OR ...)` en JPQL da problemas de
+  tipado en PostgreSQL.
+
+  ```
+  totalSales        = suma(Sale.total)            sin ANULADA
+  totalPurchases    = suma(Purchase.total)        sin ANULADA
+  grossProfit       = totalSales - totalPurchases
+  operatingExpenses = suma(OperationalExpense.amount)
+  netProfit         = grossProfit - operatingExpenses
+  ```
+
+  Los totales son **con IVA**, que es lo que guarda `total`. Los ingresos ocasionales no
+  entran en ningun KPI.
+* `getMovements(desde, hasta)`: ventas, compras, gastos e ingresos ocasionales del rango
+  como renglones (`VENTA`, `COMPRA`, `GASTO`, `INGRESO`), del mas reciente al mas antiguo y
+  cortado en `MAX_MOVEMENTS` (100), igual que Autollantas. No son `Movement` de tesoreria:
+  son los documentos de negocio. Una venta a credito aparece aunque no haya movido caja.
+* `buildReporteIva(desde, hasta)`: por cada linea de venta no anulada del rango, agrupa
+  por nombre de categoria del producto:
+
+  ```
+  ivaGenerado    = suma(SaleDetail.ivaAmount)
+  ivaNeto        = suma(SaleDetail.ivaDifference)
+  ivaDescontable = ivaGenerado - ivaNeto
+  ```
+
+  Ordena por IVA generado descendente y agrega el resumen: facturas con IVA, y los tres
+  totales. Las lineas con IVA generado cero se ignoran, como en Autollantas. Los dos campos
+  estan congelados al facturar, asi que una compra posterior que cambie el `taxAmount` del
+  producto no mueve el reporte de un periodo ya facturado.
+
+Rangos: `desde` y `hasta` son obligatorios en periodo, movimientos e IVA; si falta uno, o
+`desde` es posterior a `hasta`, el service lanza `IllegalArgumentException` (**400**).
+
+**Endpoints** (todos requieren JWT, todos `GET`, todos JSON)
+
+* `/api/reporting/kpis`: sin parametros, KPIs globales. Con `desde` y `hasta` (ISO,
+  `2026-09-01`), KPIs del periodo. Una sola ruta porque la respuesta es el mismo DTO;
+  `desde` / `hasta` vuelven null en el global.
+* `/api/reporting/movements?desde=...&hasta=...`
+* `/api/reporting/iva?desde=...&hasta=...`
+
+DTOs: `KpisResponse`, `MovementSummaryResponse`, `IvaReportResponse` con su lista de
+`IvaCategoryResponse`. **No hay PDF ni Excel**, decision deliberada en
+[03-DECISIONS.md](03-DECISIONS.md).
 
 ## Base de datos
