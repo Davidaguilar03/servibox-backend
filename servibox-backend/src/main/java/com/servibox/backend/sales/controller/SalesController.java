@@ -92,6 +92,12 @@ public class SalesController {
         return responder(salesService.anularFactura(id));
     }
 
+    @PostMapping("/{id}/restore")
+    public SaleResponse restaurarFactura(@PathVariable Long id) {
+        facturaDeRuta(id);
+        return responder(salesService.restaurarFactura(id));
+    }
+
     /**
      * Factura pedida por la ruta: si no existe para este tenant, 404. El mismo 404 cubre
      * "no existe" y "es de otro tenant", ver ResourceNotFoundException.

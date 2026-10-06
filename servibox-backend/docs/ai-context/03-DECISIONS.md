@@ -12,6 +12,55 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-06: Restaurar es el inverso exacto de anular
+
+* Decision: `restaurarFactura` y `restaurarCompra` deshacen exactamente lo que hizo la
+  anulacion. Lo que anular saco, restaurar lo devuelve:
+  * **Stock.** La venta lo vuelve a descontar con `descontarStock` de `crearFactura` (si
+    no alcanza, 409 y nada cambia); la compra lo vuelve a sumar sin validar.
+  * **Tesoreria.** Se recrean por `TreasuryService` los movimientos que
+    `revertirMovimientosDeVenta` / `...DeCompra` borraron: el del contado (total, cuenta de
+    la factura, fecha de la factura) y uno por cada `Collection` / `Payment` (su monto, su
+    cuenta, su fecha). Las filas de abonos y pagos sobreviven a la anulacion; de ahi se
+    leen. Cada concepto sale de un unico metodo privado (`conceptoVenta`, `conceptoAbono`,
+    `conceptoCompra`, `conceptoPago`) compartido con crear, abonar y pagar: un movimiento
+    restaurado es indistinguible del original salvo por su id.
+  * **Estado derivado**, no se guarda el previo: contado `PAGADA`; credito `PAGADA` si el
+    saldo pendiente cae dentro de la tolerancia de un peso (la misma comparacion de
+    `registrarAbono` / `registrarPago`) y `PENDIENTE` si no.
+  * **Saldo en compras.** Cada egreso recreado pasa por `registrarEgresoDeCompra`, que
+    llama a `exigirSaldoSuficiente`: la misma regla de crear y pagar. Si uno no alcanza,
+    409 y la transaccion deshace stock, egresos ya recreados y estado.
+  * **Defensa.** Si queda algun `Movement` vivo con origen `(SALE, id)` o
+    `(PURCHASE, id)`, la factura no esta anulada de verdad en tesoreria: se rechaza por
+    inconsistencia en vez de duplicar el dinero.
+* Cambio asociado: `registrarIngresoDeVenta` y `registrarEgresoDeCompra` reciben la fecha
+  de negocio. Antes `aplicarMovimiento` fechaba todo con `LocalDate.now()`, asi que el
+  movimiento del contado de una factura con fecha pasada quedaba con la fecha de captura.
+  Ahora crear usa la fecha de la factura, igual que Autollantas (`getSaleDate()` /
+  `getPurchaseDate()`, hoy si es null), y restaurar usa la misma. Abonos y pagos llevan la
+  fecha de su fila, que hoy siempre es la de captura. Los demas movimientos (sueltos,
+  transferencias, ingresos ocasionales, gastos operativos) siguen con `LocalDate.now()`.
+* Lo que hace Autollantas, verificado en `restoreSale` y `restorePurchase`:
+  * Estado: contado `PAGADA`; credito `PAGADA` o `PENDIENTE` segun `saldo_pendiente < 1.0`.
+    Coincide.
+  * Tesoreria: solo el contado, con la fecha de la factura, y solo si no queda un
+    `Movement` de la factura; si queda, lo salta en silencio. Aqui se rechaza: en ServiBox
+    ningun camino normal lo deja vivo, asi que es un dato roto que hay que ver. No recrea
+    abonos ni pagos, pero su anulacion tampoco los revertia (ver *Diferencias entre lo
+    migrado de Sales*); aqui la anulacion revierte todo y la restauracion recrea todo.
+  * Stock sin validar: `restoreSale` resta sin mirar el disponible y puede dejarlo
+    negativo. Saldo sin validar: `restorePurchase` debita sin comprobar.
+  * Costo: `restorePurchase` no toca `purchaseCost` ni llama a `recalculatePrices`.
+    Coincide.
+  * Sin restricciones de tiempo ni de usuario; el servicio ni revisa el estado, solo la UI
+    limita la accion a la papelera.
+* Primer diseno descartado (siempre `PENDIENTE` y sin tesoreria): dejaba una factura de
+  contado en un estado raro, obligaba a registrar un abono nuevo con fecha de hoy y dejaba
+  sin salida a las facturas con abonos o pagos.
+* Cubierto por `SalesRestoreTest` y `PurchasesRestoreTest` (foto antes de anular, anular,
+  restaurar, foto identica) y por los tests de aislamiento.
+
 ## 2026-09-22: Reporting expone JSON, sin generacion de PDF ni Excel
 
 * Decision: el modulo Reporting **no genera PDF ni Excel**. Expone los datos ya calculados
@@ -93,11 +142,12 @@ Formato de cada entrada:
 
 * **3. Restaurar.** Notion dice "restored (PENDIENTE) included again". En Autollantas
   `restoreSale` deja la factura en `PAGADA` si es de contado y en `PENDIENTE` o `PAGADA`
-  segun el pendiente si es a credito; no siempre `PENDIENTE`. ServiBox todavia no tiene
-  restauracion (ver [02-CONVENTIONS.md](02-CONVENTIONS.md)). Como el filtro es por estado,
-  cualquier estado distinto de `ANULADA` vuelve a contar; el test simula la restauracion
-  poniendo `PENDIENTE` por el repositorio. Cuando se porte `restoreSale`, Reporting no
-  necesita ningun cambio.
+  segun el pendiente si es a credito; no siempre `PENDIENTE`. Como el filtro es por estado,
+  cualquier estado distinto de `ANULADA` vuelve a contar.
+  **RESUELTO el 2026-10-06:** ya existe `restaurarFactura` (estado derivado como en
+  Autollantas, ver la entrada de esa fecha) y el test usa el metodo real en vez de poner
+  `PENDIENTE` por el repositorio; la factura del test es a credito sin abonos y vuelve
+  `PENDIENTE`. Reporting no necesito ningun cambio.
 
 * **4. Fallback del Reporte de IVA: no se porto.** Autollantas, si `ivaAmount` es null,
   recalcula el IVA desde la tasa **actual** del producto (lineas anteriores a que existiera
@@ -435,7 +485,8 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
   `quantity`. Ver la entrada *Comprar reescribe el costo del producto, y anular no lo
   deshace* (2026-09-08), que ademas documenta que la anulacion **no** revierte ese costo.
 * **No hay edicion ni restauracion** de compras (`savePurchaseWithDetails` en modo edicion,
-  `restorePurchase` desde la papelera), igual que en Sales.
+  `restorePurchase` desde la papelera), igual que en Sales. **Restauracion RESUELTA el
+  2026-10-06** (`restaurarCompra`); la edicion sigue pendiente.
 * Los enums `PaymentType` y `PurchaseStatus` se duplican en `purchases` en vez de
   compartirse con `sales`: son dos y tres valores fijos, y una clase comun obligaria a que
   los dos modulos dependieran entre si o de un paquete compartido por cinco constantes.
@@ -608,6 +659,7 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
   * **La factura no se puede editar ni restaurar todavia.** Autollantas tiene
     `saveSaleWithDetails` en modo edicion y `restoreSale` desde la papelera, las dos con
     su propia reversion de stock y de caja. Fuera del alcance de esta migracion.
+    **Restauracion RESUELTA el 2026-10-06** (`restaurarFactura`); la edicion sigue pendiente.
 
 ## 2026-09-07: La transferencia genera sus dos movimientos, con relacion al Transfer
 

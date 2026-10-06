@@ -90,6 +90,12 @@ public class PurchasesController {
         return responder(purchasesService.anularFactura(id));
     }
 
+    @PostMapping("/{id}/restore")
+    public PurchaseResponse restaurarCompra(@PathVariable Long id) {
+        compraDeRuta(id);
+        return responder(purchasesService.restaurarCompra(id));
+    }
+
     /** Compra pedida por la ruta: 404 si no existe para este tenant. */
     private Purchase compraDeRuta(Long id) {
         return purchasesService.findPurchaseById(id)

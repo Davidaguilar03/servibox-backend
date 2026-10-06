@@ -95,8 +95,10 @@ siempre `date`. Los de concepto se nombran `concepto_<entidad>` y en Java son si
 | `PAGADA` / `PENDIENTE` / `ANULADA` | Estado de la factura | Mismos nombres que Autollantas, pero enum en vez de `String` |
 
 Una factura anulada **no se borra**: queda en `ANULADA` con el stock ya devuelto. En
-Autollantas se sigue viendo desde la papelera y se puede restaurar; ServiBox todavia no
-tiene la restauracion.
+Autollantas se sigue viendo desde la papelera; en ServiBox se restaura con
+`POST /api/sales/{id}/restore` (y `/api/purchases/{id}/restore`), el inverso exacto de
+anular: vuelve al estado que le dan sus datos (`PAGADA` o `PENDIENTE`) con sus movimientos
+de tesoreria recreados.
 
 ### Purchases
 

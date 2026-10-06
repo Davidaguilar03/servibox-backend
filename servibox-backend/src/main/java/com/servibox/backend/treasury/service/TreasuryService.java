@@ -107,12 +107,15 @@ public class TreasuryService {
 
     /**
      * Ingreso generado por una venta: el del contado al facturar, o el de un abono. Queda
-     * ligado a la factura por (SALE, id) para poder revertirlo al anularla.
+     * ligado a la factura por (SALE, id) para poder revertirlo al anularla. La fecha es la
+     * de negocio (la de la factura o la del abono), para que restaurar una factura anulada
+     * recree el movimiento con la misma fecha que tuvo.
      */
     @Transactional
-    public Movement registrarIngresoDeVenta(Account cuenta, String concepto, Double monto, Sale venta) {
+    public Movement registrarIngresoDeVenta(Account cuenta, String concepto, Double monto, Sale venta,
+                                            LocalDate fecha) {
         return aplicarMovimiento(recargar(cuenta), MovementType.INGRESO, concepto, monto,
-                MovementSourceType.SALE, venta.getId());
+                MovementSourceType.SALE, venta.getId(), fecha);
     }
 
     /**
@@ -131,12 +134,18 @@ public class TreasuryService {
      */
     private Movement aplicarMovimiento(Account cuenta, MovementType tipo, String concepto,
                                        Double monto, MovementSourceType tipoOrigen, Long idOrigen) {
+        return aplicarMovimiento(cuenta, tipo, concepto, monto, tipoOrigen, idOrigen, LocalDate.now());
+    }
+
+    private Movement aplicarMovimiento(Account cuenta, MovementType tipo, String concepto,
+                                       Double monto, MovementSourceType tipoOrigen, Long idOrigen,
+                                       LocalDate fecha) {
         Movement movimiento = new Movement();
         movimiento.setAccount(cuenta);
         movimiento.setType(tipo);
         movimiento.setConcept(concepto);
         movimiento.setAmount(monto);
-        movimiento.setDate(LocalDate.now());
+        movimiento.setDate(fecha != null ? fecha : LocalDate.now());
         movimiento.setSourceType(tipoOrigen);
         movimiento.setSourceId(idOrigen);
         Movement guardado = movementRepository.save(movimiento);
@@ -370,14 +379,16 @@ public class TreasuryService {
      *
      * Valida que la cuenta tenga saldo. En Autollantas esa comprobacion vive en el
      * formulario; aqui vive donde se mueve el dinero, que es el unico sitio por el que
-     * pasan todos los egresos.
+     * pasan todos los egresos, la restauracion de una compra anulada incluida. La fecha,
+     * igual que en registrarIngresoDeVenta, es la de negocio.
      */
     @Transactional
-    public Movement registrarEgresoDeCompra(Account cuenta, String concepto, Double monto, Purchase compra) {
+    public Movement registrarEgresoDeCompra(Account cuenta, String concepto, Double monto, Purchase compra,
+                                            LocalDate fecha) {
         Account gestionada = recargar(cuenta);
         exigirSaldoSuficiente(gestionada, monto);
         return aplicarMovimiento(gestionada, MovementType.EGRESO, concepto, monto,
-                MovementSourceType.PURCHASE, compra.getId());
+                MovementSourceType.PURCHASE, compra.getId(), fecha);
     }
 
     /** Lanza InsufficientBalanceException si la cuenta no puede cubrir el monto. */
@@ -413,6 +424,15 @@ public class TreasuryService {
     @Transactional
     public void revertirMovimientosDeVenta(Sale venta) {
         revertir(movimientosDe(MovementSourceType.SALE, venta.getId()));
+    }
+
+    /**
+     * Si queda algun movimiento vivo con ese origen. Una factura ANULADA no deberia tener
+     * ninguno: restaurar lo usa para no duplicar dinero si los datos estan inconsistentes.
+     */
+    @Transactional(readOnly = true)
+    public boolean tieneMovimientos(MovementSourceType tipo, Long id) {
+        return !movimientosDe(tipo, id).isEmpty();
     }
 
     /** Los movimientos de un origen concreto, dentro del tenant activo. */

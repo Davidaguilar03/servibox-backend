@@ -543,7 +543,8 @@ dos**: una factura descuenta inventario y mueve tesoreria.
    ```
 
 5. Si es `CONTADO`: estado `PAGADA` y `TreasuryService.registrarIngresoDeVenta` mete un
-   `INGRESO` por el total en la cuenta. Si es `CREDITO`: estado `PENDIENTE` y tesoreria no
+   `INGRESO` por el total en la cuenta, con concepto `Venta <numero>` y **fecha de la
+   factura** (no la de hoy). Si es `CREDITO`: estado `PENDIENTE` y tesoreria no
    se toca, porque todavia no entro dinero.
 
 **Abonos.** `registrarAbono(saleId, accountId, monto)` crea el `Collection`, registra el
@@ -568,6 +569,26 @@ Una factura ya `ANULADA` no se puede volver a anular: devolveria el stock por se
 Una `PENDIENTE` sin abonos no genero ningun movimiento, asi que el primer paso no hace
 nada y en la practica solo se devuelve el stock, que es el comportamiento de Autollantas.
 
+**Restauracion.** `restaurarFactura(saleId)` es el inverso exacto de la anulacion: lo que
+anular saco, restaurar lo devuelve. Motivo y comparacion con Autollantas en
+[03-DECISIONS.md](03-DECISIONS.md).
+
+* Solo una `ANULADA`; en cualquier otro estado rechaza con `InvalidSaleOperationException`
+  (**400**). Tambien rechaza, sin tocar nada, si queda algun `Movement` vivo con origen
+  `(SALE, id)`: la factura no esta anulada de verdad en tesoreria y recrear duplicaria el
+  dinero.
+* Vuelve a descontar el stock de cada linea con el mismo `descontarStock` de
+  `crearFactura`: si no alcanza, `InsufficientStockException` (**409**) y la transaccion
+  deshace todo.
+* Recrea por `TreasuryService.registrarIngresoDeVenta` los movimientos que la anulacion
+  borro: el `INGRESO` del contado (total, cuenta de la factura, `Venta <numero>`, fecha de
+  la factura) y uno por cada `Collection` (su monto, su cuenta, `Abono factura <numero>`,
+  fecha del abono). Las filas `Collection` sobreviven a la anulacion; de ahi salen. Los
+  conceptos viven en `conceptoVenta` / `conceptoAbono`, compartidos con crear y abonar.
+* El estado se deriva, no se guarda: `CONTADO` queda `PAGADA`; `CREDITO` queda `PAGADA` si
+  el saldo pendiente cae dentro de la tolerancia de un peso (la misma comparacion de
+  `registrarAbono`) y `PENDIENTE` si no.
+
 **Endpoints** (todos requieren JWT)
 
 * `POST /api/sales` (emitir factura)
@@ -575,6 +596,7 @@ nada y en la practica solo se devuelve el stock, que es el comportamiento de Aut
 * `GET /api/sales/{id}`: 404 si no existe para el tenant
 * `POST /api/sales/{id}/collections` (abono)
 * `POST /api/sales/{id}/annul`
+* `POST /api/sales/{id}/restore`
 
 Las respuestas van por DTO (`SaleResponse`, `SaleDetailResponse`, `CollectionResponse`),
 nunca la entidad JPA. `SaleResponse` incluye `pendingBalance` calculado.
@@ -670,6 +692,22 @@ igual que en Sales.
 
 Una compra ya `ANULADA` no se puede volver a anular.
 
+**Restauracion.** `restaurarCompra(purchaseId)`: espejo exacto de `restaurarFactura`.
+
+* Solo una `ANULADA` y sin movimientos vivos con origen `(PURCHASE, id)`
+  (`InvalidPurchaseOperationException`, **400**).
+* Vuelve a sumar el stock (sin validacion: sumar siempre se puede).
+* Recrea por `registrarEgresoDeCompra` el `EGRESO` del contado (`Compra <numero>`, fecha de
+  la factura) y uno por cada `Payment` (`Pago compra <numero>`, fecha del pago). Cada uno
+  pasa por `exigirSaldoSuficiente`, la misma regla de crear y pagar: si alguno no alcanza,
+  `InsufficientBalanceException` (**409**) y la transaccion deshace stock, egresos ya
+  recreados y estado.
+* Estado derivado igual que en ventas: contado `PAGADA`, credito por saldo pendiente.
+* **No toca `purchaseCost` ni `suggestedPrice`**, igual que la anulacion; cubierto por
+  `restaurarNoCambiaElCostoDelProducto`.
+
+El egreso del contado al crear la compra tambien lleva la fecha de la factura.
+
 **Endpoints** (todos requieren JWT)
 
 * `POST /api/purchases`
@@ -677,6 +715,7 @@ Una compra ya `ANULADA` no se puede volver a anular.
 * `GET /api/purchases/{id}`: 404 si no existe para el tenant
 * `POST /api/purchases/{id}/payments`
 * `POST /api/purchases/{id}/annul`
+* `POST /api/purchases/{id}/restore`
 
 ### Modulo Reporting
 
