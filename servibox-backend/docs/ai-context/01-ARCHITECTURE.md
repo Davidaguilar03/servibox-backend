@@ -2,7 +2,20 @@
 
 ## Stack tecnologico
 
+* Java 21, Maven, Lombok.
+* Spring Boot 4.1.1: `webmvc`, `data-jpa`, `security`, `validation`.
+* Hibernate ORM 7.4.5 (el que trae Spring Boot).
+* JWT con `jjwt` 0.12.6 (`api`, `impl`, `jackson`).
+* H2 para local y tests; driver de PostgreSQL ya declarado para produccion, ver Base de
+  datos al final de este archivo.
+
 ## Integracion Spring Boot
+
+Se usa la autoconfiguracion de Spring Boot salvo en tres puntos, cada uno descrito en su
+seccion: el `PlatformTransactionManager` se reemplaza por
+`TenantAwareJpaTransactionManager` (Estrategia multi-tenant), la cadena de seguridad la
+define `SecurityConfig` (Capa de seguridad JWT) y la auditoria JPA se activa con
+`JpaAuditingConfiguration`.
 
 ## Estrategia multi-tenant (tenant_id + filtro Hibernate)
 
@@ -147,6 +160,16 @@ firmado dentro del token.
    esta activo y la busqueda del usuario no puede cruzar de tenant. Y la authority sale
    del rol **en base**, no del claim del token, para que un cambio de rol tampoco tenga
    que esperar a que el token expire.
+7. Al abrir la transaccion, `TenantAwareJpaTransactionManager` toma ese `TenantContext` y
+   habilita el filtro de Hibernate, ver
+   la seccion Estrategia multi-tenant de este mismo archivo.
+
+En resumen: `login -> JWT con tenantId -> JwtAuthenticationFilter -> TenantContext ->
+filtro de Hibernate`. El tenant nunca lo aporta el cliente en claro.
+
+**`TenantContext.clear()` va en un `finally`** dentro del filtro. El pool de hilos de
+Tomcat se reutiliza entre requests: un tenant que quede pegado se filtraria al siguiente
+request atendido por ese hilo.
 
 ### Verificacion de usuario activo en cada request
 
@@ -159,16 +182,6 @@ paga una consulta a `USUARIOS`. Motivo completo en [03-DECISIONS.md](03-DECISION
 una lectura por clave unica `(tenant_id, username)` con indice. Si algun dia el volumen lo
 justifica, la salida tipica es una cache corta en memoria del estado del usuario, con TTL
 de segundos, o una lista de tokens revocados. No esta implementado ni hace falta todavia.
-7. Al abrir la transaccion, `TenantAwareJpaTransactionManager` toma ese `TenantContext` y
-   habilita el filtro de Hibernate, ver
-   la seccion Estrategia multi-tenant de este mismo archivo.
-
-En resumen: `login -> JWT con tenantId -> JwtAuthenticationFilter -> TenantContext ->
-filtro de Hibernate`. El tenant nunca lo aporta el cliente en claro.
-
-**`TenantContext.clear()` va en un `finally`** dentro del filtro. El pool de hilos de
-Tomcat se reutiliza entre requests: un tenant que quede pegado se filtraria al siguiente
-request atendido por ese hilo.
 
 ### Manejo centralizado de errores
 
@@ -183,6 +196,10 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | Excepcion | Codigo | Cuerpo |
 |-|-|-|
 | `IllegalStateException` (tipicamente el `@PrePersist` sin tenant activo) | 400 | mensaje de la excepcion |
+| `IllegalArgumentException` (id del cuerpo que no resuelve, rango de fechas invalido) | 400 | mensaje de la excepcion |
+| `InvalidTransferException`, `InvalidSaleOperationException`, `InvalidPurchaseOperationException` | 400 | mensaje de la excepcion |
+| `DuplicateProductCodeException`, `DuplicateAccountNameException`, `DuplicateInvoiceNumberException`, `DuplicatePurchaseInvoiceNumberException` | 409 | mensaje de la excepcion |
+| `InsufficientStockException`, `InsufficientBalanceException` | 409 | mensaje de la excepcion |
 | `InvalidCredentialsException` y `AuthenticationException` | 401 | "Credenciales invalidas" |
 | `MethodArgumentNotValidException` (fallo de `@Valid`) | 400 | "Peticion invalida" |
 | `ResourceNotFoundException` | 404 | mensaje de la excepcion |
@@ -234,8 +251,9 @@ el username, por eso `LoginRequest` lleva `tenantSlug` ademas de usuario y contr
 ### Datos de prueba local
 
 `config.DevDataInitializer` es un `CommandLineRunner` con `@Profile("dev")`: si la tabla
-de tenants esta vacia crea el tenant `demo` y el usuario `admin`. Solo para probar el
-login en local.
+de tenants esta vacia crea el tenant `demo` y el usuario `admin` (`admin123`), y para ese
+tenant el `TaxType` IVA (0.19, `isVat` true), las 8 categorias por defecto de Autollantas
+con IVA y las 2 cuentas por defecto (ver Modulo Treasury). Solo para probar en local.
 
 ## Estructura de paquetes
 
@@ -244,17 +262,18 @@ Base: `com.servibox.backend`. Un paquete por modulo de negocio, mas tres transve
 | Paquete | Contenido |
 |-|-|
 | `config` | `SecurityConfig`, `JpaAuditingConfiguration`, `JsonAuthenticationEntryPoint`, `DevDataInitializer` |
-| `tenant` | `Tenant`, `TenantContext`, `TenantAwareJpaTransactionManager`, `TenantFilterConfiguration` |
-| `shared` | `TenantAwareEntity`, `ErrorResponse`, `GlobalExceptionHandler` |
-| `auth` | `JwtService`, `JwtAuthenticationFilter`, `AuthController`, mas `entity` / `repository` / `dto` |
+| `tenant` | `Tenant`, `TenantRepository`, `TenantContext`, `TenantAwareJpaTransactionManager`, `TenantFilterConfiguration` |
+| `shared` | `TenantAwareEntity`, `ErrorResponse`, `GlobalExceptionHandler`, `ResourceNotFoundException` |
+| `auth` | `JwtService`, `JwtAuthenticationFilter`, `AuthController`, `InvalidCredentialsException`, mas `entity` / `repository` / `dto` |
 | `inventory` | primer modulo de negocio migrado, ver abajo |
 | `treasury` | segundo modulo de negocio migrado, ver abajo |
 | `sales` | tercer modulo de negocio migrado, ver abajo |
 | `purchases` | cuarto modulo de negocio migrado, ver abajo |
-| `reporting` | vacio todavia |
+| `reporting` | quinto paquete de negocio y ultimo modulo del roadmap, solo lectura, ver abajo |
 
 Los modulos de negocio usan siempre las mismas cinco capas:
-`controller`, `service`, `repository`, `entity`, `dto`.
+`controller`, `service`, `repository`, `entity`, `dto`. Las excepciones de dominio de cada
+modulo viven en su paquete `service`.
 
 ### Modulo Inventory
 
@@ -315,12 +334,6 @@ Las respuestas van siempre por DTO (`CategoryResponse`, `ProductResponse`,
 `TaxTypeResponse`), nunca la entidad JPA: exponerla arrastraria `tenantId` y las
 relaciones EAGER completas al cliente.
 
-**Nota sobre `recalculateMinSalePrice`.** La documentacion previa describia un metodo
-`recalculateMinSalePrice` con un campo `minSalePrice` y un IVA fijo de 0.19. Ese metodo ya
-no existe en Autollantas: fue reemplazado por `recalculatePrices`, y `minSalePrice` no
-existe como campo en ninguna parte del repo. ServiBox porto la version vigente. No
-reintroducir `minSalePrice` sin revisar antes el codigo real.
-
 ### Modulo Treasury
 
 Migrado desde el paquete `treasury` de Autollantas (`model` / `repository` / `service`).
@@ -362,7 +375,7 @@ Todas sus entidades extienden `TenantAwareEntity`.
   | `PURCHASE` | `Purchase` | el EGRESO del contado y el de cada pago |
   | `OCCASIONAL_INCOME` | `OccasionalIncome` | su INGRESO |
   | `OPERATIONAL_EXPENSE` | `OperationalExpense` | su EGRESO |
-  | null | — | movimiento suelto |
+  | null | (nada) | movimiento suelto |
 
   Sustituye a cuatro relaciones `ManyToOne` opcionales, una por origen, que era el diseno
   anterior. **Agregar un origen nuevo ahora es agregar un valor al enum y nada mas**: sin
@@ -445,22 +458,9 @@ Todas sus entidades extienden `TenantAwareEntity`.
 * `balanceGlobal()`: suma de los `currentBalance` de todas las cuentas del tenant activo.
   Es el "Total Global" (`lblTotalGlobal`) de `Accounts.fxml`.
 
-**Cuidado: el `@Filter` de Hibernate no cubre `findById`.**
-El filtro por tenant se aplica a las consultas (HQL, criteria, consultas derivadas de
-Spring Data), pero **no** a `EntityManager.find()`, que es lo que usa el `findById`
-heredado de `JpaRepository`. Es decir, `accountRepository.findById(id)` devuelve la cuenta
-aunque sea de otro tenant. Por eso `TreasuryService.findAccountById` usa la consulta
-derivada `findByIdAndTenantId` y no el `findById` heredado.
-
-Lo detecto el test de aislamiento: `GET /api/treasury/accounts/{id}/movements` con el token
-del tenant equivocado respondia 200 con lista vacia (la lista de movimientos si estaba
-filtrada, porque es una consulta derivada) en vez de rechazar la cuenta ajena. Cualquier
-busqueda por id de una entidad de negocio tiene el mismo problema: **no usar `findById`
-directo en un service multi-tenant.**
-
-El barrido posterior encontro el mismo hueco en los 3 `findById` de `InventoryService`,
-uno de ellos con consecuencia de escritura. Todos corregidos, ver
-[03-DECISIONS.md](03-DECISIONS.md).
+**Cuidado: el `@Filter` de Hibernate no cubre `findById`.** Aqui se detecto el hueco;
+la regla vigente esta en [02-CONVENTIONS.md](02-CONVENTIONS.md) (Busqueda por id) y la
+historia en [03-DECISIONS.md](03-DECISIONS.md).
 
 **Endpoints** (todos requieren JWT)
 
@@ -470,10 +470,10 @@ uno de ellos con consecuencia de escritura. Todos corregidos, ver
 * `POST /api/treasury/transfers`
 * `GET` y `POST` `/api/treasury/occasional-incomes`
 * `GET` y `POST` `/api/treasury/operational-expenses`
-* `PUT /api/treasury/operational-expenses/{id}` — edita el gasto; 404 si no existe para el
+* `PUT /api/treasury/operational-expenses/{id}`: edita el gasto; 404 si no existe para el
   tenant. `PUT` y no `PATCH` porque el cuerpo trae el gasto completo, igual que el
   formulario de Autollantas, que reenvia todos los campos al guardar en modo edicion.
-* `DELETE /api/treasury/operational-expenses/{id}` — **204**; 404 si no existe para el
+* `DELETE /api/treasury/operational-expenses/{id}`: **204**; 404 si no existe para el
   tenant. `DELETE` y no un `/annul` porque el registro desaparece, no queda en estado
   `ANULADA`.
 * `GET /api/treasury/balance` (balance global)
@@ -505,13 +505,17 @@ dos**: una factura descuenta inventario y mueve tesoreria.
   factura a credito no tiene cuenta hasta que se le abona), `paymentMethod`, `status`
   (enum `PAGADA` / `PENDIENTE` / `ANULADA`), `subtotal`, `ivaPorPagar`, `total`.
   Restriccion unica `uk_venta_tenant_invoice_number` sobre
-  `(tenant_id, numero_factura_venta)` — **divergencia deliberada**: Autollantas valida el
+  `(tenant_id, numero_factura_venta)`, **divergencia deliberada**: Autollantas valida el
   numero solo en la aplicacion y no tiene indice unico. Ver
   [03-DECISIONS.md](03-DECISIONS.md).
 * `SaleDetail` (`DETALLE_VENTAS`): `ManyToOne` a `Sale` y a `Product`, `quantity`, `price`
   (unitario sin IVA) e `ivaAmount`, **congelado al facturar**. Cambiarle el IVA a un
   producto no puede mover el IVA de una factura ya emitida, porque esa factura ya se
   entrego y se declaro. Es el mismo campo `iva_generado_linea` de Autollantas.
+  Lleva ademas `ivaDifference` (`diferencia_iva_linea`), el IVA **neto** de la linea
+  (`ivaAmount` menos `producto.taxAmount * quantity`), congelado igual. Lo agrego la
+  migracion de Reporting: el Reporte de IVA reparte el descontable por categoria y
+  necesita el de cada linea, no solo el agregado de la factura.
 * `Collection` (`RECAUDOS`): `ManyToOne` a `Sale` y a `Account`, `amount`, `date`. Es un
   **abono**, ver [02-CONVENTIONS.md](02-CONVENTIONS.md). En Autollantas esta clase vive en
   `treasury`; aqui vive en `sales`, junto a la factura a la que pertenece.
@@ -568,19 +572,16 @@ nada y en la practica solo se devuelve el stock, que es el comportamiento de Aut
 
 * `POST /api/sales` (emitir factura)
 * `GET /api/sales`
-* `GET /api/sales/{id}` — 404 si no existe para el tenant
+* `GET /api/sales/{id}`: 404 si no existe para el tenant
 * `POST /api/sales/{id}/collections` (abono)
 * `POST /api/sales/{id}/annul`
 
 Las respuestas van por DTO (`SaleResponse`, `SaleDetailResponse`, `CollectionResponse`),
 nunca la entidad JPA. `SaleResponse` incluye `pendingBalance` calculado.
 
-**Tasa de IVA: una sola implementacion.** `InventoryService.getIvaRateForProduct(Product)`
-es publico y es de donde la toman tanto el calculo de precios de Inventory como Sales. En
-Autollantas ese `getIvaRate(Product)` esta copiado identico en cuatro sitios
-(`SaleFormController`, `SaleDetailsController`, `ProductsController` y
-`SaleDetailRow.ivaRate()`) y la propia documentacion del proyecto lo marca como candidato
-a centralizar. **No volver a copiarlo.**
+**Tasa de IVA:** sale de `InventoryService.getIvaRateForProduct(Product)`, la misma que
+usan Inventory y Purchases. Regla en [02-CONVENTIONS.md](02-CONVENTIONS.md) (Calculos que
+no se copian).
 
 ### Modulo Purchases
 
@@ -673,8 +674,90 @@ Una compra ya `ANULADA` no se puede volver a anular.
 
 * `POST /api/purchases`
 * `GET /api/purchases`
-* `GET /api/purchases/{id}` — 404 si no existe para el tenant
+* `GET /api/purchases/{id}`: 404 si no existe para el tenant
 * `POST /api/purchases/{id}/payments`
 * `POST /api/purchases/{id}/annul`
 
+### Modulo Reporting
+
+Ultimo de los 7 bloques del roadmap original (infraestructura multi-tenant, auth,
+Inventory, Treasury, Sales, Purchases, Reporting); ingresos ocasionales y gastos
+operativos entraron como parte de Treasury. Migrado desde
+`reporting/service/DashboardService` y `ReportService.buildReporteIva` de Autollantas.
+
+**No tiene entidades propias ni escribe nada.** Agrega los datos de todos los modulos
+anteriores: `Sale` y `SaleDetail` (Sales), `Purchase` (Purchases), `OperationalExpense` y
+`OccasionalIncome` (Treasury), y la categoria de `Product` (Inventory). Las consultas viven
+en los repositorios de cada modulo (`sumTotalByStatusNot...`, `findBy...DateBetween...`),
+no en `reporting/repository`, que sigue vacio: la consulta pertenece a la entidad que lee.
+El aislamiento por tenant lo da el filtro de Hibernate, porque todas son consultas JPQL o
+derivadas; ninguna pasa por `findById`.
+
+**Regla de exclusion.** Las facturas de venta y de compra en `ANULADA` no cuentan en
+nada: ni KPIs, ni movimientos, ni Reporte de IVA. El filtro es por **estado**
+(`status <> ANULADA`), no por historia, asi que una factura que vuelva a `PENDIENTE`
+vuelve a contar sin mas. Gastos operativos e ingresos ocasionales no tienen estado: se
+eliminan, y al eliminarse desaparecen solos.
+
+**`ReportingService`**
+
+* `getGlobalKpis()`: los 5 KPIs sobre todo el historico del tenant.
+* `getPeriodKpis(desde, hasta)`: los mismos 5, por `invoiceDate` de la factura o `date`
+  del gasto dentro de `[desde, hasta]`, ambos inclusive. Dos metodos y dos consultas por
+  cifra, no uno con fechas opcionales: un `(:desde IS NULL OR ...)` en JPQL da problemas de
+  tipado en PostgreSQL.
+
+  ```
+  totalSales        = suma(Sale.total)            sin ANULADA
+  totalPurchases    = suma(Purchase.total)        sin ANULADA
+  grossProfit       = totalSales - totalPurchases
+  operatingExpenses = suma(OperationalExpense.amount)
+  netProfit         = grossProfit - operatingExpenses
+  ```
+
+  Los totales son **con IVA**, que es lo que guarda `total`. Los ingresos ocasionales no
+  entran en ningun KPI.
+* `getMovements(desde, hasta)`: ventas, compras, gastos e ingresos ocasionales del rango
+  como renglones (`VENTA`, `COMPRA`, `GASTO`, `INGRESO`), del mas reciente al mas antiguo y
+  cortado en `MAX_MOVEMENTS` (100), igual que Autollantas. No son `Movement` de tesoreria:
+  son los documentos de negocio. Una venta a credito aparece aunque no haya movido caja.
+* `buildReporteIva(desde, hasta)`: por cada linea de venta no anulada del rango, agrupa
+  por nombre de categoria del producto:
+
+  ```
+  ivaGenerado    = suma(SaleDetail.ivaAmount)
+  ivaNeto        = suma(SaleDetail.ivaDifference)
+  ivaDescontable = ivaGenerado - ivaNeto
+  ```
+
+  Ordena por IVA generado descendente y agrega el resumen: facturas con IVA, y los tres
+  totales. Las lineas con IVA generado cero se ignoran, como en Autollantas. Los dos campos
+  estan congelados al facturar, asi que una compra posterior que cambie el `taxAmount` del
+  producto no mueve el reporte de un periodo ya facturado.
+
+Rangos: `desde` y `hasta` son obligatorios en periodo, movimientos e IVA; si falta uno, o
+`desde` es posterior a `hasta`, el service lanza `IllegalArgumentException` (**400**).
+
+**Endpoints** (todos requieren JWT, todos `GET`, todos JSON)
+
+* `/api/reporting/kpis`: sin parametros, KPIs globales. Con `desde` y `hasta` (ISO,
+  `2026-09-01`), KPIs del periodo. Una sola ruta porque la respuesta es el mismo DTO;
+  `desde` / `hasta` vuelven null en el global.
+* `/api/reporting/movements?desde=...&hasta=...`
+* `/api/reporting/iva?desde=...&hasta=...`
+
+DTOs: `KpisResponse`, `MovementSummaryResponse`, `IvaReportResponse` con su lista de
+`IvaCategoryResponse`. **No hay PDF ni Excel**, decision deliberada en
+[03-DECISIONS.md](03-DECISIONS.md).
+
 ## Base de datos
+
+* Nombres fisicos en espanol: tablas en mayusculas y plural (`VENTAS`, `DETALLE_VENTAS`,
+  `GASTOS_OPERATIVOS`), columnas en `snake_case` (`numero_factura_venta`, `fecha_gasto`).
+  Todas las tablas de negocio llevan `tenant_id`, ver Estrategia multi-tenant.
+* Tests: H2 en memoria con `ddl-auto=create-drop` (`src/test/resources/application-test.properties`).
+* Local: `application.properties` no declara datasource ni `ddl-auto`; manda la
+  autoconfiguracion de Spring Boot sobre la H2 embebida.
+* Sin Flyway ni Liquibase todavia: el esquema lo genera Hibernate desde las entidades.
+  Pendiente antes de produccion con PostgreSQL, ver *Estado de la gestion del esquema* en
+  [03-DECISIONS.md](03-DECISIONS.md).

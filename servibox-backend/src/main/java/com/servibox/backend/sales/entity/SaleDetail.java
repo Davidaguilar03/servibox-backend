@@ -40,4 +40,13 @@ public class SaleDetail extends TenantAwareEntity {
      */
     @Column(name = "iva_generado_linea")
     private Double ivaAmount;
+
+    /**
+     * IVA neto a pagar de la linea: ivaAmount menos el IVA descontable de esas unidades
+     * (producto.taxAmount * cantidad), congelado al facturar igual que ivaAmount. El
+     * descontable se deduce como ivaAmount - ivaDifference. Lo usa el Reporte de IVA para
+     * repartir el descontable por categoria. Es el diferencia_iva_linea de Autollantas.
+     */
+    @Column(name = "diferencia_iva_linea")
+    private Double ivaDifference;
 }
