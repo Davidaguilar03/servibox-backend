@@ -499,7 +499,8 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
   **No se sembraron datos de prueba**: `BasicDataInitializer` de Autollantas no crea ningun
   ingreso ocasional por defecto, asi que `DevDataInitializer` se dejo intacto.
 
-* Nota sobre los origenes de `Movement`: van tres relaciones opcionales
+* Nota sobre los origenes de `Movement` (**superada** el mismo dia por el par
+  `(tipo, id)`, ver entrada correspondiente): van tres relaciones opcionales
   (`sourceTransfer`, `sourceSale`, `sourceOccasionalIncome`). Al introducir la segunda se
   dejo dicho que con dos casos generalizar era pagar por adelantado; con tres la cuenta
   sigue saliendo, porque cada una se borra con su propia consulta derivada y la base las
@@ -556,6 +557,9 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
 
 ## 2026-09-07: Movement.sourceSale, y que treasury conozca a sales
 
+> **SUPERADO** por "El origen de un Movement pasa a ser (tipo, id)": `sourceSale` ya no
+> existe, hoy es `(SALE, id)`. La entrada se conserva por el razonamiento.
+
 * Decision: `Movement` gana un `ManyToOne` **opcional** a `Sale`
   (`id_venta_origen`, nullable), hermano de `sourceTransfer`. Entre los dos cubren los dos
   origenes automaticos que hoy existen. `MovementResponse` expone `sourceSaleId`.
@@ -606,6 +610,10 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
     su propia reversion de stock y de caja. Fuera del alcance de esta migracion.
 
 ## 2026-09-07: La transferencia genera sus dos movimientos, con relacion al Transfer
+
+> **Parcialmente SUPERADO:** la generacion de los dos movimientos sigue vigente, pero la
+> relacion `sourceTransfer` se reemplazo por `(TRANSFER, id)`, ver "El origen de un
+> Movement pasa a ser (tipo, id)".
 
 * Decision: `registrarTransferencia` ya no toca `currentBalance` directamente. Guarda el
   `Transfer` y llama dos veces a `aplicarMovimiento`, un `EGRESO` en el origen y un
@@ -734,8 +742,8 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
 * Motivo: el par `(tabla_origen, id_origen)` es una referencia polimorfica a las tablas
   `VENTAS`, `COMPRAS`, `RECAUDOS`, `PAGOS`, `GASTOS_OPERATIVOS`, `INGRESOS_OCASIONALES` y
   `TRANSFERENCIAS` (de esas, `TRANSFERENCIAS`, `VENTAS`, `RECAUDOS` e
-  `INGRESOS_OCASIONALES` ya existen en ServiBox, cada una como su propia relacion opcional
-  en `Movement`). Cuando se escribio esta entrada ninguno de esos modulos existia: portarla
+  `INGRESOS_OCASIONALES` ya existen en ServiBox; hoy todas se referencian con el par
+  `sourceType` / `sourceId`). Cuando se escribio esta entrada ninguno de esos modulos existia: portarla
   entonces habria sido
   copiar una clave foranea sin integridad referencial que apunta a tablas ausentes, y un
   `switch` sobre nombres de tabla en `String`. Una columna `concept` da la misma

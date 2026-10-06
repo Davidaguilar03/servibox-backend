@@ -2,11 +2,40 @@
 
 ## Convenciones de nombres
 
+* Entidades, campos, DTOs y repositorios en ingles (`Sale.invoiceDate`,
+  `findByIdAndTenantId`). Tablas y columnas en espanol, ver Base de datos en
+  [01-ARCHITECTURE.md](01-ARCHITECTURE.md).
+* Operaciones de negocio de los services en espanol (`crearFactura`, `registrarAbono`,
+  `anularFactura`, `registrarGastoOperativo`). Inventory conserva los nombres en ingles
+  portados de Autollantas (`saveProduct`, `recalculatePrices`).
+* Restricciones unicas: `uk_<entidad>_tenant_<campo>`, ver Unicidad mas abajo.
+* Rutas: `/api/<modulo>/<recurso-en-plural-kebab>`; acciones sobre un recurso como
+  subruta `POST` (`/{id}/annul`, `/{id}/collections`, `/{id}/payments`).
+* Tests: nombre en espanol que describe el comportamiento
+  (`anularNoRevierteElCostoDelProducto`).
+
 ## Estilo de codigo
+
+* Lombok para getters, setters y constructores (`@RequiredArgsConstructor` para inyeccion).
+* Todo lo que mueve dinero pasa por `TreasuryService`; ningun otro modulo toca
+  `AccountRepository` ni `MovementRepository`. El stock si se ajusta directo:
+  `SalesService` y `PurchasesService` usan `ProductRepository`, y los calculos de precio e
+  IVA los piden a `InventoryService`.
 
 ## Manejo de errores
 
+Excepciones de dominio en el paquete `service` de su modulo, traducidas en un solo sitio,
+`GlobalExceptionHandler`. Tabla de codigos en [01-ARCHITECTURE.md](01-ARCHITECTURE.md)
+(Manejo centralizado de errores). Criterio: duplicado o falta de stock / saldo es **409**;
+operacion no permitida por el estado del documento es **400**; recurso de ruta es **404**,
+ver Busqueda por id mas abajo.
+
 ## Formato de respuestas API (DTOs)
+
+Todos los DTOs son `record` en el paquete `dto` del modulo: `XxxRequest` de entrada
+(validado con `@Valid`) y `XxxResponse` de salida. Un controlador nunca devuelve una
+entidad JPA: arrastraria `tenantId` y relaciones EAGER. Los valores calculados que no son
+columna (por ejemplo `pendingBalance`) se exponen en el `Response`.
 
 ## Terminologia de negocio
 
@@ -98,8 +127,8 @@ producto en negativo.
 | IVA Neto a Pagar | Generado menos Descontable, `SaleDetail.ivaDifference` | Por linea es el mismo concepto que `Sale.ivaPorPagar` por factura |
 | Movimiento (en Reporting) | Un documento de negocio resumido: `VENTA`, `COMPRA`, `GASTO`, `INGRESO` | **No es un `Movement` de tesoreria.** Una venta a credito es un movimiento del dashboard aunque no haya movido ninguna cuenta |
 
-Regla de exclusion en todo Reporting: `ANULADA` no cuenta, y el filtro es por estado, no
-por historia. Una factura restaurada a `PENDIENTE` vuelve a contar.
+Regla de exclusion de `ANULADA`: ver Modulo Reporting en
+[01-ARCHITECTURE.md](01-ARCHITECTURE.md).
 
 ### Unicidad en entidades multi-tenant
 
@@ -127,9 +156,9 @@ la validacion siempre excluye el propio registro.
 **No usar el `findById` heredado de `JpaRepository`.** El `@Filter` de Hibernate no se
 aplica a `EntityManager.find()`, asi que devuelve la fila aunque sea de otro tenant. Usar
 una consulta derivada, por convencion `findByIdAndTenantId(id, TenantContext.getTenantId())`.
-Detalle y como se detecto en [01-ARCHITECTURE.md](01-ARCHITECTURE.md), seccion Modulo
-Treasury. Aplicado ya en `Account`, `Product`, `ProductCategory`, `Sale`, `Customer`,
-`Purchase`, `Supplier` y `OccasionalIncome`; no queda ningun `findById` heredado sobre una
+Como se detecto en [03-DECISIONS.md](03-DECISIONS.md). Aplicado ya en `Account`,
+`Product`, `ProductCategory`, `Sale`, `Customer`, `Purchase`, `Supplier`,
+`OccasionalIncome` y `OperationalExpense`; no queda ningun `findById` heredado sobre una
 entidad `TenantAware`.
 
 Y el codigo de respuesta: un recurso pedido **por la ruta** que no aparece para el tenant
