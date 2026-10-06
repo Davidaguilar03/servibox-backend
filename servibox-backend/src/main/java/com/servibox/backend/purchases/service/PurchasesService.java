@@ -15,6 +15,7 @@ import com.servibox.backend.purchases.repository.PurchaseRepository;
 import com.servibox.backend.purchases.repository.SupplierRepository;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
+import com.servibox.backend.treasury.entity.MovementSourceType;
 import com.servibox.backend.treasury.service.TreasuryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -184,7 +185,7 @@ public class PurchasesService {
         if (paymentType == PaymentType.CONTADO) {
             guardada.setStatus(PurchaseStatus.PAGADA);
             treasuryService.registrarEgresoDeCompra(
-                    cuenta, "Compra " + invoiceNumber, total, guardada);
+                    cuenta, conceptoCompra(guardada), total, guardada, guardada.getInvoiceDate());
         } else {
             guardada.setStatus(PurchaseStatus.PENDIENTE);
         }
@@ -226,8 +227,7 @@ public class PurchasesService {
         Payment guardado = paymentRepository.save(pago);
 
         // registrarEgresoDeCompra ya exige saldo suficiente.
-        treasuryService.registrarEgresoDeCompra(
-                cuenta, "Pago compra " + compra.getInvoiceNumber(), monto, compra);
+        treasuryService.registrarEgresoDeCompra(cuenta, conceptoPago(compra), monto, compra, guardado.getDate());
 
         if (saldoPendiente(compra) <= TOLERANCIA_PESOS) {
             compra.setStatus(PurchaseStatus.PAGADA);
@@ -291,6 +291,65 @@ public class PurchasesService {
 
         compra.setStatus(PurchaseStatus.ANULADA);
         return purchaseRepository.save(compra);
+    }
+
+    /**
+     * Saca una compra de la papelera: espejo exacto de SalesService.restaurarFactura y
+     * inverso exacto de anularFactura. Vuelve a sumar el stock (sumar siempre se puede) y
+     * recrea los egresos que la anulacion borro, el del contado y uno por cada pago, con su
+     * concepto, cuenta, monto y fecha originales.
+     *
+     * Cada egreso pasa por registrarEgresoDeCompra, que exige saldo suficiente igual que al
+     * comprar o pagar: si alguno no alcanza, InsufficientBalanceException y la transaccion
+     * deshace stock, egresos ya recreados y estado. Rechaza tambien si quedara algun
+     * movimiento vivo con origen (PURCHASE, id).
+     *
+     * Como la anulacion, **no toca el `purchaseCost`** ni el precio sugerido. Ver
+     * 03-DECISIONS.md.
+     */
+    @Transactional
+    public Purchase restaurarCompra(Long purchaseId) {
+        Purchase compra = findPurchaseById(purchaseId)
+                .orElseThrow(() -> new IllegalArgumentException("Compra no encontrada: " + purchaseId));
+
+        if (compra.getStatus() != PurchaseStatus.ANULADA) {
+            throw new InvalidPurchaseOperationException("Solo se puede restaurar una compra ANULADA, y la "
+                    + compra.getInvoiceNumber() + " esta " + compra.getStatus());
+        }
+        if (treasuryService.tieneMovimientos(MovementSourceType.PURCHASE, compra.getId())) {
+            throw new InvalidPurchaseOperationException("Inconsistencia: la compra " + compra.getInvoiceNumber()
+                    + " esta ANULADA pero todavia tiene movimientos de tesoreria; no se restaura");
+        }
+
+        for (PurchaseDetail detalle : purchaseDetailRepository.findByPurchaseId(compra.getId())) {
+            aumentarStock(detalle.getProduct(), detalle.getQuantity());
+        }
+
+        if (compra.getPaymentType() == PaymentType.CONTADO) {
+            treasuryService.registrarEgresoDeCompra(
+                    compra.getAccount(), conceptoCompra(compra), compra.getTotal(), compra, compra.getInvoiceDate());
+        }
+        for (Payment pago : paymentRepository.findByPurchaseId(compra.getId())) {
+            treasuryService.registrarEgresoDeCompra(
+                    pago.getAccount(), conceptoPago(compra), pago.getAmount(), compra, pago.getDate());
+        }
+
+        if (compra.getPaymentType() == PaymentType.CONTADO || saldoPendiente(compra) <= TOLERANCIA_PESOS) {
+            compra.setStatus(PurchaseStatus.PAGADA);
+        } else {
+            compra.setStatus(PurchaseStatus.PENDIENTE);
+        }
+        return purchaseRepository.save(compra);
+    }
+
+    /** Concepto del egreso de una compra de contado. Unica copia del texto. */
+    private static String conceptoCompra(Purchase compra) {
+        return "Compra " + compra.getInvoiceNumber();
+    }
+
+    /** Concepto del egreso de un pago al proveedor. Unica copia del texto. */
+    private static String conceptoPago(Purchase compra) {
+        return "Pago compra " + compra.getInvoiceNumber();
     }
 
     /** Lo que falta por pagarle al proveedor: el total menos los pagos ya hechos. */

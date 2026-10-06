@@ -15,6 +15,7 @@ import com.servibox.backend.sales.repository.SaleDetailRepository;
 import com.servibox.backend.sales.repository.SaleRepository;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
+import com.servibox.backend.treasury.entity.MovementSourceType;
 import com.servibox.backend.treasury.service.TreasuryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -176,7 +177,7 @@ public class SalesService {
         if (paymentType == PaymentType.CONTADO) {
             guardada.setStatus(SaleStatus.PAGADA);
             treasuryService.registrarIngresoDeVenta(
-                    cuenta, "Venta " + invoiceNumber, guardada.getTotal(), guardada);
+                    cuenta, conceptoVenta(guardada), guardada.getTotal(), guardada, guardada.getInvoiceDate());
         } else {
             guardada.setStatus(SaleStatus.PENDIENTE);
         }
@@ -217,8 +218,7 @@ public class SalesService {
         abono.setDate(LocalDate.now());
         Collection guardado = collectionRepository.save(abono);
 
-        treasuryService.registrarIngresoDeVenta(
-                cuenta, "Abono factura " + venta.getInvoiceNumber(), monto, venta);
+        treasuryService.registrarIngresoDeVenta(cuenta, conceptoAbono(venta), monto, venta, guardado.getDate());
 
         if (saldoPendiente(venta) <= TOLERANCIA_PESOS) {
             venta.setStatus(SaleStatus.PAGADA);
@@ -262,6 +262,66 @@ public class SalesService {
 
         venta.setStatus(SaleStatus.ANULADA);
         return saleRepository.save(venta);
+    }
+
+    /**
+     * Saca una factura de la papelera: es el inverso exacto de anularFactura. Lo que la
+     * anulacion saco, esto lo devuelve:
+     *
+     * * Vuelve a descontar el stock con el mismo descontarStock de crearFactura.
+     * * Recrea en tesoreria los movimientos que la anulacion borro, con su concepto, cuenta,
+     *   monto y fecha originales: el ingreso del contado y uno por cada abono, cuyas filas
+     *   Collection siguen ahi despues de anular.
+     * * El estado se deriva de los datos, igual que al crear o abonar: contado PAGADA,
+     *   credito PAGADA o PENDIENTE segun el saldo pendiente.
+     *
+     * Si quedara algun movimiento vivo con origen (SALE, id), la factura no esta anulada de
+     * verdad en tesoreria y recrear duplicaria el dinero: se rechaza sin tocar nada. Si una
+     * linea no tiene stock, la transaccion deshace todo. Ver 03-DECISIONS.md.
+     */
+    @Transactional
+    public Sale restaurarFactura(Long saleId) {
+        Sale venta = findSaleById(saleId)
+                .orElseThrow(() -> new IllegalArgumentException("Factura no encontrada: " + saleId));
+
+        if (venta.getStatus() != SaleStatus.ANULADA) {
+            throw new InvalidSaleOperationException("Solo se puede restaurar una factura ANULADA, y la "
+                    + venta.getInvoiceNumber() + " esta " + venta.getStatus());
+        }
+        if (treasuryService.tieneMovimientos(MovementSourceType.SALE, venta.getId())) {
+            throw new InvalidSaleOperationException("Inconsistencia: la factura " + venta.getInvoiceNumber()
+                    + " esta ANULADA pero todavia tiene movimientos de tesoreria; no se restaura");
+        }
+
+        for (SaleDetail detalle : saleDetailRepository.findBySaleId(venta.getId())) {
+            descontarStock(detalle.getProduct(), detalle.getQuantity());
+        }
+
+        if (venta.getPaymentType() == PaymentType.CONTADO) {
+            treasuryService.registrarIngresoDeVenta(
+                    venta.getAccount(), conceptoVenta(venta), venta.getTotal(), venta, venta.getInvoiceDate());
+        }
+        for (Collection abono : collectionRepository.findBySaleId(venta.getId())) {
+            treasuryService.registrarIngresoDeVenta(
+                    abono.getAccount(), conceptoAbono(venta), abono.getAmount(), venta, abono.getDate());
+        }
+
+        if (venta.getPaymentType() == PaymentType.CONTADO || saldoPendiente(venta) <= TOLERANCIA_PESOS) {
+            venta.setStatus(SaleStatus.PAGADA);
+        } else {
+            venta.setStatus(SaleStatus.PENDIENTE);
+        }
+        return saleRepository.save(venta);
+    }
+
+    /** Concepto del ingreso de una venta de contado. Unica copia del texto. */
+    private static String conceptoVenta(Sale venta) {
+        return "Venta " + venta.getInvoiceNumber();
+    }
+
+    /** Concepto del ingreso de un abono. Unica copia del texto. */
+    private static String conceptoAbono(Sale venta) {
+        return "Abono factura " + venta.getInvoiceNumber();
     }
 
     /** Lo que falta por cobrar de una factura: su total menos los abonos ya recibidos. */

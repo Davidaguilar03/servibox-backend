@@ -20,7 +20,6 @@ import com.servibox.backend.sales.entity.Customer;
 import com.servibox.backend.sales.entity.PaymentType;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.sales.entity.SaleStatus;
-import com.servibox.backend.sales.repository.SaleRepository;
 import com.servibox.backend.sales.service.SalesService;
 import com.servibox.backend.tenant.Tenant;
 import com.servibox.backend.tenant.TenantContext;
@@ -89,9 +88,6 @@ class ReportingTest {
 
     @Autowired
     private InventoryService inventoryService;
-
-    @Autowired
-    private SaleRepository saleRepository;
 
     @Autowired
     private TenantRepository tenantRepository;
@@ -249,11 +245,8 @@ class ReportingTest {
                 .extracting(MovementSummaryResponse::sourceId)
                 .doesNotContain(anulada.getId());
 
-        // Restaurar: ServiBox todavia no tiene la operacion (ver 02-CONVENTIONS.md), asi que
-        // se simula el estado que dejaria. El reporte filtra por estado, no por historia.
-        Sale restaurada = saleRepository.findByIdAndTenantId(anulada.getId(), tenantUno).orElseThrow();
-        restaurada.setStatus(SaleStatus.PENDIENTE);
-        saleRepository.save(restaurada);
+        // El reporte filtra por estado, no por historia: al restaurarla vuelve a contar.
+        assertThat(salesService.restaurarFactura(anulada.getId()).getStatus()).isEqualTo(SaleStatus.PENDIENTE);
 
         assertThat(reportingService.getGlobalKpis().totalSales()).isCloseTo(595.0, within(DELTA));
         assertThat(reportingService.getPeriodKpis(desde, hasta).totalSales()).isCloseTo(595.0, within(DELTA));

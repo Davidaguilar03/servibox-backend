@@ -284,4 +284,32 @@ class PurchasesTenantIsolationTest {
     void comprasExigeAutenticacion() throws Exception {
         mockMvc.perform(get("/api/purchases")).andExpect(status().isUnauthorized());
     }
+
+    @Test
+    void restaurarUnaCompraAjenaNoEsPosible() throws Exception {
+        Purchase deUno = comprarEn(tenantUno, "FAC-UNO", "LLA-UNO", "900000001");
+        TenantContext.setTenantId(tenantUno);
+        purchasesService.anularFactura(deUno.getId());
+        TenantContext.clear();
+
+        mockMvc.perform(post("/api/purchases/" + deUno.getId() + "/restore")
+                        .header("Authorization", "Bearer " + tokenDos))
+                .andExpect(status().isNotFound());
+
+        TenantContext.setTenantId(tenantUno);
+        assertThat(purchasesService.findPurchaseById(deUno.getId()).orElseThrow().getStatus())
+                .isEqualTo(PurchaseStatus.ANULADA);
+        TenantContext.clear();
+
+        // Su dueno si puede.
+        mockMvc.perform(post("/api/purchases/" + deUno.getId() + "/restore")
+                        .header("Authorization", "Bearer " + tokenUno))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PENDIENTE"));
+    }
+
+    @Test
+    void restaurarCompraExigeAutenticacion() throws Exception {
+        mockMvc.perform(post("/api/purchases/1/restore")).andExpect(status().isUnauthorized());
+    }
 }

@@ -251,4 +251,32 @@ class SalesTenantIsolationTest {
     void ventasExigeAutenticacion() throws Exception {
         mockMvc.perform(get("/api/sales")).andExpect(status().isUnauthorized());
     }
+
+    @Test
+    void restaurarUnaFacturaAjenaNoEsPosible() throws Exception {
+        Sale deUno = facturarEn(tenantUno, "VEN-UNO", "LLA-UNO", "900000001");
+        TenantContext.setTenantId(tenantUno);
+        salesService.anularFactura(deUno.getId());
+        TenantContext.clear();
+
+        mockMvc.perform(post("/api/sales/" + deUno.getId() + "/restore")
+                        .header("Authorization", "Bearer " + tokenDos))
+                .andExpect(status().isNotFound());
+
+        TenantContext.setTenantId(tenantUno);
+        assertThat(salesService.findSaleById(deUno.getId()).orElseThrow().getStatus())
+                .isEqualTo(SaleStatus.ANULADA);
+        TenantContext.clear();
+
+        // Su dueno si puede; era de contado, vuelve PAGADA.
+        mockMvc.perform(post("/api/sales/" + deUno.getId() + "/restore")
+                        .header("Authorization", "Bearer " + tokenUno))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PAGADA"));
+    }
+
+    @Test
+    void restaurarFacturaExigeAutenticacion() throws Exception {
+        mockMvc.perform(post("/api/sales/1/restore")).andExpect(status().isUnauthorized());
+    }
 }
