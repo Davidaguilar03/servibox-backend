@@ -1,5 +1,6 @@
 package com.servibox.backend.purchases.dto;
 
+import com.servibox.backend.counterparties.dto.CounterpartyResponse;
 import com.servibox.backend.purchases.entity.PaymentType;
 import com.servibox.backend.purchases.entity.Purchase;
 import com.servibox.backend.purchases.entity.PurchaseDetail;
@@ -11,8 +12,7 @@ import java.util.List;
 public record PurchaseResponse(
         Long id,
         String invoiceNumber,
-        Long supplierId,
-        String supplierName,
+        CounterpartyResponse supplier,
         LocalDate invoiceDate,
         LocalDate dueDate,
         PaymentType paymentType,
@@ -32,8 +32,7 @@ public record PurchaseResponse(
         return new PurchaseResponse(
                 purchase.getId(),
                 purchase.getInvoiceNumber(),
-                purchase.getSupplier() != null ? purchase.getSupplier().getId() : null,
-                purchase.getSupplier() != null ? purchase.getSupplier().getName() : null,
+                CounterpartyResponse.from(purchase.getSupplier()),
                 purchase.getInvoiceDate(),
                 purchase.getDueDate(),
                 purchase.getPaymentType(),

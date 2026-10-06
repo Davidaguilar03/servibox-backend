@@ -4,14 +4,17 @@ import com.jayway.jsonpath.JsonPath;
 import com.servibox.backend.auth.entity.Role;
 import com.servibox.backend.auth.entity.User;
 import com.servibox.backend.auth.repository.UserRepository;
+import com.servibox.backend.counterparties.entity.Counterparty;
+import com.servibox.backend.counterparties.entity.CounterpartyRole;
+import com.servibox.backend.counterparties.entity.DocumentType;
+import com.servibox.backend.counterparties.repository.CounterpartyRepository;
+import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
 import com.servibox.backend.purchases.entity.PaymentType;
 import com.servibox.backend.purchases.entity.Purchase;
 import com.servibox.backend.purchases.entity.PurchaseStatus;
-import com.servibox.backend.purchases.entity.Supplier;
 import com.servibox.backend.purchases.repository.PurchaseRepository;
-import com.servibox.backend.purchases.repository.SupplierRepository;
 import com.servibox.backend.purchases.service.PurchasesService;
 import com.servibox.backend.sales.SalesFixture;
 import com.servibox.backend.tenant.Tenant;
@@ -65,7 +68,10 @@ class PurchasesTenantIsolationTest {
     private PurchaseRepository purchaseRepository;
 
     @Autowired
-    private SupplierRepository supplierRepository;
+    private CounterpartyRepository counterpartyRepository;
+
+    @Autowired
+    private CounterpartyService counterpartyService;
 
     @Autowired
     private TenantRepository tenantRepository;
@@ -136,11 +142,7 @@ class PurchasesTenantIsolationTest {
             ProductCategory categoria = fixture.crearCategoriaConIva();
             Product producto = fixture.crearProducto(categoria, codigoProducto, 100000.0, 10);
 
-            Supplier proveedor = new Supplier();
-            proveedor.setName("Proveedor " + nit);
-            proveedor.setBusinessName("Proveedor " + nit + " S.A.S.");
-            proveedor.setDocument(nit);
-            Supplier guardado = purchasesService.saveSupplier(proveedor);
+            Counterparty guardado = fixture.crearProveedor("Proveedor " + nit, nit);
 
             return purchasesService.crearFactura(numero, guardado, LocalDate.now(), null,
                     PaymentType.CREDITO, null, null,
@@ -183,7 +185,7 @@ class PurchasesTenantIsolationTest {
                 .andExpect(jsonPath("$.status").value("PENDIENTE"))
                 .andExpect(jsonPath("$.details.length()").value(1))
                 .andExpect(jsonPath("$.details[0].productCode").value("LLA-UNO"))
-                .andExpect(jsonPath("$.supplierName").value("Proveedor 900000001"));
+                .andExpect(jsonPath("$.supplier.name").value("Proveedor 900000001"));
     }
 
     /** Ni los detalles ni los proveedores del otro tenant se cuelan. */
@@ -193,8 +195,8 @@ class PurchasesTenantIsolationTest {
         comprarEn(tenantDos, "FAC-DOS", "LLA-DOS", "900000002");
 
         TenantContext.setTenantId(tenantUno);
-        assertThat(purchasesService.findAllSuppliers())
-                .extracting(Supplier::getDocument)
+        assertThat(counterpartyService.findAll())
+                .extracting(Counterparty::getDocumentNumber)
                 .containsExactly("900000001");
 
         Purchase deUno = purchasesService.findAllPurchases().get(0);
@@ -245,7 +247,7 @@ class PurchasesTenantIsolationTest {
 
     /**
      * La validacion del service no reemplaza a la restriccion de base. Esto prueba que
-     * uk_compra_tenant_invoice_number y uk_proveedor_tenant_document existen en el DDL, que
+     * uk_compra_tenant_invoice_number y uk_tercero_tenant_document existen en el DDL, que
      * es la divergencia deliberada frente a Autollantas.
      */
     @Test
@@ -256,8 +258,8 @@ class PurchasesTenantIsolationTest {
         assertThatThrownBy(() -> purchaseRepository.saveAndFlush(compraCruda("FAC-CRUDA")))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
-        supplierRepository.saveAndFlush(proveedorCrudo("900555444"));
-        assertThatThrownBy(() -> supplierRepository.saveAndFlush(proveedorCrudo("900555444")))
+        counterpartyRepository.saveAndFlush(proveedorCrudo("900555444"));
+        assertThatThrownBy(() -> counterpartyRepository.saveAndFlush(proveedorCrudo("900555444")))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
@@ -273,10 +275,12 @@ class PurchasesTenantIsolationTest {
         return compra;
     }
 
-    private Supplier proveedorCrudo(String nit) {
-        Supplier proveedor = new Supplier();
+    private Counterparty proveedorCrudo(String nit) {
+        Counterparty proveedor = new Counterparty();
+        proveedor.setRole(CounterpartyRole.PROVEEDOR);
         proveedor.setName("Proveedor " + nit);
-        proveedor.setDocument(nit);
+        proveedor.setDocumentType(DocumentType.NIT);
+        proveedor.setDocumentNumber(nit);
         return proveedor;
     }
 

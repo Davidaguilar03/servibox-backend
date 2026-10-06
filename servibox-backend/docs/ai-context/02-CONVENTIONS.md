@@ -80,6 +80,15 @@ Los campos de fecha de negocio en Autollantas se nombran `fecha_<entidad>`
 siempre `date`. Los de concepto se nombran `concepto_<entidad>` y en Java son siempre
 `concept`. La convencion se mantiene en ServiBox.
 
+### Terceros
+
+| Termino | Significado | Cuidado |
+|-|-|-|
+| **Tercero** | Persona o empresa con la que el taller comercia (`TERCEROS`) | En el codigo se llama **`Counterparty`**. No hay entidades `Customer` ni `Supplier`: **cliente y proveedor son roles de un tercero** (`CounterpartyRole`), no tipos distintos |
+| `CLIENTE` / `PROVEEDOR` / `AMBOS` | Rol del tercero (`tipo_tercero`) | Un tercero que se usa en el otro rol pasa a `AMBOS`; nunca se duplica por documento |
+| `customer` / `supplier` | El tercero de una venta / de una compra | Son nombres del **campo** en `Sale` y `Purchase` (y en sus DTOs), no de una clase |
+| `documentType` / `documentNumber` | Tipo y numero de documento (`tipo_documento`, `numero_documento`) | Los dos obligatorios. El numero es unico por tenant |
+
 ### Sales
 
 | Termino | Significado | Cuidado |
@@ -105,8 +114,7 @@ de tesoreria recreados.
 | Termino | Significado | Cuidado |
 |-|-|-|
 | **Pago** | Pago parcial o total de una factura de compra a credito | **En compras se dice pago; en ventas se dice abono.** No son sinonimos intercambiables: el abono es lo que el taller **recibe** de un cliente, el pago es lo que el taller **entrega** a un proveedor. Autollantas es explicito: ventana "Registrar Pago", boton "Confirmar Pago", campo "Valor a Pagar". La clase es `Payment` (tabla `PAGOS`) |
-| `Supplier` | Proveedor (`PROVEEDORES`) | Su `document` es el **NIT** (`numero_nit_proveedor`) |
-| `businessName` | Razon social | En Autollantas **no existe como campo aparte**: el formulario tiene un unico campo "Nombre/razon social" que va a `nombre_proveedor`. Ver [03-DECISIONS.md](03-DECISIONS.md) |
+| Proveedor | El tercero de una compra (`Purchase.supplier`) | Es un `Counterparty` con rol `PROVEEDOR` o `AMBOS`. Nombre y razon social son un solo campo, `name` (`nombre_razon_social`), como en el formulario de Autollantas |
 | `price` (linea de compra) | Costo de compra unitario, sin IVA | En Autollantas se llama `unitPrice` (`precio_compra`) |
 | `ivaTotal` | IVA de la factura de compra | Es IVA **descontable**: se recupera contra el IVA de las ventas. No confundir con el `ivaPorPagar` de una venta, que ya es la diferencia |
 | Validacion de saldo | Una compra de **contado** exige `cuenta.currentBalance >= total` | **No aplica a credito**, que no saca dinero al facturar |
@@ -144,9 +152,8 @@ justamente lo normal entre negocios que no se conocen.
 | `User` | `(tenant_id, username)` | `uk_usuario_tenant_username` |
 | `Product` | `(tenant_id, codigo_producto)` | `uk_producto_tenant_code` |
 | `Account` | `(tenant_id, nombre_cuenta)` | `uk_cuenta_tenant_name` |
-| `Customer` | `(tenant_id, numero_documento_cliente)` | `uk_cliente_tenant_document` |
+| `Counterparty` | `(tenant_id, numero_documento)` | `uk_tercero_tenant_document` |
 | `Sale` | `(tenant_id, numero_factura_venta)` | `uk_venta_tenant_invoice_number` |
-| `Supplier` | `(tenant_id, numero_nit_proveedor)` | `uk_proveedor_tenant_document` |
 | `Purchase` | `(tenant_id, numero_factura_compra)` | `uk_compra_tenant_invoice_number` |
 
 Ademas de la restriccion de base, el service valida antes de guardar y lanza una excepcion
@@ -159,7 +166,7 @@ la validacion siempre excluye el propio registro.
 aplica a `EntityManager.find()`, asi que devuelve la fila aunque sea de otro tenant. Usar
 una consulta derivada, por convencion `findByIdAndTenantId(id, TenantContext.getTenantId())`.
 Como se detecto en [03-DECISIONS.md](03-DECISIONS.md). Aplicado ya en `Account`,
-`Product`, `ProductCategory`, `Sale`, `Customer`, `Purchase`, `Supplier`,
+`Product`, `ProductCategory`, `Sale`, `Counterparty`, `Purchase`,
 `OccasionalIncome` y `OperationalExpense`; no queda ningun `findById` heredado sobre una
 entidad `TenantAware`.
 

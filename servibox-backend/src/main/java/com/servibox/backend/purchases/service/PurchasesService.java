@@ -1,5 +1,8 @@
 package com.servibox.backend.purchases.service;
 
+import com.servibox.backend.counterparties.entity.Counterparty;
+import com.servibox.backend.counterparties.entity.CounterpartyRole;
+import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.repository.ProductRepository;
 import com.servibox.backend.inventory.service.InventoryService;
@@ -8,11 +11,9 @@ import com.servibox.backend.purchases.entity.PaymentType;
 import com.servibox.backend.purchases.entity.Purchase;
 import com.servibox.backend.purchases.entity.PurchaseDetail;
 import com.servibox.backend.purchases.entity.PurchaseStatus;
-import com.servibox.backend.purchases.entity.Supplier;
 import com.servibox.backend.purchases.repository.PaymentRepository;
 import com.servibox.backend.purchases.repository.PurchaseDetailRepository;
 import com.servibox.backend.purchases.repository.PurchaseRepository;
-import com.servibox.backend.purchases.repository.SupplierRepository;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.MovementSourceType;
@@ -39,7 +40,7 @@ public class PurchasesService {
     private final PurchaseRepository purchaseRepository;
     private final PurchaseDetailRepository purchaseDetailRepository;
     private final PaymentRepository paymentRepository;
-    private final SupplierRepository supplierRepository;
+    private final CounterpartyService counterpartyService;
     private final ProductRepository productRepository;
     private final InventoryService inventoryService;
     private final TreasuryService treasuryService;
@@ -68,25 +69,6 @@ public class PurchasesService {
         return paymentRepository.findByPurchaseId(purchaseId);
     }
 
-    @Transactional(readOnly = true)
-    public List<Supplier> findAllSuppliers() {
-        return supplierRepository.findAll();
-    }
-
-    @Transactional(readOnly = true)
-    public Optional<Supplier> findSupplierById(Long id) {
-        Long tenantId = TenantContext.getTenantId();
-        if (tenantId == null) {
-            return Optional.empty();
-        }
-        return supplierRepository.findByIdAndTenantId(id, tenantId);
-    }
-
-    @Transactional
-    public Supplier saveSupplier(Supplier supplier) {
-        return supplierRepository.save(supplier);
-    }
-
     /** Una linea pedida: que producto, cuantas unidades y a que costo unitario sin IVA. */
     public record LineaCompra(Long productId, Integer quantity, Double price) {
     }
@@ -97,7 +79,7 @@ public class PurchasesService {
      */
     @Transactional
     public Purchase crearFactura(String invoiceNumber,
-                                 Supplier proveedor,
+                                 Counterparty proveedor,
                                  LocalDate invoiceDate,
                                  LocalDate dueDate,
                                  PaymentType paymentType,
@@ -106,6 +88,9 @@ public class PurchasesService {
                                  List<LineaCompra> lineas) {
 
         validarNumeroFacturaUnico(invoiceNumber, null);
+        if (proveedor != null) {
+            counterpartyService.exigirRol(proveedor, CounterpartyRole.PROVEEDOR);
+        }
 
         if (lineas == null || lineas.isEmpty()) {
             throw new InvalidPurchaseOperationException("Una factura de compra necesita al menos una linea");

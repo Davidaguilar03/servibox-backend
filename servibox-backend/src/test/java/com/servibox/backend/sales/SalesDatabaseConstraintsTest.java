@@ -1,10 +1,12 @@
 package com.servibox.backend.sales;
 
-import com.servibox.backend.sales.entity.Customer;
+import com.servibox.backend.counterparties.entity.Counterparty;
+import com.servibox.backend.counterparties.entity.CounterpartyRole;
+import com.servibox.backend.counterparties.entity.DocumentType;
+import com.servibox.backend.counterparties.repository.CounterpartyRepository;
 import com.servibox.backend.sales.entity.PaymentType;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.sales.entity.SaleStatus;
-import com.servibox.backend.sales.repository.CustomerRepository;
 import com.servibox.backend.sales.repository.SaleRepository;
 import com.servibox.backend.tenant.TenantContext;
 import org.junit.jupiter.api.AfterEach;
@@ -38,7 +40,7 @@ class SalesDatabaseConstraintsTest {
     private SaleRepository saleRepository;
 
     @Autowired
-    private CustomerRepository customerRepository;
+    private CounterpartyRepository counterpartyRepository;
 
     @BeforeEach
     void seed() {
@@ -62,10 +64,12 @@ class SalesDatabaseConstraintsTest {
         return venta;
     }
 
-    private Customer clienteCrudo(String documento) {
-        Customer cliente = new Customer();
+    private Counterparty clienteCrudo(String documento) {
+        Counterparty cliente = new Counterparty();
+        cliente.setRole(CounterpartyRole.CLIENTE);
         cliente.setName("Cliente " + documento);
-        cliente.setDocument(documento);
+        cliente.setDocumentType(DocumentType.CC);
+        cliente.setDocumentNumber(documento);
         return cliente;
     }
 
@@ -79,9 +83,9 @@ class SalesDatabaseConstraintsTest {
 
     @Test
     void laBaseFrenaDosClientesConElMismoDocumentoAunSaltandoseElService() {
-        customerRepository.saveAndFlush(clienteCrudo("900123456"));
+        counterpartyRepository.saveAndFlush(clienteCrudo("900123456"));
 
-        assertThatThrownBy(() -> customerRepository.saveAndFlush(clienteCrudo("900123456")))
+        assertThatThrownBy(() -> counterpartyRepository.saveAndFlush(clienteCrudo("900123456")))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 }

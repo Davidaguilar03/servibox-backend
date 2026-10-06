@@ -1,9 +1,9 @@
 package com.servibox.backend.sales;
 
+import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
 import com.servibox.backend.inventory.service.InventoryService;
-import com.servibox.backend.sales.entity.Customer;
 import com.servibox.backend.sales.entity.PaymentType;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.sales.entity.SaleStatus;
@@ -58,7 +58,7 @@ class SalesRestoreTest {
     private Product rin;
     private Account caja;
     private Account banco;
-    private Customer cliente;
+    private Counterparty cliente;
 
     @BeforeEach
     void seed() {

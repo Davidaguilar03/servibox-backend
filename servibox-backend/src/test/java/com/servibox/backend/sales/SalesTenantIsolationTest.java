@@ -4,9 +4,10 @@ import com.jayway.jsonpath.JsonPath;
 import com.servibox.backend.auth.entity.Role;
 import com.servibox.backend.auth.entity.User;
 import com.servibox.backend.auth.repository.UserRepository;
+import com.servibox.backend.counterparties.entity.Counterparty;
+import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
-import com.servibox.backend.sales.entity.Customer;
 import com.servibox.backend.sales.entity.PaymentType;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.sales.entity.SaleStatus;
@@ -58,6 +59,9 @@ class SalesTenantIsolationTest {
 
     @Autowired
     private SalesService salesService;
+
+    @Autowired
+    private CounterpartyService counterpartyService;
 
     @Autowired
     private TenantRepository tenantRepository;
@@ -128,7 +132,7 @@ class SalesTenantIsolationTest {
             ProductCategory categoria = fixture.crearCategoriaConIva();
             Product producto = fixture.crearProducto(categoria, codigoProducto, 100000.0, 10);
             Account cuenta = fixture.crearCuenta("Caja General");
-            Customer cliente = fixture.crearCliente("Cliente " + documentoCliente, documentoCliente);
+            Counterparty cliente = fixture.crearCliente("Cliente " + documentoCliente, documentoCliente);
             return salesService.crearFactura(numeroFactura, cliente, LocalDate.now(), null,
                     PaymentType.CONTADO, cuenta, "Efectivo",
                     List.of(new SalesService.LineaFactura(producto.getId(), 1, 100000.0)));
@@ -171,7 +175,7 @@ class SalesTenantIsolationTest {
                 .andExpect(jsonPath("$.status").value("PAGADA"))
                 .andExpect(jsonPath("$.details.length()").value(1))
                 .andExpect(jsonPath("$.details[0].ivaAmount").value(19000.0))
-                .andExpect(jsonPath("$.customerName").value("Cliente 900000001"));
+                .andExpect(jsonPath("$.customer.name").value("Cliente 900000001"));
     }
 
     /** Ni los detalles ni los clientes del otro tenant se cuelan por el GET de la factura. */
@@ -181,8 +185,8 @@ class SalesTenantIsolationTest {
         facturarEn(tenantDos, "VEN-DOS", "LLA-DOS", "900000002");
 
         TenantContext.setTenantId(tenantUno);
-        assertThat(salesService.findAllCustomers())
-                .extracting(Customer::getDocument)
+        assertThat(counterpartyService.findAll())
+                .extracting(Counterparty::getDocumentNumber)
                 .containsExactly("900000001");
 
         Sale deUno = salesService.findAllSales().get(0);

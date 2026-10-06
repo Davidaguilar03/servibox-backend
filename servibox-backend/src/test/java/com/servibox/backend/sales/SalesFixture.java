@@ -4,8 +4,10 @@ import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
 import com.servibox.backend.inventory.entity.TaxType;
 import com.servibox.backend.inventory.service.InventoryService;
-import com.servibox.backend.sales.entity.Customer;
-import com.servibox.backend.sales.service.SalesService;
+import com.servibox.backend.counterparties.entity.Counterparty;
+import com.servibox.backend.counterparties.entity.CounterpartyRole;
+import com.servibox.backend.counterparties.entity.DocumentType;
+import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.tenant.Tenant;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.tenant.TenantRepository;
@@ -19,7 +21,7 @@ import java.util.List;
 
 /**
  * Semilla comun de los tests de Sales: un tenant con su IVA del 19 por ciento, una
- * categoria, productos con stock y una cuenta de caja.
+ * categoria, productos con stock y una cuenta de caja. Clientes y proveedores son terceros.
  */
 @Component
 public class SalesFixture {
@@ -36,7 +38,7 @@ public class SalesFixture {
     private TreasuryService treasuryService;
 
     @Autowired
-    private SalesService salesService;
+    private CounterpartyService counterpartyService;
 
     public Long crearTenant() {
         Tenant tenant = new Tenant();
@@ -82,13 +84,16 @@ public class SalesFixture {
         return treasuryService.saveAccount(cuenta);
     }
 
-    public Customer crearCliente(String nombre, String documento) {
-        Customer cliente = new Customer();
-        cliente.setName(nombre);
-        cliente.setDocument(documento);
-        cliente.setEmail(nombre.toLowerCase() + "@correo.local");
-        cliente.setPhone("3000000000");
-        return salesService.saveCustomer(cliente);
+    /** Tercero CLIENTE por el camino de obtenerOCrear, el mismo que usa una venta. */
+    public Counterparty crearCliente(String nombre, String documento) {
+        return counterpartyService.obtenerOCrear(CounterpartyRole.CLIENTE, DocumentType.CC, documento,
+                nombre, nombre.toLowerCase().replace(' ', '.') + "@correo.local", "3000000000");
+    }
+
+    /** Tercero PROVEEDOR por el camino de obtenerOCrear, el mismo que usa una compra. */
+    public Counterparty crearProveedor(String nombre, String nit) {
+        return counterpartyService.obtenerOCrear(CounterpartyRole.PROVEEDOR, DocumentType.NIT, nit,
+                nombre, null, null);
     }
 
     public void usarTenant(Long tenantId) {

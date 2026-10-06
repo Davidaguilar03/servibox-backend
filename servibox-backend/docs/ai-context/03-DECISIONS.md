@@ -12,6 +12,43 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-06: Clientes y proveedores se unifican en terceros (Counterparty)
+
+* Decision: paso 1 del refactor de normalizacion (ver
+  [sessions/2026-10-06-refactor-normalizacion.md](sessions/2026-10-06-refactor-normalizacion.md)).
+  `Customer` (`CLIENTES`) y `Supplier` (`PROVEEDORES`) desaparecen; los reemplaza
+  `Counterparty` (`TERCEROS`) en el paquete `counterparties`, como manda
+  [04-DATA-MODEL.md](../04-DATA-MODEL.md). `Sale.customer` y `Purchase.supplier` apuntan a
+  un `Counterparty` por la columna `id_tercero`. Una persona o empresa existe **una sola vez
+  por tenant**, identificada por su numero de documento (`uk_tercero_tenant_document`).
+* **Promocion a AMBOS.** `CounterpartyService.obtenerOCrear` busca por documento: si no
+  existe lo crea con el rol que hace falta (CLIENTE para una venta, PROVEEDOR para una
+  compra); si existe con el rol contrario pasa a AMBOS; si ya tiene ese rol o AMBOS lo
+  devuelve. Correo y celular que lleguen solo completan los vacios, nunca pisan un dato
+  existente; el nombre y el tipo de documento de un tercero existente tampoco se tocan. La
+  alternativa, dos filas para la misma empresa (una cliente y otra proveedor), es justo la
+  duplicacion que la normalizacion quita.
+* **Validacion de rol por id.** Cuando la factura referencia un tercero existente por id,
+  `crearFactura` llama a `exigirRol`: una venta exige CLIENTE o AMBOS, una compra PROVEEDOR o
+  AMBOS; si no, `InvalidCounterpartyException` (**400**). Por id **no se promueve**: elegir
+  un id es elegir ese tercero tal cual; si el rol no sirve es un error de la peticion, no
+  una instruccion de cambiarle el rol.
+* **El tipo de documento pasa a ser obligatorio**, igual que el numero. `Customer` y
+  `Supplier` no tenian tipo y el numero era nullable. Ahora el documento es la identidad
+  del tercero: con un numero nulo no hay con que buscarlo ni con que detectar el duplicado,
+  y sin el tipo un `900123456` como CC y como NIT serian indistinguibles. Ademas el
+  diccionario lo marca NOT NULL. `businessName` se pierde: el diccionario tiene un solo
+  campo, `nombre_razon_social`, que es lo que tenia el formulario de Autollantas.
+* Se conserva: la API identifica al cliente y al proveedor **por id**, opcional
+  (`customerId`, `supplierId`); un id que no resuelve en el tenant sigue siendo 400. Las
+  respuestas cambian de `customerId` + `customerName` a un objeto `customer` (y `supplier`)
+  con los datos del tercero. No hay endpoints de terceros: tampoco los habia de clientes ni
+  de proveedores.
+* Nombres de columna: los propios del diccionario. La PK usa `id_tercero` con
+  `@AttributeOverride`; el tenant se queda en `tenant_id` porque el `@Filter` de
+  `TenantAwareEntity` lleva la columna escrita en su condicion SQL. Las dos se alinean
+  (`id_tenant` en todas las tablas) en el paso de Flyway.
+
 ## 2026-10-06: Restaurar es el inverso exacto de anular
 
 * Decision: `restaurarFactura` y `restaurarCompra` deshacen exactamente lo que hizo la
@@ -470,9 +507,11 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
   factura emitida.
 * **El saldo pendiente no es columna**: se deriva de la suma de pagos. Autollantas lo
   guarda en `saldo_pendiente`.
-* **`businessName` no existe en Autollantas.** Su formulario tiene un unico campo
-  "Nombre/razon social" que va a `nombre_proveedor`; aqui van separados porque el alcance
-  lo pedia. `Supplier.name` sigue siendo el que se muestra.
+* ~~**`businessName` no existe en Autollantas.**~~ **SUPERADO el 2026-10-06** por "Clientes y proveedores se unifican en terceros (Counterparty)":
+  `Supplier` ya no existe y el tercero tiene un unico `nombre_razon_social`. Texto original:
+  su formulario tiene un unico campo "Nombre/razon social" que va a `nombre_proveedor`;
+  aqui van separados porque el alcance lo pedia. `Supplier.name` sigue siendo el que se
+  muestra.
 * **`ivaAmount` de la linea es el de la linea completa.** Autollantas guarda en
   `impuesto_compra` el IVA **por unidad** (asi lo muestra la columna "IVA/Unidad"). Se
   unifico con el criterio de `SaleDetail.ivaAmount` para que las dos lineas signifiquen lo
@@ -591,7 +630,9 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
 * Decision: `Sale` lleva `uk_venta_tenant_invoice_number` sobre
   `(tenant_id, numero_factura_venta)`, ademas de la validacion en
   `SalesService.crearFactura` que lanza `DuplicateInvoiceNumberException` (**409**). Lo
-  mismo con `Customer` y `uk_cliente_tenant_document`.
+  mismo con `Customer` y `uk_cliente_tenant_document`. **SUPERADO en esa parte el
+  2026-10-06** por "Clientes y proveedores se unifican en terceros (Counterparty)": ahora es `Counterparty` con `uk_tercero_tenant_document`; el criterio
+  de dos capas se mantiene.
 * Alternativas consideradas: copiar Autollantas, que valida el numero con
   `existsByInvoiceNumberIgnoreCase` antes de guardar y **no tiene indice unico** en
   `ventas` (su propia documentacion lo dice explicito).
@@ -653,9 +694,10 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
     coherencia con la decision de `taxAmount` del 2026-08-28.
   * **`Collection` vive en `sales`, no en `treasury`.** En Autollantas esta en `treasury`
     aunque solo tenga sentido colgando de una factura.
-  * **`Customer` no tiene `documentType`.** Autollantas guarda tipo y numero de documento;
-    aqui solo el numero, que es lo que pedia el alcance. Si hace falta discriminar CC de
-    NIT, se agrega.
+  * ~~**`Customer` no tiene `documentType`.**~~ **SUPERADO el 2026-10-06** por "Clientes y proveedores se unifican en terceros (Counterparty)": el
+    tercero tiene `documentType` obligatorio. Texto original: Autollantas guarda tipo y
+    numero de documento; aqui solo el numero, que es lo que pedia el alcance. Si hace
+    falta discriminar CC de NIT, se agrega.
   * **La factura no se puede editar ni restaurar todavia.** Autollantas tiene
     `saveSaleWithDetails` en modo edicion y `restoreSale` desde la papelera, las dos con
     su propia reversion de stock y de caja. Fuera del alcance de esta migracion.

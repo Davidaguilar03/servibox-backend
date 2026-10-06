@@ -1,5 +1,6 @@
 package com.servibox.backend.purchases.entity;
 
+import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.shared.TenantAwareEntity;
 import com.servibox.backend.treasury.entity.Account;
 import jakarta.persistence.Column;
@@ -36,9 +37,10 @@ public class Purchase extends TenantAwareEntity {
     @Column(name = "numero_factura_compra")
     private String invoiceNumber;
 
+    /** El proveedor: un tercero PROVEEDOR o AMBOS. Nullable, como lo era id_proveedor. */
     @ManyToOne
-    @JoinColumn(name = "id_proveedor")
-    private Supplier supplier;
+    @JoinColumn(name = "id_tercero")
+    private Counterparty supplier;
 
     @Column(name = "fecha_compra")
     private LocalDate invoiceDate;

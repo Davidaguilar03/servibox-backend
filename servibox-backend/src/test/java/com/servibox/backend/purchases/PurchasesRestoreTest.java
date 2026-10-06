@@ -1,12 +1,12 @@
 package com.servibox.backend.purchases;
 
+import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
 import com.servibox.backend.inventory.service.InventoryService;
 import com.servibox.backend.purchases.entity.PaymentType;
 import com.servibox.backend.purchases.entity.Purchase;
 import com.servibox.backend.purchases.entity.PurchaseStatus;
-import com.servibox.backend.purchases.entity.Supplier;
 import com.servibox.backend.purchases.service.InsufficientBalanceException;
 import com.servibox.backend.purchases.service.InvalidPurchaseOperationException;
 import com.servibox.backend.purchases.service.PurchasesService;
@@ -57,7 +57,7 @@ class PurchasesRestoreTest {
     private Product llanta;
     private Account caja;
     private Account banco;
-    private Supplier proveedor;
+    private Counterparty proveedor;
 
     @BeforeEach
     void seed() {
@@ -69,13 +69,7 @@ class PurchasesRestoreTest {
         treasuryService.registrarMovimiento(caja, MovementType.INGRESO, "Fondeo de prueba", 1000000.0);
         treasuryService.registrarMovimiento(banco, MovementType.INGRESO, "Fondeo de prueba", 1000000.0);
 
-        Supplier s = new Supplier();
-        s.setName("Importadora Andina");
-        s.setBusinessName("Importadora Andina S.A.S.");
-        s.setDocument("900987654");
-        s.setEmail("ventas@andina.local");
-        s.setPhone("3001112233");
-        proveedor = purchasesService.saveSupplier(s);
+        proveedor = fixture.crearProveedor("Importadora Andina", "900987654");
     }
 
     @AfterEach
