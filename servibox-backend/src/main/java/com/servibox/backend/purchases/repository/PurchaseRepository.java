@@ -11,7 +11,7 @@ import java.util.Optional;
 
 public interface PurchaseRepository extends JpaRepository<Purchase, Long> {
 
-    /** Ver la nota de findByIdAndTenantId en SupplierRepository. */
+    /** Ver la nota de findByIdAndTenantId en CounterpartyRepository. */
     Optional<Purchase> findByIdAndTenantId(Long id, Long tenantId);
 
     Optional<Purchase> findByInvoiceNumberIgnoreCaseAndTenantId(String invoiceNumber, Long tenantId);

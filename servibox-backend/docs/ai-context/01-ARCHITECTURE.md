@@ -267,6 +267,7 @@ Base: `com.servibox.backend`. Un paquete por modulo de negocio, mas tres transve
 | `auth` | `JwtService`, `JwtAuthenticationFilter`, `AuthController`, `InvalidCredentialsException`, mas `entity` / `repository` / `dto` |
 | `inventory` | primer modulo de negocio migrado, ver abajo |
 | `treasury` | segundo modulo de negocio migrado, ver abajo |
+| `counterparties` | terceros (`Counterparty`): clientes y proveedores en una sola entidad, compartida por `sales` y `purchases`, ver abajo |
 | `sales` | tercer modulo de negocio migrado, ver abajo |
 | `purchases` | cuarto modulo de negocio migrado, ver abajo |
 | `reporting` | quinto paquete de negocio y ultimo modulo del roadmap, solo lectura, ver abajo |
@@ -488,6 +489,40 @@ movimientos sueltos, para que el cliente distinga en el listado de que viene cad
 Autollantas para el tenant `demo`: `Caja General` (`CASH`) y `Bancolombia` (`BANK`), las
 dos con saldo inicial 0.
 
+### Modulo Counterparties
+
+Terceros: la persona o empresa con la que el taller comercia. Unifica el cliente de una
+venta y el proveedor de una compra (paso 1 del refactor de normalizacion, ver
+[04-DATA-MODEL.md](../04-DATA-MODEL.md), TERCEROS). No tiene controller propio todavia.
+
+**Entidad** `Counterparty` (`TERCEROS`):
+
+| Campo | Columna | Notas |
+|-|-|-|
+| `id` | `id_tercero` | `@AttributeOverride` sobre el `id` de `TenantAwareEntity` |
+| `tenantId` | `tenant_id` | Heredado. No se renombra a `id_tenant`: el `@Filter` de la clase base lleva la columna escrita en su condicion |
+| `role` | `tipo_tercero` | Enum `CounterpartyRole`: `CLIENTE`, `PROVEEDOR`, `AMBOS`. Obligatorio |
+| `name` | `nombre_razon_social` | 150. Obligatorio |
+| `documentType` | `tipo_documento` | Enum `DocumentType`: `CC`, `NIT`, `CE`, `RUT`, `PASAPORTE`. Obligatorio |
+| `documentNumber` | `numero_documento` | 25. Obligatorio. Unico por tenant: `uk_tercero_tenant_document` |
+| `email` | `correo` | 150, opcional |
+| `phone` | `celular` | 25, opcional |
+
+**`CounterpartyService`**
+
+* `crear(tercero)`: valida rol, nombre, tipo y numero de documento
+  (`InvalidCounterpartyException`, **400**) y que el documento no exista en el tenant
+  (`DuplicateCounterpartyDocumentException`, **409**).
+* `obtenerOCrear(rolRequerido, tipoDocumento, numeroDocumento, nombre, correo, celular)`:
+  busca por `(tenant, numero_documento)`. Si no existe lo crea con el rol pedido; si existe
+  con el rol contrario lo pasa a `AMBOS`; si ya tiene ese rol o `AMBOS` lo devuelve. Correo
+  y celular solo completan los vacios; nombre y tipo de documento de uno existente no se
+  tocan.
+* `exigirRol(tercero, rolRequerido)`: una venta exige `CLIENTE` o `AMBOS`; una compra,
+  `PROVEEDOR` o `AMBOS`. Si no, `InvalidCounterpartyException` (**400**). Lo llaman
+  `crearFactura` de ventas y de compras cuando reciben un tercero.
+* `findById` usa `findByIdAndTenantId`; `findByDocumentNumber`, `findByDocumentNumberAndTenantId`.
+
 ### Modulo Sales
 
 Migrado desde el paquete `sales` de Autollantas. Es el primer modulo que **cruza los otros
@@ -495,12 +530,10 @@ dos**: una factura descuenta inventario y mueve tesoreria.
 
 **Entidades**
 
-* `Customer` (`CLIENTES`): `name`, `document`, `email`, `phone`. Es una entidad propia, no
-  campos sueltos dentro de la venta, igual que en Autollantas. Restriccion unica
-  `uk_cliente_tenant_document` sobre `(tenant_id, numero_documento_cliente)`: el mismo NIT
-  puede ser cliente de dos talleres distintos. `document` es nullable porque Autollantas
-  permite facturar sin documento, y en SQL varios NULL no chocan entre si.
-* `Sale` (`VENTAS`): `invoiceNumber`, `ManyToOne` a `Customer`, `invoiceDate`, `dueDate`,
+* El cliente es un `Counterparty` (ver Modulo Counterparties); `sales` ya no tiene entidad
+  propia de cliente.
+* `Sale` (`VENTAS`): `invoiceNumber`, `ManyToOne` **nullable** `customer` a `Counterparty`
+  (columna `id_tercero`), `invoiceDate`, `dueDate`,
   `paymentType` (enum `CONTADO` / `CREDITO`), `ManyToOne` **nullable** a `Account` (una
   factura a credito no tiene cuenta hasta que se le abona), `paymentMethod`, `status`
   (enum `PAGADA` / `PENDIENTE` / `ANULADA`), `subtotal`, `ivaPorPagar`, `total`.
@@ -601,6 +634,12 @@ anular saco, restaurar lo devuelve. Motivo y comparacion con Autollantas en
 Las respuestas van por DTO (`SaleResponse`, `SaleDetailResponse`, `CollectionResponse`),
 nunca la entidad JPA. `SaleResponse` incluye `pendingBalance` calculado.
 
+El cliente se identifica **por id** (`customerId` en `SaleRequest`, opcional). Un id que
+no resuelve en el tenant es 400 `Cliente no encontrado`; uno que resuelve a un tercero
+`PROVEEDOR` es 400 por rol. En la respuesta sale como `customer`, un
+`CounterpartyResponse` (`id`, `role`, `name`, `documentType`, `documentNumber`, `email`,
+`phone`), o `null`. Compras hace lo mismo con `supplierId` y `supplier`.
+
 **Tasa de IVA:** sale de `InventoryService.getIvaRateForProduct(Product)`, la misma que
 usan Inventory y Purchases. Regla en [02-CONVENTIONS.md](02-CONVENTIONS.md) (Calculos que
 no se copian).
@@ -612,9 +651,10 @@ invertido: una compra **suma** stock y **saca** dinero.
 
 **Entidades**
 
-* `Supplier` (`PROVEEDORES`): `name`, `businessName`, `document` (NIT), `email`, `phone`.
-  Restriccion unica `uk_proveedor_tenant_document` sobre `(tenant_id, numero_nit_proveedor)`.
-* `Purchase` (`COMPRAS`): `invoiceNumber`, `ManyToOne` a `Supplier`, `invoiceDate`,
+* El proveedor es un `Counterparty` (ver Modulo Counterparties); `purchases` ya no tiene
+  entidad propia de proveedor.
+* `Purchase` (`COMPRAS`): `invoiceNumber`, `ManyToOne` **nullable** `supplier` a
+  `Counterparty` (columna `id_tercero`), `invoiceDate`,
   `dueDate`, `paymentType` (enum `CONTADO` / `CREDITO`), `ManyToOne` **nullable** a
   `Account`, `paymentMethod`, `status` (enum `PAGADA` / `PENDIENTE` / `ANULADA`),
   `subtotal`, `ivaTotal`, `total`. Restriccion unica

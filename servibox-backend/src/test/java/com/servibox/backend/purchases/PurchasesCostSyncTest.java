@@ -1,12 +1,12 @@
 package com.servibox.backend.purchases;
 
+import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
 import com.servibox.backend.inventory.entity.TaxType;
 import com.servibox.backend.inventory.service.InventoryService;
 import com.servibox.backend.purchases.entity.PaymentType;
 import com.servibox.backend.purchases.entity.Purchase;
-import com.servibox.backend.purchases.entity.Supplier;
 import com.servibox.backend.purchases.service.PurchasesService;
 import com.servibox.backend.sales.SalesFixture;
 import com.servibox.backend.tenant.TenantContext;
@@ -53,7 +53,7 @@ class PurchasesCostSyncTest {
 
     private Product llanta;
     private Account caja;
-    private Supplier proveedor;
+    private Counterparty proveedor;
 
     @BeforeEach
     void seed() {
@@ -75,10 +75,7 @@ class PurchasesCostSyncTest {
         llanta = fixture.crearProducto(categoria, "LLA-COSTO", 20000.0, 10);
         caja = fixture.crearCuenta("Caja General");
 
-        Supplier s = new Supplier();
-        s.setName("Importadora Andina");
-        s.setDocument("900111222");
-        proveedor = purchasesService.saveSupplier(s);
+        proveedor = fixture.crearProveedor("Importadora Andina", "900111222");
     }
 
     @AfterEach

@@ -4,11 +4,11 @@ import com.jayway.jsonpath.JsonPath;
 import com.servibox.backend.auth.entity.Role;
 import com.servibox.backend.auth.entity.User;
 import com.servibox.backend.auth.repository.UserRepository;
+import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
 import com.servibox.backend.inventory.service.InventoryService;
 import com.servibox.backend.purchases.entity.Purchase;
-import com.servibox.backend.purchases.entity.Supplier;
 import com.servibox.backend.purchases.service.PurchasesService;
 import com.servibox.backend.reporting.dto.IvaCategoryResponse;
 import com.servibox.backend.reporting.dto.IvaReportResponse;
@@ -16,7 +16,6 @@ import com.servibox.backend.reporting.dto.KpisResponse;
 import com.servibox.backend.reporting.dto.MovementSummaryResponse;
 import com.servibox.backend.reporting.service.ReportingService;
 import com.servibox.backend.sales.SalesFixture;
-import com.servibox.backend.sales.entity.Customer;
 import com.servibox.backend.sales.entity.PaymentType;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.sales.entity.SaleStatus;
@@ -157,8 +156,8 @@ class ReportingTest {
     private class Taller {
         final ProductCategory llantas;
         final Product llanta;
-        final Customer cliente;
-        final Supplier proveedor;
+        final Counterparty cliente;
+        final Counterparty proveedor;
         final Account caja;
 
         Taller(Long tenantId) {
@@ -166,10 +165,7 @@ class ReportingTest {
             llantas = fixture.crearCategoriaConIva();
             llanta = fixture.crearProducto(llantas, "LLA-001", 100.0, 50);
             cliente = fixture.crearCliente("Cliente", "900" + System.nanoTime());
-            Supplier s = new Supplier();
-            s.setName("Proveedor");
-            s.setDocument("800" + System.nanoTime());
-            proveedor = purchasesService.saveSupplier(s);
+            proveedor = fixture.crearProveedor("Proveedor", "800" + System.nanoTime());
             caja = fixture.crearCuenta("Caja General");
         }
 

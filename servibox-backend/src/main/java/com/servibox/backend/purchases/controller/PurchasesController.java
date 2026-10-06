@@ -1,5 +1,7 @@
 package com.servibox.backend.purchases.controller;
 
+import com.servibox.backend.counterparties.entity.Counterparty;
+import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.purchases.dto.PaymentRequest;
 import com.servibox.backend.purchases.dto.PaymentResponse;
 import com.servibox.backend.purchases.dto.PurchaseRequest;
@@ -7,7 +9,6 @@ import com.servibox.backend.purchases.dto.PurchaseResponse;
 import com.servibox.backend.purchases.entity.Payment;
 import com.servibox.backend.purchases.entity.PaymentType;
 import com.servibox.backend.purchases.entity.Purchase;
-import com.servibox.backend.purchases.entity.Supplier;
 import com.servibox.backend.purchases.service.PurchasesService;
 import com.servibox.backend.shared.ResourceNotFoundException;
 import com.servibox.backend.treasury.entity.Account;
@@ -32,6 +33,7 @@ public class PurchasesController {
 
     private final PurchasesService purchasesService;
     private final TreasuryService treasuryService;
+    private final CounterpartyService counterpartyService;
 
     @GetMapping
     public List<PurchaseResponse> listarCompras() {
@@ -46,9 +48,9 @@ public class PurchasesController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public PurchaseResponse crearCompra(@Valid @RequestBody PurchaseRequest request) {
-        Supplier proveedor = null;
+        Counterparty proveedor = null;
         if (request.supplierId() != null) {
-            proveedor = purchasesService.findSupplierById(request.supplierId())
+            proveedor = counterpartyService.findById(request.supplierId())
                     .orElseThrow(() -> new IllegalArgumentException(
                             "Proveedor no encontrado: " + request.supplierId()));
         }

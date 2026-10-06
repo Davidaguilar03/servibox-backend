@@ -1,5 +1,6 @@
 package com.servibox.backend.sales.entity;
 
+import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.shared.TenantAwareEntity;
 import com.servibox.backend.treasury.entity.Account;
 import jakarta.persistence.Column;
@@ -35,9 +36,10 @@ public class Sale extends TenantAwareEntity {
     @Column(name = "numero_factura_venta")
     private String invoiceNumber;
 
+    /** El cliente: un tercero CLIENTE o AMBOS. Nullable, como lo era id_cliente. */
     @ManyToOne
-    @JoinColumn(name = "id_cliente")
-    private Customer customer;
+    @JoinColumn(name = "id_tercero")
+    private Counterparty customer;
 
     @Column(name = "fecha_venta")
     private LocalDate invoiceDate;

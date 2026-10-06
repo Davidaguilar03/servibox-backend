@@ -1,16 +1,17 @@
 package com.servibox.backend.sales.service;
 
+import com.servibox.backend.counterparties.entity.Counterparty;
+import com.servibox.backend.counterparties.entity.CounterpartyRole;
+import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.repository.ProductRepository;
 import com.servibox.backend.inventory.service.InventoryService;
 import com.servibox.backend.sales.entity.Collection;
-import com.servibox.backend.sales.entity.Customer;
 import com.servibox.backend.sales.entity.PaymentType;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.sales.entity.SaleDetail;
 import com.servibox.backend.sales.entity.SaleStatus;
 import com.servibox.backend.sales.repository.CollectionRepository;
-import com.servibox.backend.sales.repository.CustomerRepository;
 import com.servibox.backend.sales.repository.SaleDetailRepository;
 import com.servibox.backend.sales.repository.SaleRepository;
 import com.servibox.backend.tenant.TenantContext;
@@ -40,7 +41,7 @@ public class SalesService {
     private final SaleRepository saleRepository;
     private final SaleDetailRepository saleDetailRepository;
     private final CollectionRepository collectionRepository;
-    private final CustomerRepository customerRepository;
+    private final CounterpartyService counterpartyService;
     private final ProductRepository productRepository;
     private final InventoryService inventoryService;
     private final TreasuryService treasuryService;
@@ -69,25 +70,6 @@ public class SalesService {
         return collectionRepository.findBySaleId(saleId);
     }
 
-    @Transactional(readOnly = true)
-    public List<Customer> findAllCustomers() {
-        return customerRepository.findAll();
-    }
-
-    @Transactional(readOnly = true)
-    public Optional<Customer> findCustomerById(Long id) {
-        Long tenantId = TenantContext.getTenantId();
-        if (tenantId == null) {
-            return Optional.empty();
-        }
-        return customerRepository.findByIdAndTenantId(id, tenantId);
-    }
-
-    @Transactional
-    public Customer saveCustomer(Customer customer) {
-        return customerRepository.save(customer);
-    }
-
     /** Una linea pedida: que producto, cuantas unidades y a que precio unitario sin IVA. */
     public record LineaFactura(Long productId, Integer quantity, Double price) {
     }
@@ -100,7 +82,7 @@ public class SalesService {
      */
     @Transactional
     public Sale crearFactura(String invoiceNumber,
-                             Customer cliente,
+                             Counterparty cliente,
                              LocalDate invoiceDate,
                              LocalDate dueDate,
                              PaymentType paymentType,
@@ -109,6 +91,9 @@ public class SalesService {
                              List<LineaFactura> lineas) {
 
         validarNumeroFacturaUnico(invoiceNumber, null);
+        if (cliente != null) {
+            counterpartyService.exigirRol(cliente, CounterpartyRole.CLIENTE);
+        }
 
         if (lineas == null || lineas.isEmpty()) {
             throw new InvalidSaleOperationException("Una factura necesita al menos una linea");

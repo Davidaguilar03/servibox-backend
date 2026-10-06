@@ -1,6 +1,8 @@
 package com.servibox.backend.shared;
 
 import com.servibox.backend.auth.InvalidCredentialsException;
+import com.servibox.backend.counterparties.service.DuplicateCounterpartyDocumentException;
+import com.servibox.backend.counterparties.service.InvalidCounterpartyException;
 import com.servibox.backend.inventory.service.DuplicateProductCodeException;
 import com.servibox.backend.purchases.service.DuplicatePurchaseInvoiceNumberException;
 import com.servibox.backend.purchases.service.InsufficientBalanceException;
@@ -78,6 +80,18 @@ public class GlobalExceptionHandler {
     /** Operacion que no cuadra con el estado de la compra (pago o anulacion invalida). */
     @ExceptionHandler(InvalidPurchaseOperationException.class)
     public ResponseEntity<ErrorResponse> manejarCompraInvalida(InvalidPurchaseOperationException ex) {
+        return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** Documento de tercero repetido dentro del tenant. */
+    @ExceptionHandler(DuplicateCounterpartyDocumentException.class)
+    public ResponseEntity<ErrorResponse> manejarTerceroDuplicado(DuplicateCounterpartyDocumentException ex) {
+        return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** Tercero que no sirve para la operacion: rol equivocado o datos obligatorios vacios. */
+    @ExceptionHandler(InvalidCounterpartyException.class)
+    public ResponseEntity<ErrorResponse> manejarTerceroInvalido(InvalidCounterpartyException ex) {
         return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 

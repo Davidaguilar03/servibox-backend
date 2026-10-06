@@ -1,5 +1,6 @@
 package com.servibox.backend.sales.dto;
 
+import com.servibox.backend.counterparties.dto.CounterpartyResponse;
 import com.servibox.backend.sales.entity.PaymentType;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.sales.entity.SaleDetail;
@@ -11,8 +12,7 @@ import java.util.List;
 public record SaleResponse(
         Long id,
         String invoiceNumber,
-        Long customerId,
-        String customerName,
+        CounterpartyResponse customer,
         LocalDate invoiceDate,
         LocalDate dueDate,
         PaymentType paymentType,
@@ -31,8 +31,7 @@ public record SaleResponse(
         return new SaleResponse(
                 sale.getId(),
                 sale.getInvoiceNumber(),
-                sale.getCustomer() != null ? sale.getCustomer().getId() : null,
-                sale.getCustomer() != null ? sale.getCustomer().getName() : null,
+                CounterpartyResponse.from(sale.getCustomer()),
                 sale.getInvoiceDate(),
                 sale.getDueDate(),
                 sale.getPaymentType(),

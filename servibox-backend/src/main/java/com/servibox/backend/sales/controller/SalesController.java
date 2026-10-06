@@ -1,11 +1,12 @@
 package com.servibox.backend.sales.controller;
 
+import com.servibox.backend.counterparties.entity.Counterparty;
+import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.sales.dto.CollectionRequest;
 import com.servibox.backend.sales.dto.CollectionResponse;
 import com.servibox.backend.sales.dto.SaleRequest;
 import com.servibox.backend.sales.dto.SaleResponse;
 import com.servibox.backend.sales.entity.Collection;
-import com.servibox.backend.sales.entity.Customer;
 import com.servibox.backend.sales.entity.PaymentType;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.sales.service.SalesService;
@@ -32,6 +33,7 @@ public class SalesController {
 
     private final SalesService salesService;
     private final TreasuryService treasuryService;
+    private final CounterpartyService counterpartyService;
 
     @GetMapping
     public List<SaleResponse> listarFacturas() {
@@ -46,9 +48,9 @@ public class SalesController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public SaleResponse crearFactura(@Valid @RequestBody SaleRequest request) {
-        Customer cliente = null;
+        Counterparty cliente = null;
         if (request.customerId() != null) {
-            cliente = salesService.findCustomerById(request.customerId())
+            cliente = counterpartyService.findById(request.customerId())
                     .orElseThrow(() -> new IllegalArgumentException(
                             "Cliente no encontrado: " + request.customerId()));
         }
