@@ -18,7 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.ActiveProfiles;
 
-import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -68,8 +68,10 @@ class InventoryPricingTest {
         ProductCategory categoria = new ProductCategory();
         categoria.setName("CATEGORIA " + System.nanoTime());
         categoria.setColor("#000000");
+        categoria.setYellowStockMin(5);
+        categoria.setRedStockMin(2);
         categoria.setTargetMargin(margen);
-        categoria.setTaxTypes(new ArrayList<>(List.of(impuestos)));
+        categoria.setTaxTypes(new HashSet<>(List.of(impuestos)));
         return inventoryService.saveCategory(categoria);
     }
 
@@ -196,13 +198,13 @@ class InventoryPricingTest {
      */
     @Test
     void unTenantNoPuedeTenerDosConfiguracionesFinancieras() {
-        inventoryService.saveFinancialSettings(new FinancialSettings());
+        inventoryService.saveFinancialSettings(configuracionEnCeros());
 
-        assertThatThrownBy(() -> inventoryService.saveFinancialSettings(new FinancialSettings()))
+        assertThatThrownBy(() -> inventoryService.saveFinancialSettings(configuracionEnCeros()))
                 .isInstanceOf(DuplicateFinancialSettingsException.class)
                 .hasMessage("El tenant ya tiene una configuracion financiera; edita la existente en vez de crear otra");
 
-        assertThatThrownBy(() -> financialSettingsRepository.saveAndFlush(new FinancialSettings()))
+        assertThatThrownBy(() -> financialSettingsRepository.saveAndFlush(configuracionEnCeros()))
                 .isInstanceOf(DataIntegrityViolationException.class)
                 .satisfies(e -> assertThat(e.getMessage()).containsIgnoringCase("uk_configuracion_tenant"));
 
@@ -211,6 +213,15 @@ class InventoryPricingTest {
         otro.setSlug("otro-taller-" + System.nanoTime());
         otro.setActive(Boolean.TRUE);
         TenantContext.setTenantId(tenantRepository.save(otro).getId());
-        assertThat(inventoryService.saveFinancialSettings(new FinancialSettings()).getId()).isNotNull();
+        assertThat(inventoryService.saveFinancialSettings(configuracionEnCeros()).getId()).isNotNull();
+    }
+
+    /** Los porcentajes son NOT NULL; la comision de tarjeta la completa el service. */
+    private static FinancialSettings configuracionEnCeros() {
+        FinancialSettings fs = new FinancialSettings();
+        fs.setExpensesRate(0.0);
+        fs.setDianRate(0.0);
+        fs.setIcaRate(0.0);
+        return fs;
     }
 }

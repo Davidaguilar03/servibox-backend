@@ -63,6 +63,8 @@ class ProductCodeUniquenessTest {
         ProductCategory categoria = new ProductCategory();
         categoria.setName("LLANTAS");
         categoria.setColor("#e74c3c");
+        categoria.setYellowStockMin(5);
+        categoria.setRedStockMin(2);
         categoria.setTargetMargin(0.0);
         return inventoryService.saveCategory(categoria);
     }
@@ -74,6 +76,9 @@ class ProductCodeUniquenessTest {
         product.setPurchaseCost(25000.0);
         product.setQuantity(5);
         product.setCategory(categoria);
+        // Los precios los calcula saveProduct; por el repositorio directo van a mano (NOT NULL).
+        product.setTaxAmount(0.0);
+        product.setSuggestedPrice(25000.0);
         return product;
     }
 

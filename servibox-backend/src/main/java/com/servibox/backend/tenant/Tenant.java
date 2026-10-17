@@ -21,10 +21,10 @@ public class Tenant {
     @Column(name = "id_tenant")
     private Long id;
 
-    @Column(name = "nombre_tenant", nullable = false)
+    @Column(name = "nombre_tenant", length = 150, nullable = false)
     private String name;
 
-    @Column(name = "slug_tenant", nullable = false, unique = true)
+    @Column(name = "slug_tenant", length = 100, nullable = false, unique = true)
     private String slug;
 
     @Column(name = "activo_tenant", nullable = false)

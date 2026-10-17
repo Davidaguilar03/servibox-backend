@@ -2,6 +2,8 @@ package com.servibox.backend.sales.entity;
 
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.shared.TenantAwareEntity;
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.CheckConstraint;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.JoinColumn;
@@ -14,22 +16,23 @@ import lombok.EqualsAndHashCode;
 @Entity
 @Data
 @EqualsAndHashCode(callSuper = true)
-@Table(name = "DETALLE_VENTAS")
+@AttributeOverride(name = "id", column = @Column(name = "id_detalle_venta"))
+@Table(name = "DETALLE_VENTAS", check = @CheckConstraint(name = "ck_detalle_venta_cantidad", constraint = "cantidad_venta > 0"))
 public class SaleDetail extends TenantAwareEntity {
 
     @ManyToOne
-    @JoinColumn(name = "id_venta")
+    @JoinColumn(name = "id_venta", nullable = false)
     private Sale sale;
 
     @ManyToOne
-    @JoinColumn(name = "id_producto")
+    @JoinColumn(name = "id_producto", nullable = false)
     private Product product;
 
-    @Column(name = "cantidad_venta")
+    @Column(name = "cantidad_venta", nullable = false)
     private Integer quantity;
 
     /** Precio unitario sin IVA al que se vendio. */
-    @Column(name = "precio_venta")
+    @Column(name = "precio_venta", nullable = false)
     private Double price;
 
     /**
@@ -38,7 +41,7 @@ public class SaleDetail extends TenantAwareEntity {
      * producto no puede mover el IVA de una factura ya emitida, porque esa factura ya se
      * entrego y se declaro. Es el mismo campo iva_generado_linea de Autollantas.
      */
-    @Column(name = "iva_generado_linea")
+    @Column(name = "iva_generado_linea", nullable = false)
     private Double ivaAmount;
 
     /**
@@ -47,6 +50,6 @@ public class SaleDetail extends TenantAwareEntity {
      * descontable se deduce como ivaAmount - ivaDifference. Lo usa el Reporte de IVA para
      * repartir el descontable por categoria. Es el diferencia_iva_linea de Autollantas.
      */
-    @Column(name = "diferencia_iva_linea")
+    @Column(name = "diferencia_iva_linea", nullable = false)
     private Double ivaDifference;
 }

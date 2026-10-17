@@ -95,12 +95,19 @@ class AccountNameUniquenessTest {
      * por el repositorio directo, la base tiene que seguir frenandolo. Esto prueba que
      * uk_cuenta_tenant_name existe de verdad en el DDL.
      */
+    /** Sin pasar por saveAccount, el saldo actual (NOT NULL) hay que ponerlo a mano. */
+    private Account cuentaCruda(String nombre) {
+        Account cuenta = nuevaCuenta(nombre);
+        cuenta.setCurrentBalance(0.0);
+        return cuenta;
+    }
+
     @Test
     void laRestriccionDeBaseFrenaAunSaltandoseElService() {
         TenantContext.setTenantId(tenantUno);
-        accountRepository.saveAndFlush(nuevaCuenta(NOMBRE));
+        accountRepository.saveAndFlush(cuentaCruda(NOMBRE));
 
-        assertThatThrownBy(() -> accountRepository.saveAndFlush(nuevaCuenta(NOMBRE)))
+        assertThatThrownBy(() -> accountRepository.saveAndFlush(cuentaCruda(NOMBRE)))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 

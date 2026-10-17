@@ -21,6 +21,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Datos minimos para probar en local. Solo perfil dev.
@@ -122,7 +123,11 @@ public class DevDataInitializer implements CommandLineRunner {
             ProductCategory categoria = new ProductCategory();
             categoria.setName(nombre);
             categoria.setColor(color);
-            categoria.setTaxTypes(List.of(iva));
+            // Sin umbrales de alerta ni margen: los configura cada taller. Son NOT NULL.
+            categoria.setYellowStockMin(0);
+            categoria.setRedStockMin(0);
+            categoria.setTargetMargin(0.0);
+            categoria.setTaxTypes(Set.of(iva));
             inventoryService.saveCategory(categoria);
         });
     }

@@ -104,7 +104,7 @@ class InventoryTenantIsolationTest {
 
     private Long crearCategoria(String token, String nombre) throws Exception {
         String body = """
-                {"name":"%s","color":"#e74c3c","targetMargin":0.5}
+                {"name":"%s","color":"#e74c3c","yellowStockMin":5,"redStockMin":2,"targetMargin":0.5}
                 """.formatted(nombre);
         MvcResult result = mockMvc.perform(post("/api/inventory/categories")
                         .header("Authorization", "Bearer " + token)

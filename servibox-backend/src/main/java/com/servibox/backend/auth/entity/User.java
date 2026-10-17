@@ -1,6 +1,7 @@
 package com.servibox.backend.auth.entity;
 
 import com.servibox.backend.shared.TenantAwareEntity;
+import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -12,34 +13,35 @@ import lombok.EqualsAndHashCode;
 
 /**
  * El username es unico dentro de un tenant, no globalmente: dos negocios distintos pueden
- * tener cada uno su usuario "admin". De ahi la restriccion compuesta (tenant_id, username)
+ * tener cada uno su usuario "admin". De ahi la restriccion compuesta (id_tenant, username)
  * en vez de unique en la columna sola.
  */
 @Entity
 @Data
 @EqualsAndHashCode(callSuper = true)
+@AttributeOverride(name = "id", column = @Column(name = "id_usuario"))
 @Table(
         name = "USUARIOS",
         uniqueConstraints = @UniqueConstraint(
                 name = "uk_usuario_tenant_username",
-                columnNames = {"tenant_id", "username"}
+                columnNames = {"id_tenant", "username"}
         )
 )
 public class User extends TenantAwareEntity {
 
-    @Column(name = "username", nullable = false)
+    @Column(name = "username", length = 50, nullable = false)
     private String username;
 
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 
-    @Column(name = "email")
+    @Column(name = "email", length = 150)
     private String email;
 
     @Column(name = "activo", nullable = false)
     private boolean active = true;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "rol", nullable = false)
+    @Column(name = "rol", length = 30, nullable = false)
     private Role role;
 }

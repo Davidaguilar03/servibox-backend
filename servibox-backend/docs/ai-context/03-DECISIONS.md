@@ -12,6 +12,61 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-17: Nombres fisicos, nulabilidad y longitudes del diccionario
+
+* Decision: paso 5 del refactor de normalizacion (ver
+  [sessions/2026-10-06-refactor-normalizacion.md](sessions/2026-10-06-refactor-normalizacion.md)).
+  Sin cambiar tipos fisicos, que son del paso 6 con Flyway.
+  * **Nombres.** Tablas, columnas y FK son las de [04-DATA-MODEL.md](04-DATA-MODEL.md). La
+    PK de cada entidad es `id_<entidad>` (`id_usuario`, `id_configuracion`, `id_cuenta`,
+    `id_movimiento`, `id_compra`, `id_detalle_compra`, `id_venta`, `id_detalle_venta`,
+    `id_producto`, `id_categoria_producto`, `id_impuesto`), con `@AttributeOverride` sobre el
+    `id` de `TenantAwareEntity`, que conserva el campo. La columna de tenant pasa de
+    `tenant_id` a `id_tenant` en la clase base, en la condicion del `@Filter` y en los
+    `@UniqueConstraint`; la propiedad Java sigue siendo `tenantId`. En MOVIMIENTOS,
+    `concepto_movimiento` pasa a `concepto` y `monto_movimiento` a `monto`. `Tenant` no
+    extiende la clase base y ya tenia las columnas de TENANTS.
+  * **FK a TENANTS.** El diccionario pone `id_tenant` como FK en todas las tablas de
+    negocio. `TenantAwareEntity` gana un `ManyToOne` LAZY a `Tenant` de solo lectura
+    (`insertable = false, updatable = false`, sin accesores) sobre la misma columna, solo
+    para que Hibernate cree la FK. Antes no habia ninguna FK a TENANTS.
+  * **Tabla puente.** `ProductCategory.taxTypes` pasa de `List` a `Set`: con la `List` la
+    tabla `CATEGORIA_IMPUESTOS` no tenia PK y admitia parejas repetidas; con el `Set` tiene
+    la PK compuesta `(id_categoria_producto, id_impuesto)` del diccionario.
+  * **Nulabilidad y longitudes.** `nullable = false` donde el diccionario dice NOT NULL
+    (entre otras, `id_tercero` en VENTAS y COMPRAS; `id_cuenta`, `tipo_movimiento`,
+    `concepto`, `monto` y `fecha_movimiento` en MOVIMIENTOS; los porcentajes de
+    CONFIGURACION_FINANCIERA; todos los campos de CATEGORIA_PRODUCTOS y PRODUCTOS) y
+    `length` de cada VARCHAR, tambien en las columnas de enum, que en H2 salen como ENUM
+    pero en PostgreSQL seran VARCHAR. No se relajo ninguna regla: los caminos que las
+    violaban se corrigieron (abajo).
+  * **CHECK.** `ck_movimiento_monto` (`monto > 0`), `ck_detalle_compra_cantidad` y
+    `ck_detalle_venta_cantidad` (cantidad > 0), junto a `ck_movimiento_factura`.
+  * **Caminos que violaban las reglas nuevas.** `InventoryService.saveProduct` insertaba
+    el producto antes de calcular `taxAmount` y `suggestedPrice`; ahora los calcula antes
+    del primer INSERT, y `recalculatePrices` ya no se salta un costo 0 (deja los dos en 0).
+    `CategoryRequest` y `ProductRequest` tenian opcionales campos NOT NULL (color, umbrales
+    y margen; descripcion y cantidad): ahora son obligatorios y faltar es 400. La semilla
+    de desarrollo creaba categorias sin umbrales ni margen: ahora los pone en 0.
+  * **Errores de lectura del cuerpo.** `HttpMessageNotReadableException` (JSON mal formado
+    o valor de enum inexistente) era 500 por el manejador de ultimo recurso; ahora es 400.
+    Si el valor es de un enum, el mensaje nombra el campo y lista los valores permitidos.
+  * **Prueba de conformidad.** `schema.SchemaConformanceTest` parsea 04-DATA-MODEL.md y lo
+    compara por `DatabaseMetaData` con el esquema de la base de pruebas. Las diferencias de
+    tipo que quedan para el paso 6 estan en una lista explicita dentro de la prueba, por
+    tabla y columna y con su motivo; la prueba falla tambien si una de ellas deja de
+    ocurrir.
+* Alternativas consideradas: valores por defecto en las entidades para las columnas NOT
+  NULL que la API dejaba opcionales (umbrales en 0, color generico), descartado porque es
+  inventar datos de negocio en vez de pedirlos; renombrar el tenant entidad por entidad con
+  `@AttributeOverride`, descartado porque el `@Filter` lleva el nombre de la columna en su
+  SQL y tiene que ser uno solo; comparar tipos por las cinco familias del diccionario sin
+  distinguir BIGINT, DOUBLE, DATE ni ENUM, descartado porque esconderia justo lo que el
+  paso 6 tiene que resolver.
+* Motivo: que el esquema que genera Hibernate sea el del diccionario antes de escribir la
+  migracion de Flyway del paso 6, y que una divergencia nueva se detecte en `./mvnw test`
+  y no en produccion.
+
 ## 2026-10-17: Comportamiento y atributos alineados con el diccionario
 
 * Decision: paso 4 del refactor de normalizacion (ver
@@ -199,7 +254,8 @@ Formato de cada entrada:
 * Nombres de columna: los propios del diccionario. La PK usa `id_tercero` con
   `@AttributeOverride`; el tenant se queda en `tenant_id` porque el `@Filter` de
   `TenantAwareEntity` lleva la columna escrita en su condicion SQL. Las dos se alinean
-  (`id_tenant` en todas las tablas) en el paso de Flyway.
+  (`id_tenant` en todas las tablas) en el paso de Flyway. **SUPERADO en el nombre de columna el 2026-10-17** por "Nombres fisicos, nulabilidad y longitudes del diccionario": la columna es `id_tenant` en
+  todas las tablas desde el paso 5, no el de Flyway, y todas las PK son `id_<entidad>`.
 
 ## 2026-10-06: Restaurar es el inverso exacto de anular
 
@@ -809,7 +865,7 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
 ## 2026-09-07: El numero de factura lleva restriccion de base, no solo validacion
 
 * Decision: `Sale` lleva `uk_venta_tenant_invoice_number` sobre
-  `(tenant_id, numero_factura_venta)`, ademas de la validacion en
+  `(tenant_id, numero_factura_venta)` (**SUPERADO en el nombre de columna el 2026-10-17** por "Nombres fisicos, nulabilidad y longitudes del diccionario": la columna es `id_tenant`), ademas de la validacion en
   `SalesService.crearFactura` que lanza `DuplicateInvoiceNumberException` (**409**). Lo
   mismo con `Customer` y `uk_cliente_tenant_document`. **SUPERADO en esa parte el
   2026-10-06** por "Clientes y proveedores se unifican en terceros (Counterparty)": ahora es `Counterparty` con `uk_tercero_tenant_document`; el criterio
@@ -970,7 +1026,7 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
 ## 2026-09-07: Nombre de cuenta unico por tenant
 
 * Decision: `Account` lleva la restriccion compuesta `uk_cuenta_tenant_name` sobre
-  `(tenant_id, nombre_cuenta)`, y `TreasuryService.saveAccount` valida con
+  `(tenant_id, nombre_cuenta)` (**SUPERADO en el nombre de columna el 2026-10-17** por "Nombres fisicos, nulabilidad y longitudes del diccionario": la columna es `id_tenant`), y `TreasuryService.saveAccount` valida con
   `findByNameAndTenantId` antes del INSERT lanzando `DuplicateAccountNameException`, que
   el `GlobalExceptionHandler` traduce a 409 con un mensaje legible.
 * Alternativas consideradas: no poner restriccion ninguna, que es lo que hace Autollantas
@@ -1011,7 +1067,8 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
 
 ## 2026-09-07: `Movement` con `concept` propio y `type` como enum
 
-* Decision: `Movement` lleva una columna `concepto_movimiento` y un enum `MovementType`
+* Decision: `Movement` lleva una columna `concepto_movimiento` (renombrada a `concepto` el
+  2026-10-17, ver "Nombres fisicos, nulabilidad y longitudes del diccionario") y un enum `MovementType`
   (`INGRESO`, `EGRESO`). Autollantas no tiene ninguna de las dos cosas: su
   `MOVIMIENTOS.tipo_movimiento` es un `String` con los literales `"Ingreso"` y `"Egreso"`,
   y la tabla no tiene columna de concepto.
@@ -1163,6 +1220,10 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
   con `Tenant.id`, que es `Long` por ser la referencia de `tenant_id`.
 
 ## 2026-08-28: Aislamiento multi-tenant por columna discriminadora
+
+> **SUPERADO en el nombre de columna** el 2026-10-17 por "Nombres fisicos, nulabilidad y longitudes del diccionario": la columna es `id_tenant`
+> en vez de `tenant_id`. La decision de fondo (columna discriminadora y `@Filter`) sigue
+> vigente.
 
 * Decision: un solo esquema con columna `tenant_id` en cada tabla de negocio, y filtro de
   Hibernate (`@FilterDef` / `@Filter` en `TenantAwareEntity`) habilitado por sesion a

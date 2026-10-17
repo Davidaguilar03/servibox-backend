@@ -254,8 +254,9 @@ class PurchasesTenantIsolationTest {
     void laBaseFrenaNumerosYNitsRepetidosAunSaltandoseElService() {
         TenantContext.setTenantId(tenantUno);
 
-        purchaseRepository.saveAndFlush(compraCruda("FAC-CRUDA"));
-        assertThatThrownBy(() -> purchaseRepository.saveAndFlush(compraCruda("FAC-CRUDA")))
+        Counterparty proveedor = counterpartyRepository.saveAndFlush(proveedorCrudo("900555000"));
+        purchaseRepository.saveAndFlush(compraCruda("FAC-CRUDA", proveedor));
+        assertThatThrownBy(() -> purchaseRepository.saveAndFlush(compraCruda("FAC-CRUDA", proveedor)))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
         counterpartyRepository.saveAndFlush(proveedorCrudo("900555444"));
@@ -263,9 +264,10 @@ class PurchasesTenantIsolationTest {
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
-    private Purchase compraCruda(String numero) {
+    private Purchase compraCruda(String numero, Counterparty proveedor) {
         Purchase compra = new Purchase();
         compra.setInvoiceNumber(numero);
+        compra.setSupplier(proveedor);
         compra.setInvoiceDate(LocalDate.now());
         compra.setPaymentType(PaymentType.CREDITO);
         compra.setStatus(PurchaseStatus.PENDIENTE);

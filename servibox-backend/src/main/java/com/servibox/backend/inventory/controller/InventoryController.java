@@ -20,8 +20,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/inventory")
@@ -76,11 +77,11 @@ public class InventoryController {
         return ProductResponse.from(inventoryService.saveProduct(product));
     }
 
-    private List<TaxType> resolverImpuestos(List<Long> ids) {
+    private Set<TaxType> resolverImpuestos(List<Long> ids) {
         if (ids == null || ids.isEmpty()) {
-            return new ArrayList<>();
+            return new HashSet<>();
         }
         List<TaxType> disponibles = inventoryService.findAllTaxTypes();
-        return disponibles.stream().filter(t -> ids.contains(t.getId())).collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        return disponibles.stream().filter(t -> ids.contains(t.getId())).collect(java.util.stream.Collectors.toCollection(HashSet::new));
     }
 }

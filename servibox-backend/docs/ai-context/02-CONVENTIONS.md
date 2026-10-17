@@ -5,6 +5,14 @@
 * Entidades, campos, DTOs y repositorios en ingles (`Sale.invoiceDate`,
   `findByIdAndTenantId`). Tablas y columnas en espanol, ver Base de datos en
   [01-ARCHITECTURE.md](01-ARCHITECTURE.md).
+* Nombres fisicos: **los de [04-DATA-MODEL.md](04-DATA-MODEL.md)**, sin inventar. La PK de
+  cada entidad es `id_<entidad>` (`id_venta`, `id_detalle_venta`, `id_categoria_producto`)
+  con `@AttributeOverride(name = "id")`; el campo Java sigue siendo `id`. La columna de
+  tenant es `id_tenant`; la propiedad Java, `tenantId`. Nulabilidad y `length` tambien del
+  diccionario, incluidas las columnas de enum. `schema.SchemaConformanceTest` compara el
+  esquema con el diccionario: quien toque una entidad o el diccionario corre esa prueba.
+* CHECK: `ck_<tabla>_<regla>` (`ck_movimiento_monto`, `ck_detalle_venta_cantidad`),
+  declarados en `@Table(check = ...)`.
 * Operaciones de negocio de los services en espanol (`crearFactura`, `registrarAbono`,
   `anularFactura`, `registrarGastoOperativo`). Inventory conserva los nombres en ingles
   portados de Autollantas (`saveProduct`, `recalculatePrices`).
@@ -28,7 +36,10 @@ Excepciones de dominio en el paquete `service` de su modulo, traducidas en un so
 `GlobalExceptionHandler`. Tabla de codigos en [01-ARCHITECTURE.md](01-ARCHITECTURE.md)
 (Manejo centralizado de errores). Criterio: duplicado o falta de stock / saldo es **409**;
 operacion no permitida por el estado del documento es **400**; recurso de ruta es **404**,
-ver Busqueda por id mas abajo.
+ver Busqueda por id mas abajo. Un cuerpo que no se puede leer (JSON mal formado, valor de
+enum que no existe) es **400**, nunca 500; si es un enum, el mensaje nombra el campo y los
+valores permitidos. Un campo NOT NULL en la base es `@NotNull` / `@NotBlank` en su
+`Request`, para que falte con 400 y no con el error crudo de la base.
 
 ## Formato de respuestas API (DTOs)
 
@@ -147,19 +158,19 @@ Regla de exclusion de `ANULADA`: ver Modulo Reporting en
 
 ### Unicidad en entidades multi-tenant
 
-Toda restriccion de unicidad de una entidad de negocio es **compuesta con `tenant_id`**,
+Toda restriccion de unicidad de una entidad de negocio es **compuesta con `id_tenant`**,
 nunca `unique = true` en la columna sola. Un valor unico globalmente impediria que dos
 clientes distintos usen el mismo nombre de usuario o el mismo codigo de producto, que es
 justamente lo normal entre negocios que no se conocen.
 
 | Entidad | Restriccion | Nombre |
 |-|-|-|
-| `User` | `(tenant_id, username)` | `uk_usuario_tenant_username` |
-| `Product` | `(tenant_id, codigo_producto)` | `uk_producto_tenant_code` |
-| `Account` | `(tenant_id, nombre_cuenta)` | `uk_cuenta_tenant_name` |
-| `Counterparty` | `(tenant_id, numero_documento)` | `uk_tercero_tenant_document` |
-| `Sale` | `(tenant_id, numero_factura_venta)` | `uk_venta_tenant_invoice_number` |
-| `Purchase` | `(tenant_id, numero_factura_compra)` | `uk_compra_tenant_invoice_number` |
+| `User` | `(id_tenant, username)` | `uk_usuario_tenant_username` |
+| `Product` | `(id_tenant, codigo_producto)` | `uk_producto_tenant_code` |
+| `Account` | `(id_tenant, nombre_cuenta)` | `uk_cuenta_tenant_name` |
+| `Counterparty` | `(id_tenant, numero_documento)` | `uk_tercero_tenant_document` |
+| `Sale` | `(id_tenant, numero_factura_venta)` | `uk_venta_tenant_invoice_number` |
+| `Purchase` | `(id_tenant, numero_factura_compra)` | `uk_compra_tenant_invoice_number` |
 
 Ademas de la restriccion de base, el service valida antes de guardar y lanza una excepcion
 legible; el error crudo de constraint violation no le sirve al usuario final. Al editar,

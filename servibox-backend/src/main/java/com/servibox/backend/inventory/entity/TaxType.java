@@ -1,6 +1,7 @@
 package com.servibox.backend.inventory.entity;
 
 import com.servibox.backend.shared.TenantAwareEntity;
+import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
@@ -10,22 +11,23 @@ import lombok.EqualsAndHashCode;
 @Entity
 @Data
 @EqualsAndHashCode(callSuper = true)
+@AttributeOverride(name = "id", column = @Column(name = "id_impuesto"))
 @Table(name = "TIPOS_IMPUESTO")
 public class TaxType extends TenantAwareEntity {
 
-    @Column(name = "nombre_impuesto")
+    @Column(name = "nombre_impuesto", length = 100, nullable = false)
     private String name;
 
-    @Column(name = "tasa_impuesto")
+    @Column(name = "tasa_impuesto", nullable = false)
     private Double rate;
 
-    @Column(name = "descripcion_impuesto")
+    @Column(name = "descripcion_impuesto", length = 255)
     private String description;
 
-    @Column(name = "aplica_transaccion")
+    @Column(name = "aplica_transaccion", nullable = false)
     private Boolean appliesToTransaction;
 
     /** IVA recuperable. Solo estos entran en el taxAmount del producto. */
-    @Column(name = "es_iva")
+    @Column(name = "es_iva", nullable = false)
     private Boolean isVat = Boolean.FALSE;
 }

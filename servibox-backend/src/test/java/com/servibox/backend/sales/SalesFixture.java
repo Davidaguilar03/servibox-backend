@@ -19,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
@@ -65,8 +66,10 @@ public class SalesFixture {
         ProductCategory categoria = new ProductCategory();
         categoria.setName("LLANTAS");
         categoria.setColor("#e74c3c");
+        categoria.setYellowStockMin(5);
+        categoria.setRedStockMin(2);
         categoria.setTargetMargin(0.0);
-        categoria.setTaxTypes(List.of(guardado));
+        categoria.setTaxTypes(Set.of(guardado));
         return inventoryService.saveCategory(categoria);
     }
 
