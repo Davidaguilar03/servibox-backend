@@ -15,7 +15,7 @@ import com.servibox.backend.sales.service.SalesService;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
-import com.servibox.backend.treasury.entity.MovementSourceType;
+import com.servibox.backend.treasury.entity.MovementCategory;
 import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.service.TreasuryService;
 import org.junit.jupiter.api.AfterEach;
@@ -111,8 +111,9 @@ class SalesInvoicingTest {
         assertThat(movimientos.get(0).getType()).isEqualTo(MovementType.INGRESO);
         assertThat(movimientos.get(0).getAmount()).isEqualTo(476000.0);
         assertThat(movimientos.get(0).getConcept()).isEqualTo("Venta VEN-00001");
-        assertThat(movimientos.get(0).getSourceType()).isEqualTo(MovementSourceType.SALE);
-        assertThat(movimientos.get(0).getSourceId()).isEqualTo(venta.getId());
+        assertThat(movimientos.get(0).getCategory()).isEqualTo(MovementCategory.RECAUDO_VENTA);
+        assertThat(movimientos.get(0).getSale().getId()).isEqualTo(venta.getId());
+        assertThat(movimientos.get(0).getPurchase()).isNull();
     }
 
     @Test

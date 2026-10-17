@@ -18,7 +18,7 @@ import com.servibox.backend.sales.service.SalesService;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
-import com.servibox.backend.treasury.entity.MovementSourceType;
+import com.servibox.backend.treasury.entity.MovementCategory;
 import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.service.TreasuryService;
 import org.junit.jupiter.api.AfterEach;
@@ -119,13 +119,16 @@ class PurchasesFlowTest {
         assertThat(saldoDe(caja)).isEqualTo(1000000.0 - 595000.0);
         List<Movement> movimientos = treasuryService.findMovementsByAccountId(caja.getId());
         Movement egreso = movimientos.stream()
-                .filter(m -> m.getSourceType() == MovementSourceType.PURCHASE)
+                .filter(m -> m.getPurchase() != null)
                 .findFirst()
                 .orElseThrow();
         assertThat(egreso.getType()).isEqualTo(MovementType.EGRESO);
         assertThat(egreso.getAmount()).isEqualTo(595000.0);
         assertThat(egreso.getConcept()).isEqualTo("Compra FAC-00001");
-        assertThat(egreso.getSourceId()).isEqualTo(compra.getId());
+        assertThat(egreso.getCategory()).isEqualTo(MovementCategory.PAGO_COMPRA);
+        assertThat(egreso.getPurchase().getId()).isEqualTo(compra.getId());
+        assertThat(egreso.getSale()).isNull();
+        fixture.verificarInvariante();
     }
 
     @Test
@@ -165,13 +168,14 @@ class PurchasesFlowTest {
         fondear(500000.0);
 
         purchasesService.registrarPago(compra.getId(), caja.getId(), total);
+        fixture.verificarInvariante();
 
         assertThat(estadoDe(compra)).isEqualTo(PurchaseStatus.PAGADA);
         assertThat(purchasesService.saldoPendiente(compra)).isEqualTo(0.0);
         assertThat(saldoDe(caja)).isEqualTo(500000.0 - total);
 
         Movement egreso = treasuryService.findMovementsByAccountId(caja.getId()).stream()
-                .filter(m -> m.getSourceType() == MovementSourceType.PURCHASE)
+                .filter(m -> m.getPurchase() != null)
                 .findFirst()
                 .orElseThrow();
         assertThat(egreso.getType()).isEqualTo(MovementType.EGRESO);
@@ -202,8 +206,9 @@ class PurchasesFlowTest {
                 .hasMessageContaining("PENDIENTE");
     }
 
+    /** Anular no borra el egreso: lo deja inactivo, fuera del extracto de la cuenta. */
     @Test
-    void anularUnaCompraPagadaQuitaElStockRevierteElMovimientoYRestauraElBalance() {
+    void anularUnaCompraPagadaQuitaElStockDejaElMovimientoInactivoYRestauraElBalance() {
         fondear(1000000.0);
         double saldoAntesDeLaCompra = saldoDe(caja);
         int stockAntesDeLaCompra = stockDe(llanta);
@@ -213,11 +218,14 @@ class PurchasesFlowTest {
         assertThat(saldoDe(caja)).isEqualTo(405000.0);
 
         purchasesService.anularFactura(compra.getId());
+        fixture.verificarInvariante();
 
         assertThat(stockDe(llanta)).isEqualTo(stockAntesDeLaCompra);
         assertThat(saldoDe(caja)).isEqualTo(saldoAntesDeLaCompra);
         assertThat(treasuryService.findMovementsByAccountId(caja.getId()).stream()
-                .filter(m -> m.getSourceType() == MovementSourceType.PURCHASE).toList()).isEmpty();
+                .filter(m -> m.getPurchase() != null).toList()).isEmpty();
+        assertThat(treasuryService.movimientosDeCompra(compra)).singleElement()
+                .satisfies(m -> assertThat(m.getConcept()).isEqualTo("Compra FAC-00007"));
         assertThat(estadoDe(compra)).isEqualTo(PurchaseStatus.ANULADA);
     }
 
@@ -249,12 +257,31 @@ class PurchasesFlowTest {
         assertThat(saldoDe(caja)).isEqualTo(saldoAntesDelPago - 19000.0);
 
         purchasesService.anularFactura(compra.getId());
+        fixture.verificarInvariante();
 
         assertThat(saldoDe(caja)).isEqualTo(saldoAntesDelPago);
         assertThat(treasuryService.findMovementsByAccountId(caja.getId()).stream()
-                .filter(m -> m.getSourceType() == MovementSourceType.PURCHASE).toList()).isEmpty();
+                .filter(m -> m.getPurchase() != null).toList()).isEmpty();
+        assertThat(treasuryService.movimientosDeCompra(compra)).singleElement()
+                .satisfies(m -> assertThat(m.getAmount()).isEqualTo(19000.0));
+        assertThat(purchasesService.saldoPendiente(compra)).isEqualTo(100000.0);
         assertThat(stockDe(llanta)).isEqualTo(10);
         assertThat(estadoDe(compra)).isEqualTo(PurchaseStatus.ANULADA);
+    }
+
+    @Test
+    void noSePuedePagarUnaCompraAnulada() {
+        Purchase compra = comprar("FAC-00013", PaymentType.CREDITO, null, 1, 100000.0);
+        fondear(500000.0);
+        purchasesService.anularFactura(compra.getId());
+
+        assertThatThrownBy(() -> purchasesService.registrarPago(compra.getId(), caja.getId(), 1000.0))
+                .isInstanceOf(InvalidPurchaseOperationException.class)
+                .hasMessage("Solo se puede pagar una compra PENDIENTE, y esta esta ANULADA");
+
+        assertThat(saldoDe(caja)).isEqualTo(500000.0);
+        assertThat(treasuryService.movimientosDeCompra(compra)).isEmpty();
+        fixture.verificarInvariante();
     }
 
     @Test

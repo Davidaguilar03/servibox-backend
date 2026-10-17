@@ -6,17 +6,15 @@ import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.repository.ProductRepository;
 import com.servibox.backend.inventory.service.InventoryService;
-import com.servibox.backend.sales.entity.Collection;
 import com.servibox.backend.sales.entity.PaymentType;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.sales.entity.SaleDetail;
 import com.servibox.backend.sales.entity.SaleStatus;
-import com.servibox.backend.sales.repository.CollectionRepository;
 import com.servibox.backend.sales.repository.SaleDetailRepository;
 import com.servibox.backend.sales.repository.SaleRepository;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
-import com.servibox.backend.treasury.entity.MovementSourceType;
+import com.servibox.backend.treasury.entity.Movement;
 import com.servibox.backend.treasury.service.TreasuryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -40,7 +38,6 @@ public class SalesService {
 
     private final SaleRepository saleRepository;
     private final SaleDetailRepository saleDetailRepository;
-    private final CollectionRepository collectionRepository;
     private final CounterpartyService counterpartyService;
     private final ProductRepository productRepository;
     private final InventoryService inventoryService;
@@ -63,11 +60,6 @@ public class SalesService {
     @Transactional(readOnly = true)
     public List<SaleDetail> findDetailsBySaleId(Long saleId) {
         return saleDetailRepository.findBySaleId(saleId);
-    }
-
-    @Transactional(readOnly = true)
-    public List<Collection> findCollectionsBySaleId(Long saleId) {
-        return collectionRepository.findBySaleId(saleId);
     }
 
     /** Una linea pedida: que producto, cuantas unidades y a que precio unitario sin IVA. */
@@ -109,7 +101,6 @@ public class SalesService {
         venta.setInvoiceDate(invoiceDate != null ? invoiceDate : LocalDate.now());
         venta.setDueDate(dueDate);
         venta.setPaymentType(paymentType);
-        venta.setAccount(cuenta);
         venta.setPaymentMethod(paymentMethod);
         // Se persiste primero para que las lineas tengan a que colgarse.
         venta.setStatus(SaleStatus.PENDIENTE);
@@ -171,11 +162,12 @@ public class SalesService {
     }
 
     /**
-     * Abono a una factura a credito. Si con este abono la factura queda cubierta, pasa a
-     * PAGADA. Se llama abono, no pago ni cobro, ver 02-CONVENTIONS.md.
+     * Abono a una factura a credito: un movimiento RECAUDO_VENTA enlazado a la venta. Si
+     * con este abono la factura queda cubierta, pasa a PAGADA. Se llama abono, no pago ni
+     * cobro, ver 02-CONVENTIONS.md.
      */
     @Transactional
-    public Collection registrarAbono(Long saleId, Long accountId, Double monto) {
+    public Movement registrarAbono(Long saleId, Long accountId, Double monto) {
         Sale venta = findSaleById(saleId)
                 .orElseThrow(() -> new IllegalArgumentException("Factura no encontrada: " + saleId));
 
@@ -196,36 +188,25 @@ public class SalesService {
         Account cuenta = treasuryService.findAccountById(accountId)
                 .orElseThrow(() -> new IllegalArgumentException("Cuenta no encontrada: " + accountId));
 
-        Collection abono = new Collection();
-        abono.setSale(venta);
-        abono.setAccount(cuenta);
-        abono.setAmount(monto);
-        abono.setDate(LocalDate.now());
-        Collection guardado = collectionRepository.save(abono);
-
-        treasuryService.registrarIngresoDeVenta(cuenta, conceptoAbono(venta), monto, venta, guardado.getDate());
+        Movement abono = treasuryService.registrarIngresoDeVenta(
+                cuenta, conceptoAbono(venta), monto, venta, LocalDate.now());
 
         if (saldoPendiente(venta) <= TOLERANCIA_PESOS) {
             venta.setStatus(SaleStatus.PAGADA);
+            saleRepository.save(venta);
         }
-        // La cuenta por la que entro el ultimo abono queda como la de la factura, igual
-        // que en Autollantas.
-        venta.setAccount(cuenta);
-        saleRepository.save(venta);
 
-        return guardado;
+        return abono;
     }
 
     /**
-     * Anula una factura. Portado de SalesService.cancelSale de Autollantas:
+     * Anula una factura: devuelve el stock y deshace en tesoreria el efecto de cada uno de
+     * sus movimientos (el contado y los abonos) sobre el saldo de su cuenta, sin validar
+     * nada. **No borra los movimientos**: con la factura ANULADA quedan inactivos y dejan de
+     * salir en listados y sumas. Ver "Anular y restaurar facturas" en 04-DATA-MODEL.md.
      *
-     * * PAGADA: devuelve el stock, borra los movimientos de tesoreria de la venta y resta
-     *   su importe del saldo de la cuenta.
-     * * PENDIENTE sin abonos: solo devuelve el stock, tesoreria no se toca porque nunca
-     *   entro dinero.
-     *
-     * En los dos casos queda ANULADA. Una factura ya ANULADA no se puede volver a anular:
-     * devolveria el stock por segunda vez.
+     * Una factura ya ANULADA no se puede volver a anular: devolveria el stock y el dinero
+     * por segunda vez.
      */
     @Transactional
     public Sale anularFactura(Long saleId) {
@@ -237,9 +218,7 @@ public class SalesService {
                     + " ya esta anulada");
         }
 
-        // Deshace el efecto en tesoreria antes de tocar nada mas. Si la venta no genero
-        // ningun movimiento (credito sin abonos), esto no hace nada.
-        treasuryService.revertirMovimientosDeVenta(venta);
+        treasuryService.revertirSaldosDeVenta(venta);
 
         for (SaleDetail detalle : saleDetailRepository.findBySaleId(venta.getId())) {
             restaurarStock(detalle.getProduct(), detalle.getQuantity());
@@ -250,19 +229,14 @@ public class SalesService {
     }
 
     /**
-     * Saca una factura de la papelera: es el inverso exacto de anularFactura. Lo que la
-     * anulacion saco, esto lo devuelve:
+     * Saca una factura de la papelera: el inverso exacto de anularFactura.
      *
-     * * Vuelve a descontar el stock con el mismo descontarStock de crearFactura.
-     * * Recrea en tesoreria los movimientos que la anulacion borro, con su concepto, cuenta,
-     *   monto y fecha originales: el ingreso del contado y uno por cada abono, cuyas filas
-     *   Collection siguen ahi despues de anular.
-     * * El estado se deriva de los datos, igual que al crear o abonar: contado PAGADA,
-     *   credito PAGADA o PENDIENTE segun el saldo pendiente.
-     *
-     * Si quedara algun movimiento vivo con origen (SALE, id), la factura no esta anulada de
-     * verdad en tesoreria y recrear duplicaria el dinero: se rechaza sin tocar nada. Si una
-     * linea no tiene stock, la transaccion deshace todo. Ver 03-DECISIONS.md.
+     * * Vuelve a descontar el stock con el mismo descontarStock de crearFactura. Si una
+     *   linea no alcanza, InsufficientStockException y la transaccion deshace todo.
+     * * Vuelve a aplicar el saldo de cada movimiento de la factura, que nunca se borraron:
+     *   son ingresos, no hay nada que validar.
+     * * El estado se deriva: PAGADA si el saldo pendiente cae en la tolerancia, si no
+     *   PENDIENTE.
      */
     @Transactional
     public Sale restaurarFactura(Long saleId) {
@@ -273,29 +247,14 @@ public class SalesService {
             throw new InvalidSaleOperationException("Solo se puede restaurar una factura ANULADA, y la "
                     + venta.getInvoiceNumber() + " esta " + venta.getStatus());
         }
-        if (treasuryService.tieneMovimientos(MovementSourceType.SALE, venta.getId())) {
-            throw new InvalidSaleOperationException("Inconsistencia: la factura " + venta.getInvoiceNumber()
-                    + " esta ANULADA pero todavia tiene movimientos de tesoreria; no se restaura");
-        }
 
         for (SaleDetail detalle : saleDetailRepository.findBySaleId(venta.getId())) {
             descontarStock(detalle.getProduct(), detalle.getQuantity());
         }
 
-        if (venta.getPaymentType() == PaymentType.CONTADO) {
-            treasuryService.registrarIngresoDeVenta(
-                    venta.getAccount(), conceptoVenta(venta), venta.getTotal(), venta, venta.getInvoiceDate());
-        }
-        for (Collection abono : collectionRepository.findBySaleId(venta.getId())) {
-            treasuryService.registrarIngresoDeVenta(
-                    abono.getAccount(), conceptoAbono(venta), abono.getAmount(), venta, abono.getDate());
-        }
+        treasuryService.reaplicarSaldosDeVenta(venta);
 
-        if (venta.getPaymentType() == PaymentType.CONTADO || saldoPendiente(venta) <= TOLERANCIA_PESOS) {
-            venta.setStatus(SaleStatus.PAGADA);
-        } else {
-            venta.setStatus(SaleStatus.PENDIENTE);
-        }
+        venta.setStatus(saldoPendiente(venta) <= TOLERANCIA_PESOS ? SaleStatus.PAGADA : SaleStatus.PENDIENTE);
         return saleRepository.save(venta);
     }
 
@@ -309,11 +268,15 @@ public class SalesService {
         return "Abono factura " + venta.getInvoiceNumber();
     }
 
-    /** Lo que falta por cobrar de una factura: su total menos los abonos ya recibidos. */
+    /**
+     * Lo que falta por cobrar de una factura: su total menos sus movimientos RECAUDO_VENTA
+     * (el contado y los abonos). Cuenta todos, activos o no: una factura anulada conserva
+     * lo que tenia pagado, y al restaurarla el estado sale de aqui.
+     */
     @Transactional(readOnly = true)
     public double saldoPendiente(Sale venta) {
-        double abonado = collectionRepository.findBySaleId(venta.getId()).stream()
-                .mapToDouble(c -> c.getAmount() != null ? c.getAmount() : 0.0)
+        double abonado = treasuryService.movimientosDeVenta(venta).stream()
+                .mapToDouble(m -> m.getAmount() != null ? m.getAmount() : 0.0)
                 .sum();
         double total = venta.getTotal() != null ? venta.getTotal() : 0.0;
         double pendiente = total - abonado;

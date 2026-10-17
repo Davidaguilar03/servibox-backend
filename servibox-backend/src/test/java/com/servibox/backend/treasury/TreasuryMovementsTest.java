@@ -157,7 +157,8 @@ class TreasuryMovementsTest {
         assertThat(egreso.getDate()).isEqualTo(fecha);
         assertThat(egreso.getAccount().getId()).isEqualTo(cuentaA.getId());
         assertThat(egreso.getRelatedMovement()).isNull();
-        assertThat(egreso.getSourceType()).isNull();
+        assertThat(egreso.getSale()).isNull();
+        assertThat(egreso.getPurchase()).isNull();
 
         List<Movement> deB = treasuryService.findMovementsByAccountId(cuentaB.getId());
         assertThat(deB).singleElement().satisfies(ingreso -> {
@@ -181,8 +182,8 @@ class TreasuryMovementsTest {
         assertThat(treasuryService.findMovementsByAccountId(cuentaA.getId()))
                 .singleElement()
                 .satisfies(m -> {
-                    assertThat(m.getSourceType()).isNull();
-                    assertThat(m.getSourceId()).isNull();
+                    assertThat(m.getSale()).isNull();
+                    assertThat(m.getPurchase()).isNull();
                     assertThat(m.getRelatedMovement()).isNull();
                 });
     }

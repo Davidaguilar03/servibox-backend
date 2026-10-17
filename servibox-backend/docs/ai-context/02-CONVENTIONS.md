@@ -74,7 +74,8 @@ esta tabla.
 | `concept` | Texto que explica el movimiento | Columna real en `MOVIMIENTOS`, cosa que **Autollantas no tiene**, ver [03-DECISIONS.md](03-DECISIONS.md) |
 | `notes` | Observaciones libres de un movimiento (`notas`) | **Opcional**. En una transferencia guarda el concepto que escribio el usuario |
 | `date` | Fecha **de negocio**, `LocalDate` | No confundir con `createdAt` / `updatedAt`, que son `LocalDateTime` y son auditoria |
-| `sourceType` + `sourceId` | Factura que genero un movimiento de venta o compra | Solo `SALE` o `PURCHASE`, y **siempre juntos**. `sourceId` no es clave foranea. **Desaparece en el paso 3** del refactor, cuando se usen `id_venta` / `id_compra`. Nunca construir un `Movement` a mano: usar los metodos de `TreasuryService` |
+| `sale` / `purchase` | Factura de un movimiento (`id_venta` / `id_compra`) | Claves foraneas reales, sin cascada. `RECAUDO_VENTA` lleva `sale`, `PAGO_COMPRA` lleva `purchase`, las demas ninguna (`ck_movimiento_factura`). En la API, `saleId` / `purchaseId`. Ya no existen `sourceType` / `sourceId`. Nunca construir un `Movement` a mano: usar los metodos de `TreasuryService` |
+| **Movimiento activo** / **inactivo** | Inactivo: enlazado a una venta o compra `ANULADA`. Activo: todos los demas | **No es una columna**: se deriva del estado de la factura (`MovementSpecifications.activo()`). Un inactivo sigue en la base, pero no sale en ningun listado ni cuenta en ninguna suma ni en el saldo. Al restaurar la factura vuelve a ser activo, con el mismo id. Invariante: `currentBalance` = `initialBalance` + movimientos activos |
 | Balance global | Suma de los `currentBalance` del tenant | Es el "Total Global" (`lblTotalGlobal`) de `Accounts.fxml` |
 | `CASH` / `BANK` | Tipo de cuenta | Las 2 cuentas por defecto de Autollantas son `Caja General` (CASH) y `Bancolombia` (BANK) |
 
@@ -96,27 +97,27 @@ siempre `date`. Los de concepto se nombran `concepto_<entidad>` y en Java son si
 
 | Termino | Significado | Cuidado |
 |-|-|-|
-| **Abono** | Pago parcial de una factura a credito | **Se dice abono, NO pago y NO cobro.** Es explicito en la documentacion de Autollantas: ventana "Registrar Abono", boton "Confirmar Abono", campo "Valor Abonado". En codigo la clase se llama `Collection` (tabla `RECAUDOS`), heredado de Autollantas; el termino de negocio de cara al usuario es abono |
+| **Abono** | Pago parcial de una factura a credito | **Se dice abono, NO pago y NO cobro.** Es explicito en la documentacion de Autollantas: ventana "Registrar Abono", boton "Confirmar Abono", campo "Valor Abonado". **No es una entidad**: un abono es un `Movement` `RECAUDO_VENTA` con `sale`. Ya no hay `Collection` ni tabla `RECAUDOS`; solo la ruta `/collections` y el DTO de entrada `CollectionRequest` conservan el nombre |
 | `invoiceNumber` | Numero de factura (`numero_factura_venta`) | Unico por tenant, y aqui **si** con restriccion de base, a diferencia de Autollantas. Ver [03-DECISIONS.md](03-DECISIONS.md) |
 | `invoiceDate` | Fecha de la factura | En Autollantas el campo se llama `saleDate` (`fecha_venta`); aqui `invoiceDate`, que es como lo llama el formulario. La columna sigue siendo `fecha_venta` |
 | `ivaAmount` (linea) | IVA generado por la linea | **Congelado al facturar.** No se recalcula nunca desde el producto: editar el IVA de un producto no puede mover el IVA de una factura ya emitida |
 | `ivaPorPagar` | IVA generado menos IVA descontable | No es el IVA de la factura: es la diferencia contra el IVA que ya se pago al comprar esos productos (`producto.taxAmount`). En Autollantas se llama `ivaDifference` / "IVA por Pagar" |
 | `subtotal` | Suma de precio por cantidad, **sin** IVA | En Autollantas no es un campo, se calcula en la UI (`calculateSubtotalSinIva`) |
-| Saldo pendiente | `total` menos la suma de abonos | **No es un campo** en ServiBox, se calcula. Autollantas lo guarda en `saldo_pendiente` |
+| Saldo pendiente | `total` menos la suma de los `RECAUDO_VENTA` de la factura (contado y abonos), activos o no | **No es un campo** en ServiBox, se calcula. Autollantas lo guarda en `saldo_pendiente`. Una venta de contado tiene pendiente 0 |
 | `CONTADO` / `CREDITO` | Forma de pago | En Autollantas son los literales `String` `"Contado"` y `"Credito"` (con tilde); aqui enum |
 | `PAGADA` / `PENDIENTE` / `ANULADA` | Estado de la factura | Mismos nombres que Autollantas, pero enum en vez de `String` |
 
-Una factura anulada **no se borra**: queda en `ANULADA` con el stock ya devuelto. En
-Autollantas se sigue viendo desde la papelera; en ServiBox se restaura con
-`POST /api/sales/{id}/restore` (y `/api/purchases/{id}/restore`), el inverso exacto de
-anular: vuelve al estado que le dan sus datos (`PAGADA` o `PENDIENTE`) con sus movimientos
-de tesoreria recreados.
+Una factura anulada **no se borra**: queda en `ANULADA` con el stock ya devuelto, los
+saldos revertidos y **sus movimientos intactos pero inactivos**. En Autollantas se sigue
+viendo desde la papelera; en ServiBox se restaura con `POST /api/sales/{id}/restore` (y
+`/api/purchases/{id}/restore`), el inverso exacto de anular: vuelve al estado que le dan
+sus datos (`PAGADA` o `PENDIENTE`) y sus mismos movimientos vuelven a ser activos.
 
 ### Purchases
 
 | Termino | Significado | Cuidado |
 |-|-|-|
-| **Pago** | Pago parcial o total de una factura de compra a credito | **En compras se dice pago; en ventas se dice abono.** No son sinonimos intercambiables: el abono es lo que el taller **recibe** de un cliente, el pago es lo que el taller **entrega** a un proveedor. Autollantas es explicito: ventana "Registrar Pago", boton "Confirmar Pago", campo "Valor a Pagar". La clase es `Payment` (tabla `PAGOS`) |
+| **Pago** | Pago parcial o total de una factura de compra a credito | **En compras se dice pago; en ventas se dice abono.** No son sinonimos intercambiables: el abono es lo que el taller **recibe** de un cliente, el pago es lo que el taller **entrega** a un proveedor. Autollantas es explicito: ventana "Registrar Pago", boton "Confirmar Pago", campo "Valor a Pagar". **No es una entidad**: un pago es un `Movement` `PAGO_COMPRA` con `purchase`. Ya no hay `Payment` ni tabla `PAGOS` |
 | Proveedor | El tercero de una compra (`Purchase.supplier`) | Es un `Counterparty` con rol `PROVEEDOR` o `AMBOS`. Nombre y razon social son un solo campo, `name` (`nombre_razon_social`), como en el formulario de Autollantas |
 | `price` (linea de compra) | Costo de compra unitario, sin IVA | En Autollantas se llama `unitPrice` (`precio_compra`) |
 | `ivaTotal` | IVA de la factura de compra | Es IVA **descontable**: se recupera contra el IVA de las ventas. No confundir con el `ivaPorPagar` de una venta, que ya es la diferencia |

@@ -1,10 +1,14 @@
 package com.servibox.backend.treasury.entity;
 
+import com.servibox.backend.purchases.entity.Purchase;
+import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.shared.TenantAwareEntity;
+import jakarta.persistence.CheckConstraint;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -23,11 +27,23 @@ import java.time.LocalDate;
  * concept es una divergencia deliberada respecto de Autollantas, donde MOVIMIENTOS no
  * tiene columna de concepto y la descripcion se deriva de (tabla_origen, id_origen).
  * Ver 03-DECISIONS.md.
+ *
+ * Un movimiento enlazado a una factura ANULADA es **inactivo**: sigue en la tabla, pero no
+ * sale en listados ni cuenta en sumas ni en el saldo. Se deriva del estado de la factura,
+ * ver MovementSpecifications.activo().
+ *
+ * ck_movimiento_factura: RECAUDO_VENTA lleva venta y no compra, PAGO_COMPRA lleva compra y
+ * no venta, y las demas categorias no llevan ninguna. TreasuryService lo valida antes.
  */
 @Entity
 @Data
 @EqualsAndHashCode(callSuper = true)
-@Table(name = "MOVIMIENTOS")
+@Table(name = "MOVIMIENTOS", check = @CheckConstraint(
+        name = "ck_movimiento_factura",
+        constraint = "(categoria_movimiento = 'RECAUDO_VENTA' AND id_venta IS NOT NULL AND id_compra IS NULL)"
+                + " OR (categoria_movimiento = 'PAGO_COMPRA' AND id_compra IS NOT NULL AND id_venta IS NULL)"
+                + " OR (categoria_movimiento NOT IN ('RECAUDO_VENTA', 'PAGO_COMPRA')"
+                + " AND id_venta IS NULL AND id_compra IS NULL)"))
 public class Movement extends TenantAwareEntity {
 
     @ManyToOne
@@ -69,17 +85,15 @@ public class Movement extends TenantAwareEntity {
     private Movement relatedMovement;
 
     /**
-     * Factura que genero el movimiento (SALE o PURCHASE), o null. Desaparece en el paso 3,
-     * ver MovementSourceType.
+     * Venta de un RECAUDO_VENTA (el contado o un abono). Null en cualquier otra categoria.
+     * Clave foranea real y sin cascada: un movimiento nunca se borra con su factura.
      */
-    @Enumerated(EnumType.STRING)
-    @Column(name = "tipo_origen_movimiento")
-    private MovementSourceType sourceType;
+    @ManyToOne
+    @JoinColumn(name = "id_venta", foreignKey = @ForeignKey(name = "fk_movimiento_venta"))
+    private Sale sale;
 
-    /**
-     * Id de la factura de origen, interpretado segun sourceType. **No es una clave
-     * foranea a proposito**: apunta a tablas distintas segun el tipo.
-     */
-    @Column(name = "id_origen_movimiento")
-    private Long sourceId;
+    /** Compra de un PAGO_COMPRA (el contado o un pago). Null en cualquier otra categoria. */
+    @ManyToOne
+    @JoinColumn(name = "id_compra", foreignKey = @ForeignKey(name = "fk_movimiento_compra"))
+    private Purchase purchase;
 }

@@ -3,14 +3,13 @@ package com.servibox.backend.purchases.controller;
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.purchases.dto.PaymentRequest;
-import com.servibox.backend.purchases.dto.PaymentResponse;
 import com.servibox.backend.purchases.dto.PurchaseRequest;
 import com.servibox.backend.purchases.dto.PurchaseResponse;
-import com.servibox.backend.purchases.entity.Payment;
 import com.servibox.backend.purchases.entity.PaymentType;
 import com.servibox.backend.purchases.entity.Purchase;
 import com.servibox.backend.purchases.service.PurchasesService;
 import com.servibox.backend.shared.ResourceNotFoundException;
+import com.servibox.backend.treasury.dto.MovementResponse;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.service.TreasuryService;
 import jakarta.validation.Valid;
@@ -77,13 +76,13 @@ public class PurchasesController {
                 lineas));
     }
 
+    /** Un pago es un movimiento PAGO_COMPRA: la respuesta es ese movimiento. */
     @PostMapping("/{id}/payments")
     @ResponseStatus(HttpStatus.CREATED)
-    public PaymentResponse registrarPago(@PathVariable Long id,
-                                         @Valid @RequestBody PaymentRequest request) {
+    public MovementResponse registrarPago(@PathVariable Long id,
+                                          @Valid @RequestBody PaymentRequest request) {
         compraDeRuta(id);
-        Payment pago = purchasesService.registrarPago(id, request.accountId(), request.amount());
-        return PaymentResponse.from(pago, purchasesService.saldoPendiente(pago.getPurchase()));
+        return MovementResponse.from(purchasesService.registrarPago(id, request.accountId(), request.amount()));
     }
 
     @PostMapping("/{id}/annul")

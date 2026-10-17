@@ -357,10 +357,10 @@ Todas sus entidades extienden `TenantAwareEntity`.
 
   Una cuenta nueva arranca con `currentBalance` igual a su `initialBalance`: mientras no
   haya movimientos, el saldo vivo es el saldo de apertura.
-* `Movement` (`MOVIMIENTOS`): **el libro de movimientos**, y desde el paso 2 del refactor
-  de normalizacion la unica entidad de tesoreria ademas de `Account`. Gastos operativos,
-  ingresos ocasionales y transferencias **no tienen tabla propia**: son movimientos con su
-  categoria. Ver [04-DATA-MODEL.md](04-DATA-MODEL.md), MOVIMIENTOS.
+* `Movement` (`MOVIMIENTOS`): **el libro de movimientos**, y la unica entidad que mueve
+  dinero. Gastos operativos, ingresos ocasionales y transferencias (paso 2 del refactor
+  de normalizacion) y abonos y pagos de facturas (paso 3) **no tienen tabla propia**: son
+  movimientos con su categoria. Ver [04-DATA-MODEL.md](04-DATA-MODEL.md), MOVIMIENTOS.
 
   | Campo | Columna | Notas |
   |-|-|-|
@@ -372,7 +372,12 @@ Todas sus entidades extienden `TenantAwareEntity`.
   | `date` | `fecha_movimiento` | Fecha de negocio (`LocalDate`), no de auditoria |
   | `notes` | `notas` | Opcional, 255 |
   | `relatedMovement` | `id_movimiento_relacionado` | `ManyToOne` a `Movement`, clave foranea real. Solo en la pata INGRESO de una transferencia, apuntando a la pata EGRESO. Excluido de `toString` y `equals` |
-  | `sourceType` / `sourceId` | `tipo_origen_movimiento` / `id_origen_movimiento` | Factura de origen: `SALE` o `PURCHASE`. Sin clave foranea. **Desaparece en el paso 3**, cuando se usen `id_venta` / `id_compra` |
+  | `sale` | `id_venta` | `ManyToOne` a `Sale`, FK real `fk_movimiento_venta`, sin cascada. Solo en `RECAUDO_VENTA` |
+  | `purchase` | `id_compra` | `ManyToOne` a `Purchase`, FK real `fk_movimiento_compra`, sin cascada. Solo en `PAGO_COMPRA` |
+
+  Restriccion `CHECK` `ck_movimiento_factura`: `RECAUDO_VENTA` lleva venta y no compra,
+  `PAGO_COMPRA` compra y no venta, y las demas categorias ninguna de las dos.
+  `TreasuryService` valida lo mismo antes de escribir; la base es la red de seguridad.
 
   Las columnas que ya existian conservan su nombre en este paso; se alinean con el
   diccionario en el paso 4.
@@ -384,21 +389,28 @@ Todas sus entidades extienden `TenantAwareEntity`.
   | `GASTO_OPERATIVO` | `EGRESO` | El usuario: arriendo, servicios, papeleria | Si |
   | `INGRESO_OCASIONAL` | `INGRESO` | El usuario: chatarra, reintegros, aporte del socio | Si |
   | `TRANSFERENCIA` | `EGRESO` en el origen, `INGRESO` en el destino | `registrarTransferencia` | No |
-  | `PAGO_COMPRA` | `EGRESO` | La compra de contado y cada pago (`(PURCHASE, id)`) | No |
-  | `RECAUDO_VENTA` | `INGRESO` | La venta de contado y cada abono (`(SALE, id)`) | No |
+  | `PAGO_COMPRA` | `EGRESO` | La compra de contado y cada pago, con `purchase` | No |
+  | `RECAUDO_VENTA` | `INGRESO` | La venta de contado y cada abono, con `sale` | No |
 
   Solo las dos manuales se crean, editan y eliminan directamente. Las demas se gestionan
   desde su operacion; editarlas o eliminarlas a mano es **400** y no toca nada.
 
+  **Movimiento activo.** Un movimiento enlazado a una venta o compra `ANULADA` es
+  **inactivo**: sigue en la tabla, pero no sale en ningun listado ni cuenta en ninguna
+  suma. Todos los demas son activos. No se guarda en una columna: se deriva del estado de
+  la factura con `MovementSpecifications.activo()`, el unico predicado que lo define, y
+  por el que pasan todas las consultas que listan o suman movimientos. Invariante:
+  `currentBalance` = `initialBalance` + movimientos activos (ingresos suman, egresos
+  restan); los tests lo comprueban con `SalesFixture.verificarInvariante()`.
+
 **`TreasuryService`**
 
 * `aplicarMovimiento(movimiento)` (privado): **el unico sitio donde se guarda un
-  `Movement` y se aplica su efecto sobre el `currentBalance` de su cuenta.** Suma si es
-  `INGRESO`, resta si es `EGRESO`, y antes valida la coherencia entre tipo y categoria.
-  Sirve para un movimiento nuevo y para uno editado (misma fila, efecto nuevo). La unica
-  otra escritura del saldo es `deshacerEfecto`, que revierte el efecto de un movimiento
-  sobre **su** cuenta; la usan editar y eliminar un movimiento manual y anular una
-  factura.
+  `Movement`**, nuevo o editado, junto con su efecto sobre el `currentBalance` de su
+  cuenta. Antes valida la coherencia entre tipo, categoria y factura. El saldo solo lo
+  escriben dos metodos privados: `aplicarEfecto` (suma un `INGRESO`, resta un `EGRESO`),
+  que usan `aplicarMovimiento` y restaurar una factura, y `deshacerEfecto` (al reves), que
+  usan editar o eliminar un movimiento manual y anular una factura.
 * `registrarIngresoOcasional(cuenta, concepto, monto, fecha, notas)` y
   `registrarGastoOperativo(cuenta, concepto, monto, fecha, notas)`: crean un `INGRESO`
   `INGRESO_OCASIONAL` o un `EGRESO` `GASTO_OPERATIVO`. Delegan en
@@ -425,13 +437,24 @@ Todas sus entidades extienden `TenantAwareEntity`.
   conserva**. Rechaza con `InvalidTransferException` (**400**) cuentas iguales o monto no
   positivo, sin mover ningun saldo ni dejar movimientos.
 * `registrarIngresoDeVenta` y `registrarEgresoDeCompra`: crean los movimientos
-  `RECAUDO_VENTA` y `PAGO_COMPRA` de las facturas, con `(SALE, id)` o `(PURCHASE, id)`.
-  El de compra exige saldo suficiente. `revertirMovimientosDeVenta` / `...DeCompra` los
-  revierten y borran al anular (se redisena en el paso 3).
-* Consultas: `findMovementById`, `findMovementsByAccountId`,
-  `buscarMovimientos(accountId, categoria, desde, hasta)` con los cuatro filtros
-  opcionales, y `sumarPorCategoria(categoria)` / `sumarPorCategoria(categoria, desde,
-  hasta)`, que usa Reporting.
+  `RECAUDO_VENTA` (con `sale`) y `PAGO_COMPRA` (con `purchase`) del contado, de cada abono
+  y de cada pago. El de compra exige saldo suficiente (`exigirSaldoSuficiente`).
+* `movimientosDeVenta(venta)` / `movimientosDeCompra(compra)`: **todos** los movimientos
+  de una factura, activos o no, en orden de id. Los usan el saldo pendiente, anular,
+  restaurar y la cuenta de los renglones de Reporting; nunca para listar en tesoreria.
+* Anular y restaurar: `revertirSaldosDeVenta` / `revertirSaldosDeCompra` deshacen el
+  efecto de cada movimiento de la factura **sin borrar filas** ni validar nada.
+  `reaplicarSaldosDeVenta` lo vuelve a aplicar sin validar (son ingresos);
+  `reaplicarSaldosDeCompra` primero simula todos los egresos acumulando sobre el saldo
+  corriente de cada cuenta y, si alguno no alcanza, lanza `InsufficientBalanceException`
+  (**409**) sin haber escrito nada.
+* Consultas, todas sobre movimientos **activos**: `findMovementsByAccountId` (el
+  extracto), `buscarMovimientos(accountId, categoria, desde, hasta, saleId, purchaseId)`
+  con todos los filtros opcionales, y `sumarPorCategoria(categoria)` /
+  `sumarPorCategoria(categoria, desde, hasta)`, que usa Reporting y suman en memoria sobre
+  el mismo listado para no duplicar la regla en JPQL. `findMovementById` busca por id en
+  el tenant, activo o no (lo usan editar y eliminar, que rechazan las categorias no
+  manuales).
 * `balanceGlobal()`: suma de los `currentBalance` de todas las cuentas del tenant activo.
   Es el "Total Global" (`lblTotalGlobal`) de `Accounts.fxml`.
 
@@ -442,9 +465,12 @@ historia en [03-DECISIONS.md](03-DECISIONS.md).
 **Endpoints** (todos requieren JWT)
 
 * `GET` y `POST` `/api/treasury/accounts`
-* `GET /api/treasury/accounts/{id}/movements`: 404 si la cuenta no es del tenant
-* `GET /api/treasury/movements?accountId=&category=&desde=&hasta=`: el libro del tenant,
-  todos los filtros opcionales, del mas reciente al mas antiguo
+* `GET /api/treasury/accounts/{id}/movements`: el extracto (movimientos activos). 404 si
+  la cuenta no es del tenant
+* `GET /api/treasury/movements?accountId=&category=&desde=&hasta=&saleId=&purchaseId=`:
+  el libro de movimientos activos del tenant, todos los filtros opcionales, del mas
+  reciente al mas antiguo. Los de una factura `ANULADA` no salen, ni filtrando por su
+  `saleId` o `purchaseId`
 * `POST /api/treasury/movements`: movimiento manual. Cuerpo `MovementRequest`:
   `accountId`, `category` (solo `GASTO_OPERATIVO` o `INGRESO_OCASIONAL`, otra es 400),
   `concept`, `amount`, `date` (opcional, hoy por defecto) y `notes` (opcional)
@@ -463,7 +489,13 @@ Desaparecieron `/api/treasury/occasional-incomes` y `/api/treasury/operational-e
 Las respuestas van siempre por DTO (`AccountResponse`, `MovementResponse`,
 `TransferResponse`, `BalanceResponse`), nunca la entidad JPA. `MovementResponse` expone
 `id`, `accountId`, `accountName`, `type`, `category`, `concept`, `amount`, `date`,
-`notes`, `sourceType`, `sourceId` y `relatedMovementId`.
+`notes`, `saleId`, `purchaseId` y `relatedMovementId`. Tambien es la respuesta de un
+abono (`POST /api/sales/{id}/collections`) y de un pago (`POST
+/api/purchases/{id}/payments`).
+
+**Limitacion conocida.** El historial de movimientos de una factura `ANULADA` queda en la
+base pero **ningun endpoint lo expone**: todo listado pasa por el predicado de movimiento
+activo. Si hace falta verlo, es un endpoint nuevo, no un filtro.
 
 **Semilla de desarrollo.** `DevDataInitializer` crea ademas las 2 cuentas por defecto de
 Autollantas para el tenant `demo`: `Caja General` (`CASH`) y `Bancolombia` (`BANK`), las
@@ -514,13 +546,13 @@ dos**: una factura descuenta inventario y mueve tesoreria.
   propia de cliente.
 * `Sale` (`VENTAS`): `invoiceNumber`, `ManyToOne` **nullable** `customer` a `Counterparty`
   (columna `id_tercero`), `invoiceDate`, `dueDate`,
-  `paymentType` (enum `CONTADO` / `CREDITO`), `ManyToOne` **nullable** a `Account` (una
-  factura a credito no tiene cuenta hasta que se le abona), `paymentMethod`, `status`
+  `paymentType` (enum `CONTADO` / `CREDITO`), `paymentMethod`, `status`
   (enum `PAGADA` / `PENDIENTE` / `ANULADA`), `subtotal`, `ivaPorPagar`, `total`.
   Restriccion unica `uk_venta_tenant_invoice_number` sobre
   `(tenant_id, numero_factura_venta)`, **divergencia deliberada**: Autollantas valida el
   numero solo en la aplicacion y no tiene indice unico. Ver
-  [03-DECISIONS.md](03-DECISIONS.md).
+  [03-DECISIONS.md](03-DECISIONS.md). **No guarda cuenta** (desde el paso 3 no hay
+  `id_cuenta` en `VENTAS`): la cuenta de cada cobro vive en su movimiento.
 * `SaleDetail` (`DETALLE_VENTAS`): `ManyToOne` a `Sale` y a `Product`, `quantity`, `price`
   (unitario sin IVA) e `ivaAmount`, **congelado al facturar**. Cambiarle el IVA a un
   producto no puede mover el IVA de una factura ya emitida, porque esa factura ya se
@@ -529,9 +561,9 @@ dos**: una factura descuenta inventario y mueve tesoreria.
   (`ivaAmount` menos `producto.taxAmount * quantity`), congelado igual. Lo agrego la
   migracion de Reporting: el Reporte de IVA reparte el descontable por categoria y
   necesita el de cada linea, no solo el agregado de la factura.
-* `Collection` (`RECAUDOS`): `ManyToOne` a `Sale` y a `Account`, `amount`, `date`. Es un
-  **abono**, ver [02-CONVENTIONS.md](02-CONVENTIONS.md). En Autollantas esta clase vive en
-  `treasury`; aqui vive en `sales`, junto a la factura a la que pertenece.
+* Los abonos **no tienen entidad propia**: un abono es un `Movement` `RECAUDO_VENTA` con
+  `sale` apuntando a la factura (ver Modulo Treasury). Ya no existen `Collection` ni la
+  tabla `RECAUDOS`.
 
 **Flujo factura -> inventario -> tesoreria**
 
@@ -556,16 +588,21 @@ dos**: una factura descuenta inventario y mueve tesoreria.
    ```
 
 5. Si es `CONTADO`: estado `PAGADA` y `TreasuryService.registrarIngresoDeVenta` mete un
-   `INGRESO` por el total en la cuenta, con concepto `Venta <numero>` y **fecha de la
-   factura** (no la de hoy). Si es `CREDITO`: estado `PENDIENTE` y tesoreria no
-   se toca, porque todavia no entro dinero.
+   `RECAUDO_VENTA` por el total en la cuenta, enlazado a la venta, con concepto
+   `Venta <numero>` y **fecha de la factura** (no la de hoy). La cuenta solo se usa para
+   ese movimiento; es obligatoria en el contado. Si es `CREDITO`: estado `PENDIENTE` y
+   tesoreria no se toca, porque todavia no entro dinero.
 
-**Abonos.** `registrarAbono(saleId, accountId, monto)` crea el `Collection`, registra el
-`INGRESO` en tesoreria y, si con eso el saldo pendiente queda cubierto, pasa la factura a
-`PAGADA`. Rechaza (`InvalidSaleOperationException`, **400**) abonar a una factura que no
-este `PENDIENTE` y abonos que excedan el saldo pendiente.
+**Abonos.** `registrarAbono(saleId, accountId, monto)` registra un `RECAUDO_VENTA`
+enlazado a la venta (concepto `Abono factura <numero>`), lo devuelve y, si con eso el
+saldo pendiente queda cubierto, pasa la factura a `PAGADA`. Rechaza
+(`InvalidSaleOperationException`, **400**) abonar a una factura que no este `PENDIENTE`
+(`ANULADA` incluida) y abonos que excedan el saldo pendiente.
 
-El saldo pendiente **no es un campo**: se calcula como `total` menos la suma de abonos.
+El saldo pendiente **no es un campo**: se calcula como `total` menos la suma de los
+movimientos `RECAUDO_VENTA` de la factura (el contado y los abonos), **activos o no**: una
+factura anulada conserva lo que tenia pagado, y al restaurarla el estado sale de ahi. Una
+venta de contado tiene pendiente 0.
 Autollantas lo guarda denormalizado en `saldo_pendiente` y lo recalcula a mano en cinco
 sitios distintos. La tolerancia de un peso de Autollantas si se porto: un pendiente por
 debajo de 1 peso cuenta como saldado, porque los centavos del IVA no pueden dejar una
@@ -573,46 +610,43 @@ factura eternamente `PENDIENTE` por 0,4 pesos.
 
 **Anulacion.** `anularFactura(saleId)`:
 
-* Revierte en tesoreria **todos** los movimientos ligados a la venta y deshace su efecto
-  sobre el saldo de la cuenta (`TreasuryService.revertirMovimientosDeVenta`).
+* Deshace el efecto de **cada** movimiento de la venta (contado y abonos) sobre el saldo
+  de su cuenta, sin validar nada (`TreasuryService.revertirSaldosDeVenta`). **No borra
+  ningun movimiento.**
 * Devuelve el stock de cada linea.
-* Deja la factura en `ANULADA`.
+* Deja la factura en `ANULADA`, y con eso sus movimientos quedan **inactivos**: siguen en
+  la base, pero no salen en listados ni cuentan en sumas (ver Modulo Treasury).
 
 Una factura ya `ANULADA` no se puede volver a anular: devolveria el stock por segunda vez.
-Una `PENDIENTE` sin abonos no genero ningun movimiento, asi que el primer paso no hace
-nada y en la practica solo se devuelve el stock, que es el comportamiento de Autollantas.
 
-**Restauracion.** `restaurarFactura(saleId)` es el inverso exacto de la anulacion: lo que
-anular saco, restaurar lo devuelve. Motivo y comparacion con Autollantas en
-[03-DECISIONS.md](03-DECISIONS.md).
+**Restauracion.** `restaurarFactura(saleId)` es el inverso exacto de la anulacion. Motivo
+y comparacion con Autollantas en [03-DECISIONS.md](03-DECISIONS.md).
 
 * Solo una `ANULADA`; en cualquier otro estado rechaza con `InvalidSaleOperationException`
-  (**400**). Tambien rechaza, sin tocar nada, si queda algun `Movement` vivo con origen
-  `(SALE, id)`: la factura no esta anulada de verdad en tesoreria y recrear duplicaria el
-  dinero.
+  (**400**).
 * Vuelve a descontar el stock de cada linea con el mismo `descontarStock` de
   `crearFactura`: si no alcanza, `InsufficientStockException` (**409**) y la transaccion
   deshace todo.
-* Recrea por `TreasuryService.registrarIngresoDeVenta` los movimientos que la anulacion
-  borro: el `INGRESO` del contado (total, cuenta de la factura, `Venta <numero>`, fecha de
-  la factura) y uno por cada `Collection` (su monto, su cuenta, `Abono factura <numero>`,
-  fecha del abono). Las filas `Collection` sobreviven a la anulacion; de ahi salen. Los
-  conceptos viven en `conceptoVenta` / `conceptoAbono`, compartidos con crear y abonar.
-* El estado se deriva, no se guarda: `CONTADO` queda `PAGADA`; `CREDITO` queda `PAGADA` si
-  el saldo pendiente cae dentro de la tolerancia de un peso (la misma comparacion de
-  `registrarAbono`) y `PENDIENTE` si no.
+* Vuelve a aplicar el saldo de cada movimiento de la factura, que nunca se borraron
+  (`reaplicarSaldosDeVenta`, sin validar: son ingresos). Las filas, con sus ids, son las
+  mismas de antes de anular.
+* El estado se deriva, no se guarda: `PAGADA` si el saldo pendiente cae dentro de la
+  tolerancia de un peso (la misma comparacion de `registrarAbono`), `PENDIENTE` si no.
 
 **Endpoints** (todos requieren JWT)
 
 * `POST /api/sales` (emitir factura)
 * `GET /api/sales`
 * `GET /api/sales/{id}`: 404 si no existe para el tenant
-* `POST /api/sales/{id}/collections` (abono)
+* `POST /api/sales/{id}/collections` (abono): cuerpo `CollectionRequest` (`accountId`,
+  `amount`); responde **201** con el `MovementResponse` del `RECAUDO_VENTA` creado
 * `POST /api/sales/{id}/annul`
 * `POST /api/sales/{id}/restore`
 
-Las respuestas van por DTO (`SaleResponse`, `SaleDetailResponse`, `CollectionResponse`),
-nunca la entidad JPA. `SaleResponse` incluye `pendingBalance` calculado.
+Las respuestas van por DTO (`SaleResponse`, `SaleDetailResponse`, `MovementResponse`),
+nunca la entidad JPA. `SaleResponse` incluye `pendingBalance` calculado y ya no lleva
+`accountId` ni `accountName`. Los cobros de una factura se consultan con `GET
+/api/treasury/movements?saleId=`.
 
 El cliente se identifica **por id** (`customerId` en `SaleRequest`, opcional). Un id que
 no resuelve en el tenant es 400 `Cliente no encontrado`; uno que resuelve a un tercero
@@ -635,16 +669,15 @@ invertido: una compra **suma** stock y **saca** dinero.
   entidad propia de proveedor.
 * `Purchase` (`COMPRAS`): `invoiceNumber`, `ManyToOne` **nullable** `supplier` a
   `Counterparty` (columna `id_tercero`), `invoiceDate`,
-  `dueDate`, `paymentType` (enum `CONTADO` / `CREDITO`), `ManyToOne` **nullable** a
-  `Account`, `paymentMethod`, `status` (enum `PAGADA` / `PENDIENTE` / `ANULADA`),
-  `subtotal`, `ivaTotal`, `total`. Restriccion unica
+  `dueDate`, `paymentType` (enum `CONTADO` / `CREDITO`), `paymentMethod`, `status` (enum
+  `PAGADA` / `PENDIENTE` / `ANULADA`), `subtotal`, `ivaTotal`, `total`. Restriccion unica
   `uk_compra_tenant_invoice_number`, misma divergencia deliberada que en `Sale`:
-  Autollantas valida el numero solo en la aplicacion.
+  Autollantas valida el numero solo en la aplicacion. **No guarda cuenta**, igual que
+  `Sale`: la de cada pago vive en su movimiento.
 * `PurchaseDetail` (`DETALLE_COMPRAS`): `ManyToOne` a `Purchase` y a `Product`,
   `quantity`, `price` (costo de compra unitario sin IVA) e `ivaAmount` de la linea.
-* `Payment` (`PAGOS`): `ManyToOne` a `Purchase` y a `Account`, `amount`, `date`. Es un
-  **pago**, no un abono, ver [02-CONVENTIONS.md](02-CONVENTIONS.md). En Autollantas esta
-  clase vive en `treasury`; aqui vive en `purchases`, junto a la factura.
+* Los pagos **no tienen entidad propia**: un pago es un `Movement` `PAGO_COMPRA` con
+  `purchase` apuntando a la compra. Ya no existen `Payment` ni la tabla `PAGOS`.
 
 **Flujo factura -> inventario (suma) -> tesoreria (egreso)**
 
@@ -669,8 +702,8 @@ invertido: una compra **suma** stock y **saca** dinero.
    y `InventoryService.recalculatePrices(producto)`, el mismo metodo que usa
    `saveProduct`. Comprar a un costo nuevo reescribe el costo del producto y rehace su
    `taxAmount` y su `suggestedPrice`. Ver mas abajo.
-6. Si es `CONTADO`: estado `PAGADA` y un `EGRESO` por el total. Si es `CREDITO`: estado
-   `PENDIENTE`, sin movimiento.
+6. Si es `CONTADO`: estado `PAGADA` y un `PAGO_COMPRA` por el total, enlazado a la
+   compra (`Compra <numero>`). Si es `CREDITO`: estado `PENDIENTE`, sin movimiento.
 
 **Sincronizacion del costo al comprar.** Portado de `savePurchaseWithDetails` de
 Autollantas, que por cada linea hace `realProduct.setPurchaseCost(unitPrice)` seguido de
@@ -692,19 +725,22 @@ Las lineas y el stock se tocan **despues** de la validacion de saldo a proposito
 saldo se compara contra el total definitivo y el rechazo ocurre sin haber escrito nada,
 aunque la transaccion lo desharia igual.
 
-**Pagos.** `registrarPago(purchaseId, accountId, monto)` crea el `Payment`, registra el
-`EGRESO` (que a su vez exige saldo suficiente) y, si con eso queda cubierto el pendiente,
-pasa la compra a `PAGADA`. Rechaza pagar una compra que no este `PENDIENTE` y pagos que
-excedan el saldo pendiente. El pendiente se calcula como `total` menos la suma de pagos,
-igual que en Sales.
+**Pagos.** `registrarPago(purchaseId, accountId, monto)` registra un `PAGO_COMPRA`
+enlazado a la compra (`Pago compra <numero>`, que a su vez exige saldo suficiente), lo
+devuelve y, si con eso queda cubierto el pendiente, pasa la compra a `PAGADA`. Rechaza
+pagar una compra que no este `PENDIENTE` (`ANULADA` incluida) y pagos que excedan el
+saldo pendiente. El pendiente es `total` menos la suma de sus movimientos `PAGO_COMPRA`,
+activos o no, igual que en Sales.
 
 **Anulacion.** `anularFactura(purchaseId)`:
 
 * **Comprueba primero todo el stock**: si a algun producto le quedan menos unidades de las
   que habria que quitar, rechaza con `InvalidPurchaseOperationException` (**400**)
   nombrando el producto. Pasa cuando parte de lo comprado ya se vendio.
-* Revierte **todos** los movimientos ligados a la compra, pagos incluidos.
-* Quita el stock que la compra habia sumado y deja la compra en `ANULADA`.
+* Deshace el efecto de **todos** los movimientos de la compra, pagos incluidos, sobre el
+  saldo de su cuenta, sin validar (`revertirSaldosDeCompra`). **No borra filas.**
+* Quita el stock que la compra habia sumado y deja la compra en `ANULADA`: sus
+  movimientos quedan inactivos.
 * **No revierte el `purchaseCost` ni el `suggestedPrice` del producto**: se quedan como los
   dejo la compra. Es lo que hace `cancelPurchase` de Autollantas y se hereda a proposito,
   ver [03-DECISIONS.md](03-DECISIONS.md). Cubierto por
@@ -712,17 +748,17 @@ igual que en Sales.
 
 Una compra ya `ANULADA` no se puede volver a anular.
 
-**Restauracion.** `restaurarCompra(purchaseId)`: espejo exacto de `restaurarFactura`.
+**Restauracion.** `restaurarCompra(purchaseId)`: espejo de `restaurarFactura`.
 
-* Solo una `ANULADA` y sin movimientos vivos con origen `(PURCHASE, id)`
-  (`InvalidPurchaseOperationException`, **400**).
+* Solo una `ANULADA` (`InvalidPurchaseOperationException`, **400**).
+* Vuelve a aplicar cada egreso de la compra con la regla de saldo suficiente de crear y
+  pagar (`reaplicarSaldosDeCompra`). Lo comprueba **entero antes de escribir nada**,
+  acumulando sobre el saldo corriente cuando varios egresos salen de la misma cuenta: si
+  uno no alcanza, `InsufficientBalanceException` (**409**) y no cambia ni el estado, ni el
+  stock, ni los saldos, ni las filas.
 * Vuelve a sumar el stock (sin validacion: sumar siempre se puede).
-* Recrea por `registrarEgresoDeCompra` el `EGRESO` del contado (`Compra <numero>`, fecha de
-  la factura) y uno por cada `Payment` (`Pago compra <numero>`, fecha del pago). Cada uno
-  pasa por `exigirSaldoSuficiente`, la misma regla de crear y pagar: si alguno no alcanza,
-  `InsufficientBalanceException` (**409**) y la transaccion deshace stock, egresos ya
-  recreados y estado.
-* Estado derivado igual que en ventas: contado `PAGADA`, credito por saldo pendiente.
+* Estado derivado igual que en ventas: `PAGADA` si el pendiente cae en la tolerancia de un
+  peso, `PENDIENTE` si no.
 * **No toca `purchaseCost` ni `suggestedPrice`**, igual que la anulacion; cubierto por
   `restaurarNoCambiaElCostoDelProducto`.
 
@@ -733,7 +769,9 @@ El egreso del contado al crear la compra tambien lleva la fecha de la factura.
 * `POST /api/purchases`
 * `GET /api/purchases`
 * `GET /api/purchases/{id}`: 404 si no existe para el tenant
-* `POST /api/purchases/{id}/payments`
+* `POST /api/purchases/{id}/payments`: cuerpo `PaymentRequest` (`accountId`, `amount`);
+  responde **201** con el `MovementResponse` del `PAGO_COMPRA` creado. `PurchaseResponse`
+  ya no lleva `accountId` ni `accountName`
 * `POST /api/purchases/{id}/annul`
 * `POST /api/purchases/{id}/restore`
 
@@ -783,7 +821,10 @@ eliminan, y al eliminarse desaparecen solos.
   cortado en `MAX_MOVEMENTS` (100), igual que Autollantas. `VENTA` y `COMPRA` salen de las
   facturas, no de sus movimientos: una venta a credito aparece aunque no haya movido caja.
   `GASTO` e `INGRESO` salen de los movimientos `GASTO_OPERATIVO` e `INGRESO_OCASIONAL`, y
-  su `sourceId` es el id del movimiento. Las transferencias no aparecen.
+  su `sourceId` es el id del movimiento. Las transferencias no aparecen. La cuenta de un
+  renglon `VENTA` o `COMPRA` es la del **ultimo movimiento** de la factura (el contado, o
+  el ultimo abono o pago), o ninguna si no tiene movimientos: es la que antes guardaba la
+  factura en `id_cuenta`, que se reescribia con cada abono o pago.
 * `buildReporteIva(desde, hasta)`: por cada linea de venta no anulada del rango, agrupa
   por nombre de categoria del producto:
 

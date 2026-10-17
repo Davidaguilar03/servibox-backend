@@ -153,7 +153,8 @@ class OperationalExpenseTest {
             assertThat(m.getConcept()).isEqualTo("Arriendo del local");
             assertThat(m.getNotes()).isEqualTo("Mes de septiembre");
             assertThat(m.getAccount().getId()).isEqualTo(caja.getId());
-            assertThat(m.getSourceType()).isNull();
+            assertThat(m.getSale()).isNull();
+            assertThat(m.getPurchase()).isNull();
         });
 
         assertThat(treasuryService.balanceGlobal()).isEqualTo(60000.0);

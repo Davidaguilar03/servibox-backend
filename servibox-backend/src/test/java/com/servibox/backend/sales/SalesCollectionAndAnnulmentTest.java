@@ -11,7 +11,7 @@ import com.servibox.backend.sales.service.InvalidSaleOperationException;
 import com.servibox.backend.sales.service.SalesService;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
-import com.servibox.backend.treasury.entity.MovementSourceType;
+import com.servibox.backend.treasury.entity.MovementCategory;
 import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.service.TreasuryService;
 import org.junit.jupiter.api.AfterEach;
@@ -86,6 +86,7 @@ class SalesCollectionAndAnnulmentTest {
         assertThat(estadoDe(venta)).isEqualTo(SaleStatus.PENDIENTE);
 
         salesService.registrarAbono(venta.getId(), caja.getId(), total);
+        fixture.verificarInvariante();
 
         assertThat(estadoDe(venta)).isEqualTo(SaleStatus.PAGADA);
         assertThat(saldoDe(caja)).isEqualTo(total);
@@ -97,8 +98,8 @@ class SalesCollectionAndAnnulmentTest {
                     assertThat(m.getType()).isEqualTo(MovementType.INGRESO);
                     assertThat(m.getAmount()).isEqualTo(total);
                     assertThat(m.getConcept()).isEqualTo("Abono factura VEN-00010");
-                    assertThat(m.getSourceType()).isEqualTo(MovementSourceType.SALE);
-                    assertThat(m.getSourceId()).isEqualTo(venta.getId());
+                    assertThat(m.getCategory()).isEqualTo(MovementCategory.RECAUDO_VENTA);
+                    assertThat(m.getSale().getId()).isEqualTo(venta.getId());
                 });
     }
 
@@ -107,6 +108,7 @@ class SalesCollectionAndAnnulmentTest {
         Sale venta = facturar("VEN-00011", PaymentType.CREDITO, null, 1, 100000.0);
 
         salesService.registrarAbono(venta.getId(), caja.getId(), 19000.0);
+        fixture.verificarInvariante();
 
         assertThat(estadoDe(venta)).isEqualTo(SaleStatus.PENDIENTE);
         assertThat(salesService.saldoPendiente(venta)).isEqualTo(100000.0);
@@ -135,8 +137,12 @@ class SalesCollectionAndAnnulmentTest {
                 .hasMessageContaining("PENDIENTE");
     }
 
+    /**
+     * Anular no borra el movimiento: lo deja inactivo. Sigue en la base, pero ya no sale en
+     * el extracto de la cuenta y el saldo vuelve a lo de antes de la venta.
+     */
     @Test
-    void anularUnaFacturaPagadaDevuelveElStockBorraElMovimientoYRestauraElBalance() {
+    void anularUnaFacturaPagadaDevuelveElStockDejaElMovimientoInactivoYRestauraElBalance() {
         double saldoAntesDeLaVenta = saldoDe(caja);
         assertThat(saldoAntesDeLaVenta).isEqualTo(0.0);
 
@@ -146,9 +152,12 @@ class SalesCollectionAndAnnulmentTest {
         assertThat(treasuryService.findMovementsByAccountId(caja.getId())).hasSize(1);
 
         salesService.anularFactura(venta.getId());
+        fixture.verificarInvariante();
 
         assertThat(stockDe(llanta)).isEqualTo(10);
         assertThat(treasuryService.findMovementsByAccountId(caja.getId())).isEmpty();
+        assertThat(treasuryService.movimientosDeVenta(venta)).singleElement()
+                .satisfies(m -> assertThat(m.getConcept()).isEqualTo("Venta VEN-00014"));
         assertThat(saldoDe(caja)).isEqualTo(saldoAntesDeLaVenta);
         assertThat(estadoDe(venta)).isEqualTo(SaleStatus.ANULADA);
     }
@@ -187,10 +196,29 @@ class SalesCollectionAndAnnulmentTest {
         assertThat(saldoDe(caja)).isEqualTo(19000.0);
 
         salesService.anularFactura(venta.getId());
+        fixture.verificarInvariante();
 
         assertThat(saldoDe(caja)).isEqualTo(0.0);
         assertThat(treasuryService.findMovementsByAccountId(caja.getId())).isEmpty();
+        assertThat(treasuryService.movimientosDeVenta(venta)).singleElement()
+                .satisfies(m -> assertThat(m.getAmount()).isEqualTo(19000.0));
+        // El abono conserva lo pagado: al restaurar, el estado sale de aqui.
+        assertThat(salesService.saldoPendiente(venta)).isEqualTo(100000.0);
         assertThat(stockDe(llanta)).isEqualTo(10);
         assertThat(estadoDe(venta)).isEqualTo(SaleStatus.ANULADA);
+    }
+
+    @Test
+    void noSePuedeAbonarAUnaFacturaAnulada() {
+        Sale venta = facturar("VEN-00018", PaymentType.CREDITO, null, 1, 100000.0);
+        salesService.anularFactura(venta.getId());
+
+        assertThatThrownBy(() -> salesService.registrarAbono(venta.getId(), caja.getId(), 1000.0))
+                .isInstanceOf(InvalidSaleOperationException.class)
+                .hasMessage("Solo se puede abonar a una factura PENDIENTE, y esta esta ANULADA");
+
+        assertThat(saldoDe(caja)).isEqualTo(0.0);
+        assertThat(treasuryService.movimientosDeVenta(venta)).isEmpty();
+        fixture.verificarInvariante();
     }
 }
