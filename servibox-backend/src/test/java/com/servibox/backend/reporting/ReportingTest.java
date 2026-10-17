@@ -41,6 +41,8 @@ import org.springframework.test.web.servlet.MvcResult;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
@@ -326,6 +328,57 @@ class ReportingTest {
         assertThat(movimientos.get(2).sourceId()).isEqualTo(venta.getId());
         assertThat(movimientos.get(2).amount()).isCloseTo(119.0, within(DELTA));
         assertThat(movimientos.get(3).accountName()).isEqualTo("Caja General");
+    }
+
+    /**
+     * La cuenta de un renglon VENTA o COMPRA es la de su ultimo movimiento activo: la del
+     * contado, la del ultimo abono o pago, o ninguna si no tiene movimientos. Una factura
+     * anulada no sale en el reporte, y sus movimientos inactivos tampoco cuentan.
+     */
+    @Test
+    void laCuentaDeUnRenglonDeFacturaEsLaDeSuUltimoMovimientoActivo() {
+        Taller t = new Taller(tenantUno);
+        LocalDate dia = LocalDate.of(2026, 9, 10);
+        Account banco = fixture.crearCuenta("Bancolombia");
+        treasuryService.registrarIngresoOcasional(t.caja, "Fondeo", 10000.0, dia, null);
+        treasuryService.registrarIngresoOcasional(banco, "Fondeo", 10000.0, dia, null);
+        List<SalesService.LineaFactura> unaLlanta = List.of(new SalesService.LineaFactura(t.llanta.getId(), 1, 100.0));
+        List<PurchasesService.LineaCompra> unaCompra =
+                List.of(new PurchasesService.LineaCompra(t.llanta.getId(), 1, 100.0));
+
+        Sale contado = salesService.crearFactura("FV-CON", t.cliente, dia, null, PaymentType.CONTADO, banco,
+                "Efectivo", unaLlanta);
+        Sale dosCuentas = t.vender("FV-DOS", dia, t.llanta, 1, 100.0);
+        salesService.registrarAbono(dosCuentas.getId(), t.caja.getId(), 50.0);
+        salesService.registrarAbono(dosCuentas.getId(), banco.getId(), 69.0);
+        Sale sinAbonos = t.vender("FV-SIN", dia, t.llanta, 1, 100.0);
+        Sale anulada = salesService.crearFactura("FV-ANU", t.cliente, dia, null, PaymentType.CONTADO, t.caja,
+                "Efectivo", unaLlanta);
+        salesService.anularFactura(anulada.getId());
+
+        Purchase compraContado = purchasesService.crearFactura("FC-CON", t.proveedor, dia, null,
+                com.servibox.backend.purchases.entity.PaymentType.CONTADO, t.caja, "Efectivo", unaCompra);
+        Purchase compraDosCuentas = t.comprar("FC-DOS", dia, t.llanta, 1, 100.0);
+        purchasesService.registrarPago(compraDosCuentas.getId(), banco.getId(), 19.0);
+        purchasesService.registrarPago(compraDosCuentas.getId(), t.caja.getId(), 100.0);
+        Purchase compraSinPagos = t.comprar("FC-SIN", dia, t.llanta, 1, 100.0);
+
+        Map<String, String> cuentaPorConcepto = new HashMap<>();
+        for (MovementSummaryResponse r : reportingService.getMovements(dia, dia)) {
+            if (r.type().equals("VENTA") || r.type().equals("COMPRA")) {
+                cuentaPorConcepto.put(r.concept(), r.accountName());
+            }
+        }
+
+        assertThat(cuentaPorConcepto).containsEntry("FV-CON - Cliente", "Bancolombia")
+                .containsEntry("FV-DOS - Cliente", "Bancolombia")
+                .containsEntry("FV-SIN - Cliente", null)
+                .containsEntry("FC-CON - Proveedor", "Caja General")
+                .containsEntry("FC-DOS - Proveedor", "Caja General")
+                .containsEntry("FC-SIN - Proveedor", null)
+                .doesNotContainKey("FV-ANU - Cliente");
+        assertThat(List.of(contado, dosCuentas, sinAbonos, compraContado, compraDosCuentas, compraSinPagos))
+                .allSatisfy(f -> assertThat(f.getId()).isNotNull());
     }
 
     /**

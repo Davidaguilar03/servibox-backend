@@ -3,6 +3,7 @@ package com.servibox.backend.shared;
 import com.servibox.backend.auth.InvalidCredentialsException;
 import com.servibox.backend.counterparties.service.DuplicateCounterpartyDocumentException;
 import com.servibox.backend.counterparties.service.InvalidCounterpartyException;
+import com.servibox.backend.inventory.service.DuplicateFinancialSettingsException;
 import com.servibox.backend.inventory.service.DuplicateProductCodeException;
 import com.servibox.backend.purchases.service.DuplicatePurchaseInvoiceNumberException;
 import com.servibox.backend.purchases.service.InsufficientBalanceException;
@@ -43,6 +44,12 @@ public class GlobalExceptionHandler {
     }
 
     /** Dos cuentas del mismo tenant con el mismo nombre. */
+    /** Segunda fila de CONFIGURACION_FINANCIERA para el mismo tenant. */
+    @ExceptionHandler(DuplicateFinancialSettingsException.class)
+    public ResponseEntity<ErrorResponse> manejarConfiguracionDuplicada(DuplicateFinancialSettingsException ex) {
+        return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
     @ExceptionHandler(DuplicateAccountNameException.class)
     public ResponseEntity<ErrorResponse> manejarCuentaDuplicada(DuplicateAccountNameException ex) {
         return construir(HttpStatus.CONFLICT, ex.getMessage());

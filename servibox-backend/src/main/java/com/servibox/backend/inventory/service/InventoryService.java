@@ -227,12 +227,29 @@ public class InventoryService {
                     fs.setExpensesRate(0.0);
                     fs.setDianRate(0.0);
                     fs.setIcaRate(0.0);
+                    fs.setCardCommissionRate(0.0);
                     return fs;
                 });
     }
 
+    /**
+     * Crea o actualiza la configuracion del tenant activo. Solo puede haber una: crear una
+     * segunda se rechaza aqui con un mensaje legible, antes de que salte el error crudo de
+     * uk_configuracion_tenant. Una comision de tarjeta sin valor queda en 0.0.
+     */
     @Transactional
     public FinancialSettings saveFinancialSettings(FinancialSettings settings) {
+        Long tenantId = TenantContext.getTenantId();
+        if (tenantId != null) {
+            financialSettingsRepository.findByTenantId(tenantId)
+                    .filter(existente -> !existente.getId().equals(settings.getId()))
+                    .ifPresent(existente -> {
+                        throw new DuplicateFinancialSettingsException();
+                    });
+        }
+        if (settings.getCardCommissionRate() == null) {
+            settings.setCardCommissionRate(0.0);
+        }
         return financialSettingsRepository.save(settings);
     }
 }

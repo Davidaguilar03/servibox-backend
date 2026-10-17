@@ -83,7 +83,11 @@ public class SalesService {
                              List<LineaFactura> lineas) {
 
         validarNumeroFacturaUnico(invoiceNumber, null);
-        if (cliente != null) {
+        // Toda venta tiene tercero (id_tercero NOT NULL en el diccionario): si no se
+        // identifica al cliente, es el Consumidor final del tenant.
+        if (cliente == null) {
+            cliente = counterpartyService.consumidorFinal();
+        } else {
             counterpartyService.exigirRol(cliente, CounterpartyRole.CLIENTE);
         }
 

@@ -61,7 +61,7 @@ class AccountNameUniquenessTest {
     private Account nuevaCuenta(String nombre) {
         Account cuenta = new Account();
         cuenta.setName(nombre);
-        cuenta.setType(AccountType.CASH);
+        cuenta.setType(AccountType.EFECTIVO);
         cuenta.setInitialBalance(0.0);
         return cuenta;
     }
@@ -109,7 +109,7 @@ class AccountNameUniquenessTest {
         TenantContext.setTenantId(tenantUno);
         Account guardada = treasuryService.saveAccount(nuevaCuenta(NOMBRE));
 
-        guardada.setType(AccountType.BANK);
+        guardada.setType(AccountType.BANCO);
 
         assertThatCode(() -> treasuryService.saveAccount(guardada)).doesNotThrowAnyException();
     }

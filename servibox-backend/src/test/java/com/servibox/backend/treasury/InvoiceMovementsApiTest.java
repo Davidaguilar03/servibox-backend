@@ -343,4 +343,43 @@ class InvoiceMovementsApiTest {
         fixture.usarTenant(tenantUno);
         fixture.verificarInvariante();
     }
+
+    /**
+     * Una factura anulada no se debe: la API muestra pendingBalance 0. El calculo interno
+     * sigue contando lo abonado, asi que al restaurarla vuelve su saldo real.
+     */
+    @Test
+    void elPendienteDeUnaAnuladaSeMuestraEnCeroYAlRestaurarVuelveElReal() throws Exception {
+        Sale venta = venderACredito("VEN-00010", 1);
+        Purchase compra = comprarACredito("FAC-00010");
+        abonar(venta, caja, 19000);
+        pagar(compra, banco, 19000);
+
+        String rutaVenta = "/api/sales/" + venta.getId();
+        String rutaCompra = "/api/purchases/" + compra.getId();
+        for (String ruta : List.of(rutaVenta, rutaCompra)) {
+            mockMvc.perform(get(ruta).header("Authorization", "Bearer " + tokenUno))
+                    .andExpect(jsonPath("$.pendingBalance").value(100000.0));
+
+            accion(ruta + "/annul", 200);
+            mockMvc.perform(get(ruta).header("Authorization", "Bearer " + tokenUno))
+                    .andExpect(jsonPath("$.status").value("ANULADA"))
+                    .andExpect(jsonPath("$.pendingBalance").value(0.0));
+
+            accion(ruta + "/restore", 200);
+            mockMvc.perform(get(ruta).header("Authorization", "Bearer " + tokenUno))
+                    .andExpect(jsonPath("$.status").value("PENDIENTE"))
+                    .andExpect(jsonPath("$.pendingBalance").value(100000.0));
+        }
+
+        // El listado tambien lo muestra en 0 mientras esta anulada.
+        accion(rutaVenta + "/annul", 200);
+        mockMvc.perform(get("/api/sales").header("Authorization", "Bearer " + tokenUno))
+                .andExpect(jsonPath("$[?(@.id == %d)].pendingBalance".formatted(venta.getId())).value(0.0));
+
+        // El calculo interno no cambia: cuenta lo abonado aunque este inactivo.
+        fixture.usarTenant(tenantUno);
+        assertThat(salesService.saldoPendiente(salesService.findSaleById(venta.getId()).orElseThrow()))
+                .isEqualTo(100000.0);
+    }
 }

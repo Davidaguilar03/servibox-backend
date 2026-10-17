@@ -49,8 +49,8 @@ public class DevDataInitializer implements CommandLineRunner {
 
     /** Las 2 cuentas por defecto de Autollantas, con su tipo. */
     private static final Map<String, AccountType> CUENTAS_POR_DEFECTO = Map.of(
-            "Caja General", AccountType.CASH,
-            "Bancolombia", AccountType.BANK
+            "Caja General", AccountType.EFECTIVO,
+            "Bancolombia", AccountType.BANCO
     );
 
     private final TenantRepository tenantRepository;

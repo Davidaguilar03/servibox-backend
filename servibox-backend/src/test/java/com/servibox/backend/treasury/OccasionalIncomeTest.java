@@ -117,7 +117,7 @@ class OccasionalIncomeTest {
         TenantContext.setTenantId(tenantId);
         Account cuenta = new Account();
         cuenta.setName(nombre);
-        cuenta.setType(AccountType.CASH);
+        cuenta.setType(AccountType.EFECTIVO);
         cuenta.setInitialBalance(0.0);
         return treasuryService.saveAccount(cuenta);
     }

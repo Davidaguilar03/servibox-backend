@@ -31,7 +31,7 @@ public record TransferResponse(
                 egreso.getAccount().getName(),
                 ingreso.getAccount().getId(),
                 ingreso.getAccount().getName(),
-                egreso.getNotes(),
+                egreso.getConcept(),
                 egreso.getAmount(),
                 egreso.getDate()
         );

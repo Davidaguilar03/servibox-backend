@@ -39,7 +39,10 @@ public class Purchase extends TenantAwareEntity {
     @Column(name = "numero_factura_compra")
     private String invoiceNumber;
 
-    /** El proveedor: un tercero PROVEEDOR o AMBOS. Nullable, como lo era id_proveedor. */
+    /**
+     * El proveedor: un tercero PROVEEDOR o AMBOS. Obligatorio desde el service, sin
+     * proveedor por defecto. La columna todavia admite nulos hasta el paso 5 del refactor.
+     */
     @ManyToOne
     @JoinColumn(name = "id_tercero")
     private Counterparty supplier;

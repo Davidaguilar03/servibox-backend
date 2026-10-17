@@ -20,6 +20,11 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class CounterpartyService {
 
+    /** Numero de documento que usa la DIAN para el consumidor final. */
+    public static final String DOCUMENTO_CONSUMIDOR_FINAL = "222222222222";
+
+    public static final String NOMBRE_CONSUMIDOR_FINAL = "Consumidor final";
+
     private final CounterpartyRepository counterpartyRepository;
 
     @Transactional(readOnly = true)
@@ -114,6 +119,18 @@ public class CounterpartyService {
             tercero.setPhone(celular);
         }
         return counterpartyRepository.save(tercero);
+    }
+
+    /**
+     * El tercero "Consumidor final" del tenant activo: el cliente de una venta que no
+     * identifica a nadie. Se crea la primera vez (CLIENTE, NIT 222222222222) y despues se
+     * reutiliza siempre el mismo; cada tenant tiene el suyo. Pasa por obtenerOCrear, asi
+     * que si ese documento ya existia como PROVEEDOR queda en AMBOS, como cualquier tercero.
+     */
+    @Transactional
+    public Counterparty consumidorFinal() {
+        return obtenerOCrear(CounterpartyRole.CLIENTE, DocumentType.NIT, DOCUMENTO_CONSUMIDOR_FINAL,
+                NOMBRE_CONSUMIDOR_FINAL, null, null);
     }
 
     /**

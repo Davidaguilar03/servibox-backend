@@ -124,8 +124,8 @@ class TreasuryTenantIsolationTest {
 
     @Test
     void unaCuentaDeUnTenantNoEsVisibleParaOtro() throws Exception {
-        crearCuenta(tokenUno, "Caja General", "CASH");
-        crearCuenta(tokenDos, "Bancolombia", "BANK");
+        crearCuenta(tokenUno, "Caja General", "EFECTIVO");
+        crearCuenta(tokenDos, "Bancolombia", "BANCO");
 
         assertThat(cuentasVisiblesPara(tokenUno)).containsExactly("Caja General");
         assertThat(cuentasVisiblesPara(tokenDos)).containsExactly("Bancolombia");
@@ -133,17 +133,17 @@ class TreasuryTenantIsolationTest {
 
     @Test
     void elMismoNombreDeCuentaEsValidoEnTenantsDistintosPeroNoDentroDelMismo() throws Exception {
-        crearCuenta(tokenUno, "Caja General", "CASH");
+        crearCuenta(tokenUno, "Caja General", "EFECTIVO");
 
         // Mismo nombre, otro tenant: pasa.
-        crearCuenta(tokenDos, "Caja General", "CASH");
+        crearCuenta(tokenDos, "Caja General", "EFECTIVO");
 
         // Mismo nombre, mismo tenant: 409 con mensaje legible, no error crudo de la base.
         mockMvc.perform(post("/api/treasury/accounts")
                         .header("Authorization", "Bearer " + tokenUno)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"Caja General","initialBalance":0,"type":"CASH"}
+                                {"name":"Caja General","initialBalance":0,"type":"EFECTIVO"}
                                 """))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error").value("Ya existe una cuenta con el nombre Caja General"));
@@ -151,7 +151,7 @@ class TreasuryTenantIsolationTest {
 
     @Test
     void losMovimientosDeUnaCuentaAjenaNoSeVenNiPorId() throws Exception {
-        Long cuentaDeUno = crearCuenta(tokenUno, "Caja General", "CASH");
+        Long cuentaDeUno = crearCuenta(tokenUno, "Caja General", "EFECTIVO");
 
         // Para el otro tenant esa cuenta no existe: 404, nunca los movimientos ajenos.
         mockMvc.perform(get("/api/treasury/accounts/" + cuentaDeUno + "/movements")
@@ -161,8 +161,8 @@ class TreasuryTenantIsolationTest {
 
     @Test
     void elBalanceGlobalSoloCuentaElDineroDelTenantQuePregunta() throws Exception {
-        Long cuentaDeUno = crearCuenta(tokenUno, "Caja General", "CASH");
-        crearCuenta(tokenDos, "Caja General", "CASH");
+        Long cuentaDeUno = crearCuenta(tokenUno, "Caja General", "EFECTIVO");
+        crearCuenta(tokenDos, "Caja General", "EFECTIVO");
 
         mockMvc.perform(post("/api/treasury/movements")
                         .header("Authorization", "Bearer " + tokenUno)
@@ -183,7 +183,7 @@ class TreasuryTenantIsolationTest {
 
     @Test
     void laTransferenciaInvalidaResponde400ConMensajeLegible() throws Exception {
-        Long cuenta = crearCuenta(tokenUno, "Caja General", "CASH");
+        Long cuenta = crearCuenta(tokenUno, "Caja General", "EFECTIVO");
 
         mockMvc.perform(post("/api/treasury/transfers")
                         .header("Authorization", "Bearer " + tokenUno)
@@ -202,8 +202,8 @@ class TreasuryTenantIsolationTest {
      */
     @Test
     void elListadoDeMovimientosMuestraLosGeneradosPorUnaTransferencia() throws Exception {
-        Long cajaGeneral = crearCuenta(tokenUno, "Caja General", "CASH");
-        Long bancolombia = crearCuenta(tokenUno, "Bancolombia", "BANK");
+        Long cajaGeneral = crearCuenta(tokenUno, "Caja General", "EFECTIVO");
+        Long bancolombia = crearCuenta(tokenUno, "Bancolombia", "BANCO");
 
         MvcResult creada = mockMvc.perform(post("/api/treasury/transfers")
                         .header("Authorization", "Bearer " + tokenUno)
@@ -225,9 +225,9 @@ class TreasuryTenantIsolationTest {
                 .andExpect(jsonPath("$[0].type").value("EGRESO"))
                 .andExpect(jsonPath("$[0].amount").value(10000.0))
                 .andExpect(jsonPath("$[0].id").value(egresoId))
-                .andExpect(jsonPath("$[0].concept").value("Transferencia a Bancolombia"))
+                .andExpect(jsonPath("$[0].concept").value("Consignacion del dia"))
                 .andExpect(jsonPath("$[0].category").value("TRANSFERENCIA"))
-                .andExpect(jsonPath("$[0].notes").value("Consignacion del dia"))
+                .andExpect(jsonPath("$[0].notes").doesNotExist())
                 .andExpect(jsonPath("$[0].relatedMovementId").doesNotExist());
 
         mockMvc.perform(get("/api/treasury/accounts/" + bancolombia + "/movements")
@@ -237,9 +237,45 @@ class TreasuryTenantIsolationTest {
                 .andExpect(jsonPath("$[0].type").value("INGRESO"))
                 .andExpect(jsonPath("$[0].amount").value(10000.0))
                 .andExpect(jsonPath("$[0].id").value(ingresoId))
-                .andExpect(jsonPath("$[0].concept").value("Transferencia desde Caja General"))
+                .andExpect(jsonPath("$[0].concept").value("Consignacion del dia"))
                 .andExpect(jsonPath("$[0].category").value("TRANSFERENCIA"))
                 .andExpect(jsonPath("$[0].relatedMovementId").value(egresoId));
+    }
+
+    /** Sin concepto del usuario, cada pata lleva el autogenerado y la respuesta el del EGRESO. */
+    @Test
+    void unaTransferenciaSinConceptoUsaElAutogenerado() throws Exception {
+        Long caja = crearCuenta(tokenUno, "Caja General", "EFECTIVO");
+        Long banco = crearCuenta(tokenUno, "Bancolombia", "BANCO");
+
+        mockMvc.perform(post("/api/treasury/transfers")
+                        .header("Authorization", "Bearer " + tokenUno)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"originAccountId":%d,"destinationAccountId":%d,"amount":10000}
+                                """.formatted(caja, banco)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.concept").value("Transferencia a Bancolombia"));
+
+        mockMvc.perform(get("/api/treasury/accounts/" + banco + "/movements")
+                        .header("Authorization", "Bearer " + tokenUno))
+                .andExpect(jsonPath("$[0].concept").value("Transferencia desde Caja General"))
+                .andExpect(jsonPath("$[0].notes").doesNotExist());
+    }
+
+    /** Los tres tipos de cuenta del diccionario se guardan y se leen por la API. */
+    @Test
+    void losTiposDeCuentaDelDiccionarioSeGuardanYSeLeen() throws Exception {
+        crearCuenta(tokenUno, "Caja General", "EFECTIVO");
+        crearCuenta(tokenUno, "Bancolombia", "BANCO");
+        crearCuenta(tokenUno, "Nequi", "DIGITAL");
+
+        MvcResult result = mockMvc.perform(get("/api/treasury/accounts")
+                        .header("Authorization", "Bearer " + tokenUno))
+                .andExpect(status().isOk())
+                .andReturn();
+        List<String> tipos = JsonPath.read(result.getResponse().getContentAsString(), "$[*].type");
+        assertThat(tipos).containsExactlyInAnyOrder("EFECTIVO", "BANCO", "DIGITAL");
     }
 
     private void registrar(String token, Long cuenta, String categoria, String concepto, int monto, String fecha)
@@ -264,9 +300,9 @@ class TreasuryTenantIsolationTest {
 
     @Test
     void elLibroDeMovimientosFiltraPorCuentaCategoriaYRangoSinMostrarOtroTenant() throws Exception {
-        Long caja = crearCuenta(tokenUno, "Caja General", "CASH");
-        Long banco = crearCuenta(tokenUno, "Bancolombia", "BANK");
-        Long cajaAjena = crearCuenta(tokenDos, "Caja General", "CASH");
+        Long caja = crearCuenta(tokenUno, "Caja General", "EFECTIVO");
+        Long banco = crearCuenta(tokenUno, "Bancolombia", "BANCO");
+        Long cajaAjena = crearCuenta(tokenDos, "Caja General", "EFECTIVO");
 
         registrar(tokenUno, caja, "INGRESO_OCASIONAL", "Chatarra agosto", 30000, "2026-08-20");
         registrar(tokenUno, caja, "GASTO_OPERATIVO", "Arriendo septiembre", 10000, "2026-09-05");
@@ -293,7 +329,7 @@ class TreasuryTenantIsolationTest {
 
     @Test
     void crearUnMovimientoManualConUnaCategoriaQueNoEsManualResponde400() throws Exception {
-        Long caja = crearCuenta(tokenUno, "Caja General", "CASH");
+        Long caja = crearCuenta(tokenUno, "Caja General", "EFECTIVO");
 
         for (String categoria : List.of("PAGO_COMPRA", "RECAUDO_VENTA", "TRANSFERENCIA")) {
             mockMvc.perform(post("/api/treasury/movements")

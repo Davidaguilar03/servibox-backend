@@ -12,6 +12,54 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-17: Comportamiento y atributos alineados con el diccionario
+
+* Decision: paso 4 del refactor de normalizacion (ver
+  [sessions/2026-10-06-refactor-normalizacion.md](sessions/2026-10-06-refactor-normalizacion.md)).
+  No renombra tablas ni columnas ni cambia tipos fisicos (eso es el paso 5).
+  * **Roles.** `Role` pasa a `ADMIN`, `MECANICO` y `CAJERO`, como el diccionario;
+    desaparece `EMPLEADO`. Sigue sin haber reglas de permisos por rol: el rol solo viaja en
+    el JWT y como authority.
+  * **Tipos de cuenta.** `AccountType` pasa a `EFECTIVO`, `BANCO` y `DIGITAL` (antes `CASH`
+    y `BANK`). La semilla de desarrollo crea `Caja General` EFECTIVO y `Bancolombia` BANCO.
+    No hay datos que migrar: el esquema se recrea en cada arranque.
+  * **Comision de tarjeta.** `FinancialSettings.cardCommissionRate` ya existia, pero era
+    opcional; ahora es NOT NULL con 0.0 por defecto, como fraccion igual que las otras
+    tasas. Todavia no entra en ningun calculo. Una sola fila por tenant (1 a 1 en el
+    diccionario): restriccion unica `uk_configuracion_tenant` y validacion en
+    `saveFinancialSettings` (`DuplicateFinancialSettingsException`, 409). Antes no estaba
+    garantizado: `findFinancialSettings` tomaba la primera que encontrara.
+  * **Tercero obligatorio en facturas.** Una venta sin `customerId` usa el **Consumidor
+    final** del tenant (`CounterpartyService.consumidorFinal()`: CLIENTE, NIT
+    `222222222222`, el numero de la DIAN), creado la primera vez con `obtenerOCrear` y
+    reutilizado despues. Una compra exige proveedor: sin `supplierId`, 400 "Una compra
+    necesita un proveedor (supplierId)". Las columnas `id_tercero` todavia admiten nulos;
+    la nulabilidad se alinea en el paso 5.
+  * **Concepto de la transferencia.** Se invierte lo del paso 2: el `concept` de las dos
+    patas es el texto del usuario, sin espacios sobrantes, y solo si no escribe ninguno se
+    usa el autogenerado ("Transferencia a X" / "Transferencia desde Y"). `notes` queda
+    vacio. La respuesta de `POST /transfers` devuelve ese concepto.
+  * **Pendiente visible de una anulada.** `SaleResponse` y `PurchaseResponse` muestran
+    `pendingBalance` 0 para una factura `ANULADA`: no se debe. `saldoPendiente` no cambia
+    (cuenta todos los movimientos, activos o no), porque restaurar deriva el estado de el.
+  * **Sumas por categoria en SQL.** El paso 3 las dejo sumando en memoria. Ahora un `SUM`
+    por Criteria (`MovementRepository.sumarMonto(Specification)`) recibe el mismo filtro
+    que el listado, con `MovementSpecifications.activo()`: la base hace la suma y la regla
+    de movimiento activo sigue en un solo sitio.
+  * **Cuenta de los renglones de Reporting.** La de una VENTA o COMPRA es la de su ultimo
+    movimiento **activo** (mayor id), o ninguna. Antes miraba todos los movimientos de la
+    factura; en la practica el resultado era el mismo, porque una factura anulada no sale
+    en el reporte, pero ahora no depende de eso.
+* Alternativas consideradas: un proveedor por defecto en compras, descartado porque una
+  factura de compra siempre la expide alguien identificable; dejar el texto del usuario
+  en `notes`, descartado porque el extracto muestra el concepto y el texto del usuario es
+  lo que explica la transferencia; mostrar en la API el pendiente real de una anulada,
+  descartado porque sugiere una deuda que no existe.
+* Motivo: alinear el comportamiento con [04-DATA-MODEL.md](04-DATA-MODEL.md) antes de
+  tocar nombres fisicos y nulabilidad en el paso 5.
+* No habia ninguna entrada sobre `CASH` / `BANK` que marcar como superada: el tipo de
+  cuenta solo estaba descrito en 01-ARCHITECTURE.md y 02-CONVENTIONS.md, ya corregidos.
+
 ## 2026-10-17: Abonos y pagos son movimientos, y anular deja los movimientos inactivos
 
 * Decision: paso 3 del refactor de normalizacion (ver
@@ -142,7 +190,9 @@ Formato de cada entrada:
   diccionario lo marca NOT NULL. `businessName` se pierde: el diccionario tiene un solo
   campo, `nombre_razon_social`, que es lo que tenia el formulario de Autollantas.
 * Se conserva: la API identifica al cliente y al proveedor **por id**, opcional
-  (`customerId`, `supplierId`); un id que no resuelve en el tenant sigue siendo 400. Las
+  (`customerId`, `supplierId`); **SUPERADO en esa parte el 2026-10-17** por "Comportamiento y atributos alineados con el diccionario":
+  ya no se factura sin tercero. Sin `customerId` la venta usa el Consumidor final, y
+  `supplierId` es obligatorio; un id que no resuelve en el tenant sigue siendo 400. Las
   respuestas cambian de `customerId` + `customerName` a un objeto `customer` (y `supplier`)
   con los datos del tercero. No hay endpoints de terceros: tampoco los habia de clientes ni
   de proveedores.
@@ -1077,6 +1127,10 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
   hace falta, pero no cambia de donde sale la autoridad del dato.
 
 ## 2026-08-28: Rol como enum en la entidad, no como tabla Role
+
+> **Parcialmente SUPERADO** por "Comportamiento y atributos alineados con el diccionario" (2026-10-17): los valores son
+> `ADMIN`, `MECANICO` y `CAJERO`; `EMPLEADO` ya no existe. Sigue vigente que es un enum
+> `STRING` y no una tabla.
 
 * Decision: `User.role` es un enum `Role` (`ADMIN`, `EMPLEADO`) persistido con
   `@Enumerated(STRING)`, no una tabla de roles con su relacion.

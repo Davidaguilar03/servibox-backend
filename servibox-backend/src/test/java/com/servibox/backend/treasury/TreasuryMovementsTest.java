@@ -56,8 +56,8 @@ class TreasuryMovementsTest {
         tenant.setActive(Boolean.TRUE);
         TenantContext.setTenantId(tenantRepository.save(tenant).getId());
 
-        cuentaA = treasuryService.saveAccount(nuevaCuenta("Caja General", AccountType.CASH));
-        cuentaB = treasuryService.saveAccount(nuevaCuenta("Bancolombia", AccountType.BANK));
+        cuentaA = treasuryService.saveAccount(nuevaCuenta("Caja General", AccountType.EFECTIVO));
+        cuentaB = treasuryService.saveAccount(nuevaCuenta("Bancolombia", AccountType.BANCO));
     }
 
     @AfterEach
@@ -152,8 +152,8 @@ class TreasuryMovementsTest {
         assertThat(egreso.getType()).isEqualTo(MovementType.EGRESO);
         assertThat(egreso.getCategory()).isEqualTo(MovementCategory.TRANSFERENCIA);
         assertThat(egreso.getAmount()).isEqualTo(10000.0);
-        assertThat(egreso.getConcept()).isEqualTo("Transferencia a Bancolombia");
-        assertThat(egreso.getNotes()).isEqualTo("Consignacion del dia");
+        assertThat(egreso.getConcept()).isEqualTo("Consignacion del dia");
+        assertThat(egreso.getNotes()).isNull();
         assertThat(egreso.getDate()).isEqualTo(fecha);
         assertThat(egreso.getAccount().getId()).isEqualTo(cuentaA.getId());
         assertThat(egreso.getRelatedMovement()).isNull();
@@ -166,12 +166,38 @@ class TreasuryMovementsTest {
             assertThat(ingreso.getType()).isEqualTo(MovementType.INGRESO);
             assertThat(ingreso.getCategory()).isEqualTo(MovementCategory.TRANSFERENCIA);
             assertThat(ingreso.getAmount()).isEqualTo(10000.0);
-            assertThat(ingreso.getConcept()).isEqualTo("Transferencia desde Caja General");
+            assertThat(ingreso.getConcept()).isEqualTo("Consignacion del dia");
+            assertThat(ingreso.getNotes()).isNull();
             assertThat(ingreso.getDate()).isEqualTo(fecha);
             assertThat(ingreso.getRelatedMovement().getId()).isEqualTo(egreso.getId());
         });
 
         assertThat(saldoDe(cuentaA) + saldoDe(cuentaB)).isEqualTo(sumaAntes);
+    }
+
+    /**
+     * El concepto de las dos patas es el texto del usuario sin espacios sobrantes; sin
+     * texto (nulo o en blanco), el autogenerado. Las notas quedan vacias en los dos casos.
+     */
+    @Test
+    void elConceptoDeLaTransferenciaEsElDelUsuarioOElAutogenerado() {
+        fondear(cuentaA, 30000.0);
+
+        TreasuryService.Transferencia conTexto = treasuryService.registrarTransferencia(
+                cuentaA, cuentaB, "  Consignacion del dia  ", 1000.0, null);
+        assertThat(conTexto.egreso().getConcept()).isEqualTo("Consignacion del dia");
+        assertThat(conTexto.ingreso().getConcept()).isEqualTo("Consignacion del dia");
+
+        for (String sinTexto : new String[]{null, "   "}) {
+            TreasuryService.Transferencia autogenerada = treasuryService.registrarTransferencia(
+                    cuentaA, cuentaB, sinTexto, 1000.0, null);
+            assertThat(autogenerada.egreso().getConcept()).isEqualTo("Transferencia a Bancolombia");
+            assertThat(autogenerada.ingreso().getConcept()).isEqualTo("Transferencia desde Caja General");
+            assertThat(autogenerada.egreso().getNotes()).isNull();
+            assertThat(autogenerada.ingreso().getNotes()).isNull();
+        }
+        assertThat(conTexto.egreso().getNotes()).isNull();
+        assertThat(conTexto.ingreso().getNotes()).isNull();
     }
 
     /** Un movimiento manual no viene de ninguna factura. */
