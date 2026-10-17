@@ -7,7 +7,7 @@ Fuente: Diccionario de Datos de ServiBox (informe UPTC-EISC-SB-01) y su diagrama
 ## Reglas generales
 
 * Multi-tenant: base compartida y esquema compartido. La columna `id_tenant` esta en todas las tablas excepto `TENANTS` y `CATEGORIA_IMPUESTOS`. En la capa JPA el aislamiento lo da el `@Filter` de Hibernate.
-* Unicos compuestos con `id_tenant`: `(id_tenant, username)` en USUARIOS, `(id_tenant, numero_documento)` en TERCEROS, `(id_tenant, numero_factura_venta)` en VENTAS, `(id_tenant, codigo_producto)` en PRODUCTOS.
+* Unicos compuestos con `id_tenant`: `(id_tenant, username)` en USUARIOS, `(id_tenant, nombre_cuenta)` en CUENTAS, `(id_tenant, numero_documento)` en TERCEROS, `(id_tenant, numero_factura_compra)` en COMPRAS, `(id_tenant, numero_factura_venta)` en VENTAS, `(id_tenant, codigo_producto)` en PRODUCTOS.
 * Motor: PostgreSQL 16. Tipos fisicos: identificadores `INTEGER`; texto `VARCHAR(n)`; montos en COP `NUMERIC(14,2)`; porcentajes `NUMERIC(5,2)`; fechas `TIMESTAMP WITHOUT TIME ZONE` (UTC); banderas `BOOLEAN`.
 * Integridad referencial: `ON DELETE RESTRICT` en las entidades maestras (cuentas, terceros, productos): nada con historial transaccional se elimina.
 * Normalizacion aplicada: (1) `MOVIMIENTOS` unifica gastos operativos, ingresos ocasionales, transferencias, pagos de compras y recaudos de ventas; `tipo_movimiento` da el flujo y `categoria_movimiento` el concepto. (2) `TERCEROS` unifica clientes y proveedores; `tipo_tercero` vale CLIENTE, PROVEEDOR o AMBOS.
@@ -66,7 +66,7 @@ Modulo: Tesoreria.
 |-|-|-|-|-|-|
 | id_cuenta | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador unico de la cuenta de tesoreria. |
 | id_tenant | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). Aislamiento de la cuenta por taller. |
-| nombre_cuenta | VARCHAR | 100 | NOT NULL | - | Nombre descriptivo de la cuenta (Caja General, Bancolombia, Nequi). |
+| nombre_cuenta | VARCHAR | 100 | NOT NULL | UK | Nombre descriptivo de la cuenta (Caja General, Bancolombia, Nequi). Unico por taller (UK compuesta con id_tenant). |
 | balance_inicial | NUMERIC | 14,2 | NOT NULL | - | Saldo de apertura al registrar la cuenta en el sistema (en COP). |
 | saldo_actual | NUMERIC | 14,2 | NOT NULL | - | Saldo disponible en tiempo real, recalculado por movimientos de fondos. |
 | tipo_cuenta | VARCHAR | 30 | NOT NULL | - | Tipo de cuenta financiera (EFECTIVO, BANCO, DIGITAL). |
@@ -85,7 +85,7 @@ Modulo: Tesoreria.
 | id_movimiento_relacionado | INTEGER (I) | 4 bytes | NULL | FK | FK autoreferencial a MOVIMIENTOS(id_movimiento). Vincula la contrapartida contable en transferencias internas entre cuentas. |
 | id_compra | INTEGER (I) | 4 bytes | NULL | FK | FK a COMPRAS(id_compra). Vincula abonos y pagos a facturas de compra. |
 | id_venta | INTEGER (I) | 4 bytes | NULL | FK | FK a VENTAS(id_venta). Vincula abonos y recaudos de facturas de venta. |
-| tipo_movimiento | VARCHAR | 20 | NOT NULL | - | Direccion contable del flujo financiero (INGRESO, EGRESO, TRANSFERENCIA). |
+| tipo_movimiento | VARCHAR | 20 | NOT NULL | - | Direccion contable del flujo financiero (INGRESO, EGRESO). |
 | categoria_movimiento | VARCHAR | 50 | NOT NULL | - | Categoria tecnica (GASTO_OPERATIVO, INGRESO_OCASIONAL, TRANSFERENCIA, PAGO_COMPRA, RECAUDO_VENTA). |
 | monto | NUMERIC | 14,2 | NOT NULL | - | Valor monetario de la transaccion en pesos colombianos (monto > 0). |
 | fecha_movimiento | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora efectiva de la operacion financiera. |
@@ -120,7 +120,7 @@ Modulo: Comercial.
 | id_compra | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador unico de la factura de adquisicion de mercancia. |
 | id_tenant | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
 | id_tercero | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TERCEROS(id_tercero). Proveedor que expide la factura. |
-| numero_factura_compra | VARCHAR | 50 | NOT NULL | - | Consecutivo oficial de la factura fisica o electronica del proveedor. |
+| numero_factura_compra | VARCHAR | 50 | NOT NULL | UK | Consecutivo oficial de la factura fisica o electronica del proveedor (UK compuesta con id_tenant). |
 | fecha_compra | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha de expedicion formal de la factura de compra. |
 | fecha_vencimiento_compra | TIMESTAMP (D) | 8 bytes | NULL | - | Fecha limite de pago acordada para compras a credito comercial. |
 | forma_pago_compra | VARCHAR | 20 | NOT NULL | - | Modalidad de pago comercial: CONTADO o CREDITO. |
@@ -199,7 +199,7 @@ Modulo: Inventario.
 | descripcion_producto | VARCHAR | 255 | NOT NULL | - | Nombre y especificaciones tecnicas del repuesto o servicio. |
 | costo_compra | NUMERIC | 14,2 | NOT NULL | - | Ultimo costo neto o promedio ponderado de compra en COP. |
 | cantidad | INTEGER (I) | 4 bytes | NOT NULL | - | Saldo de existencias fisicas disponibles en almacen o bodega. |
-| iva_producto | NUMERIC | 5,2 | NOT NULL | - | Tarifa nominal de IVA aplicable al item (19.00, 5.00, 0.00). |
+| iva_producto | NUMERIC | 14,2 | NOT NULL | - | Monto de IVA por unidad en COP: costo_compra por la suma de las tasas de IVA (es_iva) de la categoria del producto. No es una tarifa. |
 | precio_sugerido | NUMERIC | 14,2 | NOT NULL | - | Precio de venta recomendado calculado a partir de costo y margen. |
 | created_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de registro del producto en el catalogo (UTC). |
 | updated_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de modificacion de existencias o precios (UTC). |
@@ -279,9 +279,10 @@ Modulo: Tributario.
 
 Decididas durante el refactor. Cada una se anota tambien en `03-DECISIONS.md`.
 
-* **Direccion del movimiento.** `tipo_movimiento` solo toma INGRESO o EGRESO, porque es lo que da el signo sobre el saldo de la cuenta. TRANSFERENCIA es una `categoria_movimiento`, no un tipo. El diccionario lista TRANSFERENCIA entre los valores de `tipo_movimiento`, pero una transferencia no tiene direccion por si sola.
+* **Direccion del movimiento.** `tipo_movimiento` solo toma INGRESO o EGRESO, porque es lo que da el signo sobre el saldo de la cuenta. TRANSFERENCIA es una `categoria_movimiento`, no un tipo. El diccionario original listaba TRANSFERENCIA entre los valores de `tipo_movimiento`, pero una transferencia no tiene direccion por si sola; la tabla MOVIMIENTOS de arriba ya esta corregida.
 * **Transferencia.** Son dos movimientos con categoria TRANSFERENCIA: un EGRESO en la cuenta origen y un INGRESO en la cuenta destino. El INGRESO apunta al EGRESO con `id_movimiento_relacionado`. El `concepto` de las dos patas es el texto que escribe el usuario, sin espacios sobrantes; si no escribe ninguno, el autogenerado ("Transferencia a X" en el EGRESO y "Transferencia desde Y" en el INGRESO). `notas` queda vacio.
 * **Enlace del movimiento con su factura.** Restriccion CHECK `ck_movimiento_factura` en MOVIMIENTOS: RECAUDO_VENTA lleva `id_venta` y no `id_compra`, PAGO_COMPRA lleva `id_compra` y no `id_venta`, y las demas categorias no llevan ninguna de las dos. El diccionario no la lista; el service valida lo mismo antes de escribir.
+* **Montos y cantidades positivos.** Restricciones CHECK `ck_movimiento_monto` (`monto > 0` en MOVIMIENTOS; el signo lo da `tipo_movimiento`), `ck_detalle_compra_cantidad` (`cantidad_compra > 0`) y `ck_detalle_venta_cantidad` (`cantidad_venta > 0`). Son las reglas que el diccionario escribe en la descripcion de esas columnas.
 * **Categorias manuales.** GASTO_OPERATIVO (EGRESO) e INGRESO_OCASIONAL (INGRESO) son los unicos movimientos que el usuario crea, edita y elimina directamente. Los de categoria TRANSFERENCIA, PAGO_COMPRA y RECAUDO_VENTA se gestionan desde su operacion.
 * **Terceros.** Una persona o empresa existe una sola vez por tenant, identificada por `numero_documento`. Si ya existe como CLIENTE y se usa como proveedor (o al reves), pasa a AMBOS. Una venta exige un tercero CLIENTE o AMBOS; una compra, PROVEEDOR o AMBOS.
 * **Tercero obligatorio en facturas.** Toda factura tiene `id_tercero`. Una venta que no identifica al cliente usa el tercero "Consumidor final" del tenant (CLIENTE, NIT 222222222222, el numero que usa la DIAN para consumidor final), que se crea la primera vez y despues se reutiliza; cada tenant tiene el suyo. Una compra exige siempre su proveedor: no hay proveedor por defecto.
@@ -293,6 +294,5 @@ Decididas durante el refactor. Cada una se anota tambien en `03-DECISIONS.md`.
 
 Decisiones que se toman en los pasos 5 y 6 del refactor (ver `sessions/2026-10-06-refactor-normalizacion.md`), cuando haya que resolver el esquema fisico:
 
-* Semantica de `iva_producto`: el diccionario lo describe como tarifa, pero el codigo guarda un monto en pesos por unidad.
 * Tipos fisicos frente a los del codigo: identificadores (INTEGER contra Long), montos (NUMERIC contra Double), porcentajes (5,2 contra fracciones), fechas (TIMESTAMP en UTC contra LocalDate).
-* Unicos que el codigo ya aplica y el diccionario no lista: nombre de cuenta y numero de factura de compra por tenant.
+* `medio_pago_compra` y `medio_pago_venta` son texto libre en el codigo, mientras el diccionario lista valores permitidos (EFECTIVO, TRANSFERENCIA, CHEQUE en compras; EFECTIVO, TARJETA_DEBITO, TARJETA_CREDITO, TRANSFERENCIA en ventas). Todavia no se validan.

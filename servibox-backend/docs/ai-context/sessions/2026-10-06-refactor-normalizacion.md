@@ -19,10 +19,11 @@ en seis pasos (eran cinco; el 2026-10-17 el antiguo paso 4 se partio en dos), ca
   diccionario (roles, tipos de cuenta, comision de tarjeta, tercero obligatorio) y
   corregir lo que dejo la revision del paso 3. Sin renombrar tablas ni columnas ni cambiar
   tipos fisicos. Hecho el 2026-10-17, rama `refactor/18-align-attributes-with-dictionary`.
-- [ ] **5. Nombres fisicos, nulabilidad y longitudes.** Nombres de tablas y columnas,
+- [x] **5. Nombres fisicos, nulabilidad y longitudes.** Nombres de tablas y columnas,
   NOT NULL y longitudes del diccionario, con una prueba de conformidad contra el
-  diccionario.
-- [ ] **6. Flyway.** Migracion V1 escrita desde el diccionario.
+  diccionario. Hecho el 2026-10-17, rama `refactor/19-align-physical-schema`.
+- [ ] **6. Flyway.** Migracion V1 escrita desde el diccionario, con los tipos fisicos del
+  diccionario. Lista de desviaciones de tipo en "Paso 5" mas abajo.
 
 ## Paso 1: terceros
 
@@ -45,6 +46,7 @@ en seis pasos (eran cinco; el 2026-10-17 el antiguo paso 4 se partio en dos), ca
   siguen con `id`.
 * El tenant sigue en `tenant_id` en todas las tablas, `TERCEROS` incluida: la condicion del
   `@Filter` de `TenantAwareEntity` lo tiene escrito. El diccionario dice `id_tenant`.
+* Resuelto en el paso 5: todas las PK son `id_<entidad>` y el tenant es `id_tenant`.
 
 ## Paso 2: movimientos con categoria
 
@@ -67,7 +69,7 @@ en seis pasos (eran cinco; el 2026-10-17 el antiguo paso 4 se partio en dos), ca
 ### Anotado para el paso 5 (nombres de columna; antes paso 4)
 
 * Las columnas que ya existian en `MOVIMIENTOS` conservan su nombre (`concepto_movimiento`,
-  `monto_movimiento`); el diccionario dice `concepto` y `monto`.
+  `monto_movimiento`); el diccionario dice `concepto` y `monto`. Resuelto en el paso 5.
 
 ## Paso 3: abonos y pagos como movimientos
 
@@ -121,3 +123,60 @@ en seis pasos (eran cinco; el 2026-10-17 el antiguo paso 4 se partio en dos), ca
   nunca los deja nulos.
 * Un valor de enum invalido en el cuerpo (por ejemplo `"type":"CASH"`) responde 500, no
   400: `GlobalExceptionHandler` no trata `HttpMessageNotReadableException`. Viene de antes.
+* Resueltos los dos en el paso 5.
+
+## Paso 5: nombres fisicos, nulabilidad y longitudes
+
+* Nombres del diccionario: PK `id_<entidad>` con `@AttributeOverride`, tenant `id_tenant`
+  (clase base, `@Filter`, `@UniqueConstraint`), `concepto` y `monto` en MOVIMIENTOS. FK
+  `id_tenant -> TENANTS` en todas las tablas de negocio por un `ManyToOne` de solo lectura
+  en `TenantAwareEntity`.
+* `CATEGORIA_IMPUESTOS` con PK compuesta: `ProductCategory.taxTypes` pasa a `Set`.
+* NOT NULL y `length` del diccionario en todas las entidades, tambien en los enums. CHECK
+  `ck_movimiento_monto`, `ck_detalle_compra_cantidad` y `ck_detalle_venta_cantidad`.
+* Caminos que violaban las reglas, corregidos sin relajarlas: `saveProduct` calcula
+  precios antes del INSERT; `CategoryRequest` y `ProductRequest` exigen los campos NOT NULL;
+  la semilla de desarrollo pone umbrales y margen en 0.
+* `HttpMessageNotReadableException` es 400, con campo y valores permitidos si es un enum.
+* 04-DATA-MODEL.md: `iva_producto` es un monto NUMERIC(14,2); `tipo_movimiento` sin
+  TRANSFERENCIA; UK compuestas de `nombre_cuenta` y `numero_factura_compra`; CHECK en
+  Decisiones; `medio_pago_*` en Pendientes.
+* `schema.SchemaConformanceTest` compara el esquema con el diccionario.
+* Decisiones: [03-DECISIONS.md](../03-DECISIONS.md), entrada "Nombres fisicos, nulabilidad
+  y longitudes del diccionario".
+* Tests: 181 antes, 192 despues. Ninguna clase perdio tests; nuevas
+  `schema.SchemaConformanceTest` (1), `schema.CheckConstraintsTest` (3) y
+  `shared.RequestBodyErrorsTest` (7).
+
+### Para el paso 6: desviaciones de tipo
+
+Las 76 de `DESVIACIONES_CONOCIDAS` en `SchemaConformanceTest`. El paso 6 las resuelve y
+vacia la lista; la prueba falla si una entrada deja de ocurrir.
+
+* **BIGINT contra INTEGER (38), identificadores `Long`.** PK y FK de todas las tablas, e
+  `id_tenant` en todas menos `CATEGORIA_IMPUESTOS`: TENANTS.id_tenant; USUARIOS.id_usuario,
+  id_tenant; CONFIGURACION_FINANCIERA.id_configuracion, id_tenant; CUENTAS.id_cuenta,
+  id_tenant; MOVIMIENTOS.id_movimiento, id_tenant, id_cuenta, id_movimiento_relacionado,
+  id_compra, id_venta; TERCEROS.id_tercero, id_tenant; COMPRAS.id_compra, id_tenant,
+  id_tercero; DETALLE_COMPRAS.id_detalle_compra, id_tenant, id_compra, id_producto;
+  VENTAS.id_venta, id_tenant, id_tercero; DETALLE_VENTAS.id_detalle_venta, id_tenant,
+  id_venta, id_producto; PRODUCTOS.id_producto, id_tenant, id_categoria_producto;
+  CATEGORIA_PRODUCTOS.id_categoria_producto, id_tenant; TIPOS_IMPUESTO.id_impuesto,
+  id_tenant; CATEGORIA_IMPUESTOS.id_categoria_producto, id_impuesto.
+* **DOUBLE contra NUMERIC (23), montos y porcentajes `Double`.**
+  CONFIGURACION_FINANCIERA.porcentaje_gastos, porcentaje_dian, porcentaje_ica,
+  porcentaje_comision_tarjeta; CUENTAS.balance_inicial, saldo_actual; MOVIMIENTOS.monto;
+  COMPRAS.subtotal_compra, iva_total_compra, total_compra; DETALLE_COMPRAS.precio_compra,
+  iva_linea_compra; VENTAS.subtotal_venta, iva_por_pagar_venta, total_venta;
+  DETALLE_VENTAS.precio_venta, iva_generado_linea, diferencia_iva_linea;
+  PRODUCTOS.costo_compra, iva_producto, precio_sugerido; CATEGORIA_PRODUCTOS.margen_utilidad;
+  TIPOS_IMPUESTO.tasa_impuesto. Los porcentajes ademas son fracciones y el diccionario los
+  escribe en 0.00 a 100.00.
+* **DATE contra TIMESTAMP (5), fechas de negocio `LocalDate`.**
+  MOVIMIENTOS.fecha_movimiento; COMPRAS.fecha_compra, fecha_vencimiento_compra;
+  VENTAS.fecha_venta, fecha_vencimiento_venta.
+* **ENUM contra VARCHAR (10), `@Enumerated(STRING)` en H2.** USUARIOS.rol;
+  CUENTAS.tipo_cuenta; MOVIMIENTOS.tipo_movimiento, categoria_movimiento;
+  TERCEROS.tipo_tercero, tipo_documento; COMPRAS.forma_pago_compra, estado_compra;
+  VENTAS.forma_pago_venta, estado_venta. En PostgreSQL saldran VARCHAR con su `length`; la
+  migracion V1 los escribe como VARCHAR.

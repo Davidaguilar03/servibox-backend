@@ -2,6 +2,7 @@ package com.servibox.backend.purchases.entity;
 
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.shared.TenantAwareEntity;
+import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -27,51 +28,52 @@ import java.time.LocalDate;
 @Entity
 @Data
 @EqualsAndHashCode(callSuper = true)
+@AttributeOverride(name = "id", column = @Column(name = "id_compra"))
 @Table(
         name = "COMPRAS",
         uniqueConstraints = @UniqueConstraint(
                 name = "uk_compra_tenant_invoice_number",
-                columnNames = {"tenant_id", "numero_factura_compra"}
+                columnNames = {"id_tenant", "numero_factura_compra"}
         )
 )
 public class Purchase extends TenantAwareEntity {
 
-    @Column(name = "numero_factura_compra")
+    @Column(name = "numero_factura_compra", length = 50, nullable = false)
     private String invoiceNumber;
 
     /**
-     * El proveedor: un tercero PROVEEDOR o AMBOS. Obligatorio desde el service, sin
-     * proveedor por defecto. La columna todavia admite nulos hasta el paso 5 del refactor.
+     * El proveedor: un tercero PROVEEDOR o AMBOS. Obligatorio (NOT NULL), sin proveedor
+     * por defecto: el service lo exige antes con un 400 legible.
      */
     @ManyToOne
-    @JoinColumn(name = "id_tercero")
+    @JoinColumn(name = "id_tercero", nullable = false)
     private Counterparty supplier;
 
-    @Column(name = "fecha_compra")
+    @Column(name = "fecha_compra", nullable = false)
     private LocalDate invoiceDate;
 
     @Column(name = "fecha_vencimiento_compra")
     private LocalDate dueDate;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "forma_pago_compra")
+    @Column(name = "forma_pago_compra", length = 20, nullable = false)
     private PaymentType paymentType;
 
-    @Column(name = "medio_pago_compra")
+    @Column(name = "medio_pago_compra", length = 30)
     private String paymentMethod;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "estado_compra")
+    @Column(name = "estado_compra", length = 20, nullable = false)
     private PurchaseStatus status;
 
     /** Suma de precio de compra por cantidad, sin IVA. */
-    @Column(name = "subtotal_compra")
+    @Column(name = "subtotal_compra", nullable = false)
     private Double subtotal;
 
     /** IVA de la compra. Es IVA descontable: se recupera contra el IVA de las ventas. */
-    @Column(name = "iva_total_compra")
+    @Column(name = "iva_total_compra", nullable = false)
     private Double ivaTotal;
 
-    @Column(name = "total_compra")
+    @Column(name = "total_compra", nullable = false)
     private Double total;
 }

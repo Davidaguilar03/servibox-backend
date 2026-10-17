@@ -17,9 +17,7 @@ import lombok.EqualsAndHashCode;
  * vez por tenant, identificado por su numero de documento. Ver 04-DATA-MODEL.md, TERCEROS.
  *
  * La PK usa la columna del diccionario (`id_tercero`) con @AttributeOverride sobre el `id`
- * de TenantAwareEntity. El tenant se queda en `tenant_id` y no en `id_tenant`: el @Filter
- * de la clase base tiene la columna escrita en su condicion SQL, y renombrarla aqui
- * romperia el aislamiento de esta tabla. Se alinea en el paso de Flyway.
+ * de TenantAwareEntity, como todas las entidades; el tenant es `id_tenant`.
  */
 @Entity
 @Data
@@ -29,7 +27,7 @@ import lombok.EqualsAndHashCode;
         name = "TERCEROS",
         uniqueConstraints = @UniqueConstraint(
                 name = "uk_tercero_tenant_document",
-                columnNames = {"tenant_id", "numero_documento"}
+                columnNames = {"id_tenant", "numero_documento"}
         )
 )
 public class Counterparty extends TenantAwareEntity {

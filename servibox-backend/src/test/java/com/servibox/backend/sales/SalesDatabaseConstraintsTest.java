@@ -42,9 +42,12 @@ class SalesDatabaseConstraintsTest {
     @Autowired
     private CounterpartyRepository counterpartyRepository;
 
+    private Counterparty cliente;
+
     @BeforeEach
     void seed() {
         fixture.usarTenant(fixture.crearTenant());
+        cliente = fixture.crearCliente("Cliente Crudo", "100200300");
     }
 
     @AfterEach
@@ -55,6 +58,7 @@ class SalesDatabaseConstraintsTest {
     private Sale facturaCruda(String numero) {
         Sale venta = new Sale();
         venta.setInvoiceNumber(numero);
+        venta.setCustomer(cliente);
         venta.setInvoiceDate(LocalDate.now());
         venta.setPaymentType(PaymentType.CONTADO);
         venta.setStatus(SaleStatus.PAGADA);

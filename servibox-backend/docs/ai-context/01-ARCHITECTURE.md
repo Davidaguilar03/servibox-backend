@@ -17,25 +17,34 @@ seccion: el `PlatformTransactionManager` se reemplaza por
 define `SecurityConfig` (Capa de seguridad JWT) y la auditoria JPA se activa con
 `JpaAuditingConfiguration`.
 
-## Estrategia multi-tenant (tenant_id + filtro Hibernate)
+## Estrategia multi-tenant (id_tenant + filtro Hibernate)
 
 Un solo esquema de base de datos para todos los tenants. Cada fila de negocio lleva una
-columna discriminadora `tenant_id`. El aislamiento no se escribe en cada query: lo aplica
+columna discriminadora `id_tenant`. El aislamiento no se escribe en cada query: lo aplica
 Hibernate. Motivo de la eleccion en [03-DECISIONS.md](03-DECISIONS.md).
 
 Piezas:
 
 **`tenant.Tenant` y `tenant.TenantRepository`**
-Entidad maestra del inquilino (tabla `TENANTS`): `id` (Long, IDENTITY), `name`, `slug`
-unico, `active`, `createdAt` (asignado en `@PrePersist`). Esta entidad NO extiende
+Entidad maestra del inquilino (tabla `TENANTS`): `id` (Long, IDENTITY, columna `id_tenant`),
+`name`, `slug` unico, `active`, `createdAt` (asignado en `@PrePersist`). Sus columnas son
+las de TENANTS en el diccionario: sin `created_at` ni `updated_at`, la fecha es
+`fecha_creacion_tenant`. Esta entidad NO extiende
 `TenantAwareEntity`: es el catalogo global de tenants, no pertenece a ninguno.
 
 **`shared.TenantAwareEntity`**
 `@MappedSuperclass` del que extienden todas las entidades de negocio. Aporta:
 
-* `id`: `Long` con `@GeneratedValue(IDENTITY)`.
-* `tenantId`: `Long`, columna `tenant_id`, `nullable = false`, `updatable = false`, del
+* `id`: `Long` con `@GeneratedValue(IDENTITY)`. La columna es la PK del diccionario,
+  `id_<entidad>`: cada entidad la fija con `@AttributeOverride(name = "id")`
+  (`id_usuario`, `id_cuenta`, `id_movimiento`, `id_tercero`, `id_venta`...). El campo Java
+  sigue siendo `id`.
+* `tenantId`: `Long`, columna `id_tenant`, `nullable = false`, `updatable = false`, del
   mismo tipo que `Tenant.id`.
+* `tenant`: `ManyToOne` LAZY a `Tenant` sobre la misma columna, de solo lectura
+  (`insertable = false, updatable = false`) y sin getter ni setter. Solo existe para que
+  la base tenga la FK `id_tenant -> TENANTS` del diccionario; el tenant se escribe y se
+  lee por `tenantId`.
 * `createdAt` y `updatedAt`: `LocalDateTime` con `@CreatedDate` y `@LastModifiedDate`,
   poblados por `@EntityListeners(AuditingEntityListener.class)`. La auditoria se activa
   globalmente con `@EnableJpaAuditing` en `config.JpaAuditingConfiguration`.
@@ -46,7 +55,7 @@ Un metodo `@PrePersist` en la clase base asigna `tenantId` automaticamente desde
 
 Si en ese momento `TenantContext.getTenantId()` es null, el metodo lanza
 `IllegalStateException` con el mensaje "No se puede persistir una entidad sin un tenant
-activo en el contexto". Es deliberado que reviente ahi: una fila con `tenant_id` nulo
+activo en el contexto". Es deliberado que reviente ahi: una fila con `id_tenant` nulo
 queda invisible para el filtro de Hibernate de todos los tenants y aparece como dato
 perdido mucho despues, cuando ya no hay forma de saber a quien pertenecia. Mejor que la
 insercion falle de una vez y visible.
@@ -66,7 +75,7 @@ Declara ademas el filtro de Hibernate:
 
 ```java
 @FilterDef(name = "tenantFilter", parameters = @ParamDef(name = "tenantId", type = Long.class))
-@Filter(name = "tenantFilter", condition = "tenant_id = :tenantId")
+@Filter(name = "tenantFilter", condition = "id_tenant = :tenantId")
 ```
 
 En Hibernate 7 el atributo `type` de `@ParamDef` es `Class<?>`, no `String`.
@@ -102,7 +111,7 @@ toma el tenant de `TenantContext` y habilita el filtro sobre la sesion ligada al
 session.enableFilter(TENANT_FILTER).setParameter(TENANT_PARAM, tenantId);
 ```
 
-Desde ahi ninguna query necesita escribir el `where tenant_id` a mano. Se registra como
+Desde ahi ninguna query necesita escribir el `where id_tenant` a mano. Se registra como
 bean `PlatformTransactionManager` en `TenantFilterConfiguration`, reemplazando al que
 autoconfigura Spring Boot.
 
@@ -179,7 +188,7 @@ efecto hasta que su token venciera, hasta 24 horas despues. Por eso cada request
 paga una consulta a `USUARIOS`. Motivo completo en [03-DECISIONS.md](03-DECISIONS.md).
 
 **Costo conocido:** es una consulta extra por request autenticado. Hoy es irrelevante, es
-una lectura por clave unica `(tenant_id, username)` con indice. Si algun dia el volumen lo
+una lectura por clave unica `(id_tenant, username)` con indice. Si algun dia el volumen lo
 justifica, la salida tipica es una cache corta en memoria del estado del usuario, con TTL
 de segundos, o una lista de tokens revocados. No esta implementado ni hace falta todavia.
 
@@ -202,6 +211,7 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | `InsufficientStockException`, `InsufficientBalanceException` | 409 | mensaje de la excepcion |
 | `InvalidCredentialsException` y `AuthenticationException` | 401 | "Credenciales invalidas" |
 | `MethodArgumentNotValidException` (fallo de `@Valid`) | 400 | "Peticion invalida" |
+| `HttpMessageNotReadableException` (JSON mal formado o valor del tipo equivocado) | 400 | Si el valor es de un enum: "Valor invalido 'X' en el campo f. Valores permitidos: ..."; si no, un mensaje generico |
 | `ResourceNotFoundException` | 404 | mensaje de la excepcion |
 | `NoResourceFoundException` | 404 | "Recurso no encontrado" |
 | `Exception` (ultimo recurso) | 500 | "Error interno del servidor" |
@@ -244,7 +254,7 @@ diccionario) con `@Enumerated(STRING)`. Motivo del enum en vez de tabla en
 pero **todavia no hay reglas de permisos por rol**: toda ruta autenticada vale para
 cualquiera.
 
-La restriccion unica es **compuesta**, `(tenant_id, username)`, no `unique` en la columna
+La restriccion unica es **compuesta**, `(id_tenant, username)`, no `unique` en la columna
 sola: dos negocios distintos pueden tener cada uno su usuario `admin`.
 
 Consecuencia de eso: el login necesita saber a que tenant entrar antes de poder resolver
@@ -286,14 +296,17 @@ Migrado desde el modulo `inventory` de Autollantas. Todas sus entidades extiende
 **Entidades**
 
 * `ProductCategory` (`CATEGORIA_PRODUCTOS`): `name`, `color`, `yellowStockMin`,
-  `redStockMin`, `targetMargin` (fraccion, 0.30 es 30 por ciento) y `taxTypes`, un
-  `ManyToMany` EAGER contra `TaxType` por la tabla `CATEGORIA_IMPUESTOS`.
+  `redStockMin`, `targetMargin` (fraccion, 0.30 es 30 por ciento), todos obligatorios, y
+  `taxTypes`, un `ManyToMany` EAGER contra `TaxType` por la tabla puente
+  `CATEGORIA_IMPUESTOS`. Es un `Set` para que la tabla tenga la PK compuesta
+  `(id_categoria_producto, id_impuesto)` del diccionario. `CategoryRequest` exige todos
+  los campos salvo los impuestos.
 * `TaxType` (`TIPOS_IMPUESTO`): `name`, `rate`, `isVat`, `appliesToTransaction`,
   `description`.
 * `Product` (`PRODUCTOS`): `code`, `description`, `purchaseCost`, `quantity`, `taxAmount`,
   `suggestedPrice`, y `ManyToOne` a `ProductCategory`. Restriccion unica **compuesta**
-  `uk_producto_tenant_code` sobre `(tenant_id, codigo_producto)`, mismo criterio que
-  `(tenant_id, username)` en `User`: dos talleres distintos pueden usar cada uno el codigo
+  `uk_producto_tenant_code` sobre `(id_tenant, codigo_producto)`, mismo criterio que
+  `(id_tenant, username)` en `User`: dos talleres distintos pueden usar cada uno el codigo
   `LLA-001` para productos que no tienen nada que ver.
 
   La unicidad se defiende en dos capas. `InventoryService.saveProduct` consulta
@@ -305,7 +318,7 @@ Migrado desde el modulo `inventory` de Autollantas. Todas sus entidades extiende
 * `FinancialSettings` (`CONFIGURACION_FINANCIERA`): `expensesRate`, `dianRate`, `icaRate`,
   `cardCommissionRate`, todas fracciones (`icaRate` por mil). En Autollantas es un
   singleton con id fijo 1; aqui es **una fila por tenant**, porque cada negocio tiene sus
-  propios porcentajes: restriccion unica `uk_configuracion_tenant` sobre `tenant_id`, y
+  propios porcentajes: restriccion unica `uk_configuracion_tenant` sobre `id_tenant`, y
   `InventoryService.saveFinancialSettings` rechaza una segunda con
   `DuplicateFinancialSettingsException` (**409**). `cardCommissionRate` es obligatoria
   (NOT NULL) y vale 0.0 por defecto; todavia no entra en ningun calculo.
@@ -351,8 +364,8 @@ Todas sus entidades extienden `TenantAwareEntity`.
 * `Account` (`CUENTAS`): `name`, `initialBalance`, `currentBalance`, `type` (enum
   `AccountType`: `EFECTIVO`, `BANCO` o `DIGITAL`, los del diccionario; antes `CASH` y
   `BANK`). Restriccion unica **compuesta** `uk_cuenta_tenant_name`
-  sobre `(tenant_id, nombre_cuenta)`, mismo criterio que `(tenant_id, username)` en `User`
-  y `(tenant_id, codigo_producto)` en `Product`: cada taller tiene su propia "Caja
+  sobre `(id_tenant, nombre_cuenta)`, mismo criterio que `(id_tenant, username)` en `User`
+  y `(id_tenant, codigo_producto)` en `Product`: cada taller tiene su propia "Caja
   General".
 
   Igual que con el codigo de producto, la unicidad se defiende en dos capas.
@@ -374,8 +387,8 @@ Todas sus entidades extienden `TenantAwareEntity`.
   | `account` | `id_cuenta` | `ManyToOne` a `Account` |
   | `type` | `tipo_movimiento` | Enum `MovementType`: solo `INGRESO` o `EGRESO`. Es lo que da el signo sobre el saldo |
   | `category` | `categoria_movimiento` | Enum `MovementCategory`, obligatorio (NOT NULL en la base) |
-  | `concept` | `concepto_movimiento` | Columna real, divergencia deliberada respecto de Autollantas |
-  | `amount` | `monto_movimiento` | |
+  | `concept` | `concepto` | Obligatorio, 255. Columna real, divergencia deliberada respecto de Autollantas |
+  | `amount` | `monto` | Obligatorio, siempre positivo (`ck_movimiento_monto`) |
   | `date` | `fecha_movimiento` | Fecha de negocio (`LocalDate`), no de auditoria |
   | `notes` | `notas` | Opcional, 255 |
   | `relatedMovement` | `id_movimiento_relacionado` | `ManyToOne` a `Movement`, clave foranea real. Solo en la pata INGRESO de una transferencia, apuntando a la pata EGRESO. Excluido de `toString` y `equals` |
@@ -385,9 +398,8 @@ Todas sus entidades extienden `TenantAwareEntity`.
   Restriccion `CHECK` `ck_movimiento_factura`: `RECAUDO_VENTA` lleva venta y no compra,
   `PAGO_COMPRA` compra y no venta, y las demas categorias ninguna de las dos.
   `TreasuryService` valida lo mismo antes de escribir; la base es la red de seguridad.
-
-  Las columnas que ya existian conservan su nombre en este paso; se alinean con el
-  diccionario en el paso 4.
+  `CHECK` `ck_movimiento_monto`: `monto > 0`. `id_cuenta`, `tipo_movimiento`, `concepto`,
+  `monto` y `fecha_movimiento` son NOT NULL.
 
   **Categorias** (`MovementCategory`) y su tipo, validado en `TreasuryService`:
 
@@ -523,7 +535,7 @@ venta y el proveedor de una compra (paso 1 del refactor de normalizacion, ver
 | Campo | Columna | Notas |
 |-|-|-|
 | `id` | `id_tercero` | `@AttributeOverride` sobre el `id` de `TenantAwareEntity` |
-| `tenantId` | `tenant_id` | Heredado. No se renombra a `id_tenant`: el `@Filter` de la clase base lleva la columna escrita en su condicion |
+| `tenantId` | `id_tenant` | Heredado, como en todas las entidades |
 | `role` | `tipo_tercero` | Enum `CounterpartyRole`: `CLIENTE`, `PROVEEDOR`, `AMBOS`. Obligatorio |
 | `name` | `nombre_razon_social` | 150. Obligatorio |
 | `documentType` | `tipo_documento` | Enum `DocumentType`: `CC`, `NIT`, `CE`, `RUT`, `PASAPORTE`. Obligatorio |
@@ -560,7 +572,7 @@ dos**: una factura descuenta inventario y mueve tesoreria.
   `paymentType` (enum `CONTADO` / `CREDITO`), `paymentMethod`, `status`
   (enum `PAGADA` / `PENDIENTE` / `ANULADA`), `subtotal`, `ivaPorPagar`, `total`.
   Restriccion unica `uk_venta_tenant_invoice_number` sobre
-  `(tenant_id, numero_factura_venta)`, **divergencia deliberada**: Autollantas valida el
+  `(id_tenant, numero_factura_venta)`, **divergencia deliberada**: Autollantas valida el
   numero solo en la aplicacion y no tiene indice unico. Ver
   [03-DECISIONS.md](03-DECISIONS.md). **No guarda cuenta** (desde el paso 3 no hay
   `id_cuenta` en `VENTAS`): la cuenta de cada cobro vive en su movimiento.
@@ -874,9 +886,22 @@ DTOs: `KpisResponse`, `MovementSummaryResponse`, `IvaReportResponse` con su list
 
 ## Base de datos
 
-* Nombres fisicos en espanol: tablas en mayusculas y plural (`VENTAS`, `DETALLE_VENTAS`,
-  `GASTOS_OPERATIVOS`), columnas en `snake_case` (`numero_factura_venta`, `fecha_gasto`).
-  Todas las tablas de negocio llevan `tenant_id`, ver Estrategia multi-tenant.
+* Nombres fisicos: los de [04-DATA-MODEL.md](04-DATA-MODEL.md). Tablas en mayusculas
+  (`VENTAS`, `DETALLE_VENTAS`, `MOVIMIENTOS`), columnas en `snake_case`
+  (`numero_factura_venta`, `fecha_movimiento`), PK `id_<entidad>` y columna de tenant
+  `id_tenant` con FK a `TENANTS` en todas las tablas salvo `TENANTS` y
+  `CATEGORIA_IMPUESTOS`. Ver Estrategia multi-tenant.
+* Nulabilidad y longitudes de VARCHAR: las del diccionario, declaradas en cada `@Column`
+  (tambien en las columnas de enum, por PostgreSQL). CHECK en las entidades:
+  `ck_movimiento_factura`, `ck_movimiento_monto`, `ck_detalle_compra_cantidad` y
+  `ck_detalle_venta_cantidad`.
+* **El esquema se verifica contra el diccionario.** `schema.SchemaConformanceTest` levanta
+  el contexto, parsea las 14 tablas de 04-DATA-MODEL.md y las compara por
+  `DatabaseMetaData` con el esquema de la base de pruebas: tablas, columnas, nulabilidad,
+  longitudes, PK, FK, unicas y tipos por familia. Las diferencias de tipo que resuelve el
+  paso 6 (BIGINT, DOUBLE, DATE, ENUM) estan en una lista explicita en la prueba, que falla
+  tambien si una entrada deja de ocurrir. Cambiar una entidad sin cambiar el diccionario,
+  o al reves, rompe esa prueba.
 * Tests: H2 en memoria con `ddl-auto=create-drop` (`src/test/resources/application-test.properties`).
 * Local: `application.properties` no declara datasource ni `ddl-auto`; manda la
   autoconfiguracion de Spring Boot sobre la H2 embebida.

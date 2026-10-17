@@ -2,6 +2,8 @@ package com.servibox.backend.purchases.entity;
 
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.shared.TenantAwareEntity;
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.CheckConstraint;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.JoinColumn;
@@ -14,22 +16,23 @@ import lombok.EqualsAndHashCode;
 @Entity
 @Data
 @EqualsAndHashCode(callSuper = true)
-@Table(name = "DETALLE_COMPRAS")
+@AttributeOverride(name = "id", column = @Column(name = "id_detalle_compra"))
+@Table(name = "DETALLE_COMPRAS", check = @CheckConstraint(name = "ck_detalle_compra_cantidad", constraint = "cantidad_compra > 0"))
 public class PurchaseDetail extends TenantAwareEntity {
 
     @ManyToOne
-    @JoinColumn(name = "id_compra")
+    @JoinColumn(name = "id_compra", nullable = false)
     private Purchase purchase;
 
     @ManyToOne
-    @JoinColumn(name = "id_producto")
+    @JoinColumn(name = "id_producto", nullable = false)
     private Product product;
 
-    @Column(name = "cantidad_compra")
+    @Column(name = "cantidad_compra", nullable = false)
     private Integer quantity;
 
     /** Costo de compra unitario, sin IVA. */
-    @Column(name = "precio_compra")
+    @Column(name = "precio_compra", nullable = false)
     private Double price;
 
     /**
@@ -37,6 +40,6 @@ public class PurchaseDetail extends TenantAwareEntity {
      * en `impuesto_compra` el IVA **por unidad**; aqui es el de la linea completa, para que
      * sea el mismo criterio que en ventas. Ver 03-DECISIONS.md.
      */
-    @Column(name = "iva_linea_compra")
+    @Column(name = "iva_linea_compra", nullable = false)
     private Double ivaAmount;
 }

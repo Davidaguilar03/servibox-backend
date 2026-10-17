@@ -3,6 +3,7 @@ package com.servibox.backend.sales;
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
+import com.servibox.backend.inventory.entity.TaxType;
 import com.servibox.backend.inventory.service.InventoryService;
 import com.servibox.backend.sales.entity.PaymentType;
 import com.servibox.backend.sales.entity.Sale;
@@ -141,8 +142,9 @@ class SalesInvoicingTest {
 
         // Se le sube el IVA a la categoria del producto, del 19 al 30 por ciento.
         Product producto = inventoryService.findProductById(llanta.getId()).orElseThrow();
-        producto.getCategory().getTaxTypes().get(0).setRate(0.30);
-        inventoryService.saveTaxType(producto.getCategory().getTaxTypes().get(0));
+        TaxType iva = producto.getCategory().getTaxTypes().iterator().next();
+        iva.setRate(0.30);
+        inventoryService.saveTaxType(iva);
 
         // La tasa vigente cambio...
         assertThat(inventoryService.getIvaRateForProduct(producto)).isEqualTo(0.30);

@@ -2,13 +2,22 @@ package com.servibox.backend.shared;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.EntityListeners;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.MappedSuperclass;
 import jakarta.persistence.PrePersist;
+import com.servibox.backend.tenant.Tenant;
 import com.servibox.backend.tenant.TenantContext;
+import lombok.AccessLevel;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.ToString;
 import org.hibernate.annotations.Filter;
 import org.hibernate.annotations.FilterDef;
 import org.hibernate.annotations.ParamDef;
@@ -21,6 +30,9 @@ import java.time.LocalDateTime;
 /**
  * Base de toda entidad de negocio que pertenece a un tenant.
  * El filtro de Hibernate se habilita por sesion, ver TenantFilterConfiguration.
+ *
+ * Nombres fisicos del diccionario (04-DATA-MODEL.md): la columna de tenant es id_tenant y
+ * la PK de cada entidad se renombra a id_<entidad> con @AttributeOverride sobre `id`.
  */
 @MappedSuperclass
 @Data
@@ -29,7 +41,7 @@ import java.time.LocalDateTime;
         name = TenantAwareEntity.TENANT_FILTER,
         parameters = @ParamDef(name = TenantAwareEntity.TENANT_PARAM, type = Long.class)
 )
-@Filter(name = TenantAwareEntity.TENANT_FILTER, condition = "tenant_id = :tenantId")
+@Filter(name = TenantAwareEntity.TENANT_FILTER, condition = "id_tenant = :tenantId")
 public abstract class TenantAwareEntity {
 
     public static final String TENANT_FILTER = "tenantFilter";
@@ -39,8 +51,20 @@ public abstract class TenantAwareEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "tenant_id", nullable = false, updatable = false)
+    @Column(name = "id_tenant", nullable = false, updatable = false)
     private Long tenantId;
+
+    /**
+     * Solo existe para que la base tenga la FK id_tenant -> TENANTS del diccionario. Es de
+     * solo lectura y sin accesores: el tenant se escribe y se lee por tenantId.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_tenant", insertable = false, updatable = false)
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private Tenant tenant;
 
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -53,7 +77,7 @@ public abstract class TenantAwareEntity {
     /**
      * Asigna el tenant activo antes de insertar. Ninguna entidad de negocio debe fijar
      * tenantId a mano: si el contexto no tiene tenant, la insercion falla de una vez en
-     * vez de dejar una fila huerfana con tenant_id nulo.
+     * vez de dejar una fila huerfana con id_tenant nulo.
      */
     @PrePersist
     void asignarTenant() {

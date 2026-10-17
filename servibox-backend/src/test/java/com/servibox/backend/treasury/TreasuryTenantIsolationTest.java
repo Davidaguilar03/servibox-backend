@@ -263,12 +263,24 @@ class TreasuryTenantIsolationTest {
                 .andExpect(jsonPath("$[0].notes").doesNotExist());
     }
 
-    /** Los tres tipos de cuenta del diccionario se guardan y se leen por la API. */
+    /**
+     * Los tres tipos de cuenta del diccionario se guardan y se leen por la API, y uno que ya
+     * no existe (CASH, el de antes) es 400.
+     */
     @Test
     void losTiposDeCuentaDelDiccionarioSeGuardanYSeLeen() throws Exception {
         crearCuenta(tokenUno, "Caja General", "EFECTIVO");
         crearCuenta(tokenUno, "Bancolombia", "BANCO");
         crearCuenta(tokenUno, "Nequi", "DIGITAL");
+        mockMvc.perform(post("/api/treasury/accounts")
+                        .header("Authorization", "Bearer " + tokenUno)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Caja Vieja","initialBalance":0,"type":"CASH"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value(
+                        "Valor invalido 'CASH' en el campo type. Valores permitidos: EFECTIVO, BANCO, DIGITAL"));
 
         MvcResult result = mockMvc.perform(get("/api/treasury/accounts")
                         .header("Authorization", "Bearer " + tokenUno))

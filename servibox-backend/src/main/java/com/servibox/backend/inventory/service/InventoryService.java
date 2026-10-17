@@ -90,9 +90,9 @@ public class InventoryService {
     @Transactional
     public Product saveProduct(Product product) {
         validarCodigoUnico(product);
-        Product guardado = productRepository.save(product);
-        recalculatePrices(guardado);
-        return guardado;
+        // Precios antes del primer INSERT: iva_producto y precio_sugerido son NOT NULL.
+        recalculatePrices(product);
+        return productRepository.save(product);
     }
 
     /**
@@ -130,7 +130,7 @@ public class InventoryService {
      */
     @Transactional
     public void recalculatePrices(Product product) {
-        if (product.getPurchaseCost() == null || product.getPurchaseCost() == 0) {
+        if (product.getPurchaseCost() == null) {
             return;
         }
         double purchaseCost = product.getPurchaseCost();

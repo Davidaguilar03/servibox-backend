@@ -5,9 +5,9 @@ import jakarta.validation.constraints.NotNull;
 
 public record ProductRequest(
         @NotBlank String code,
-        String description,
+        @NotBlank String description,
         @NotNull Double purchaseCost,
-        Integer quantity,
+        @NotNull Integer quantity,
         @NotNull Long categoryId
 ) {
 }

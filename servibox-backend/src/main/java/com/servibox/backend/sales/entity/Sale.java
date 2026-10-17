@@ -2,6 +2,7 @@ package com.servibox.backend.sales.entity;
 
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.shared.TenantAwareEntity;
+import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -26,53 +27,53 @@ import java.time.LocalDate;
 @Entity
 @Data
 @EqualsAndHashCode(callSuper = true)
+@AttributeOverride(name = "id", column = @Column(name = "id_venta"))
 @Table(
         name = "VENTAS",
         uniqueConstraints = @UniqueConstraint(
                 name = "uk_venta_tenant_invoice_number",
-                columnNames = {"tenant_id", "numero_factura_venta"}
+                columnNames = {"id_tenant", "numero_factura_venta"}
         )
 )
 public class Sale extends TenantAwareEntity {
 
-    @Column(name = "numero_factura_venta")
+    @Column(name = "numero_factura_venta", length = 50, nullable = false)
     private String invoiceNumber;
 
     /**
-     * El cliente: un tercero CLIENTE o AMBOS. Nunca nulo desde el service: una venta sin
-     * cliente identificado usa el Consumidor final del tenant. La columna todavia admite
-     * nulos; la nulabilidad se alinea en el paso 5 del refactor.
+     * El cliente: un tercero CLIENTE o AMBOS. Obligatorio (NOT NULL): una venta sin
+     * cliente identificado usa el Consumidor final del tenant.
      */
     @ManyToOne
-    @JoinColumn(name = "id_tercero")
+    @JoinColumn(name = "id_tercero", nullable = false)
     private Counterparty customer;
 
-    @Column(name = "fecha_venta")
+    @Column(name = "fecha_venta", nullable = false)
     private LocalDate invoiceDate;
 
     @Column(name = "fecha_vencimiento_venta")
     private LocalDate dueDate;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "forma_pago_venta")
+    @Column(name = "forma_pago_venta", length = 20, nullable = false)
     private PaymentType paymentType;
 
-    @Column(name = "medio_pago_venta")
+    @Column(name = "medio_pago_venta", length = 30)
     private String paymentMethod;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "estado_venta")
+    @Column(name = "estado_venta", length = 20, nullable = false)
     private SaleStatus status;
 
     /** Suma de precio por cantidad de las lineas, sin IVA. */
-    @Column(name = "subtotal_venta")
+    @Column(name = "subtotal_venta", nullable = false)
     private Double subtotal;
 
     /** IVA generado por la venta menos el IVA descontable de los productos vendidos. */
-    @Column(name = "iva_por_pagar_venta")
+    @Column(name = "iva_por_pagar_venta", nullable = false)
     private Double ivaPorPagar;
 
     /** subtotal mas el IVA generado. Es lo que paga el cliente. */
-    @Column(name = "total_venta")
+    @Column(name = "total_venta", nullable = false)
     private Double total;
 }

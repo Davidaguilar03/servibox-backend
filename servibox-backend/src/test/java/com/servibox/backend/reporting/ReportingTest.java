@@ -39,7 +39,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.time.LocalDate;
-import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
@@ -425,8 +425,10 @@ class ReportingTest {
         ProductCategory baterias = new ProductCategory();
         baterias.setName("BATERIAS");
         baterias.setColor("#3498db");
+        baterias.setYellowStockMin(5);
+        baterias.setRedStockMin(2);
         baterias.setTargetMargin(0.0);
-        baterias.setTaxTypes(new ArrayList<>(t.llantas.getTaxTypes()));
+        baterias.setTaxTypes(new HashSet<>(t.llantas.getTaxTypes()));
         baterias = inventoryService.saveCategory(baterias);
         Product bateria = fixture.crearProducto(baterias, "BAT-001", 200.0, 10);  // taxAmount 38
 

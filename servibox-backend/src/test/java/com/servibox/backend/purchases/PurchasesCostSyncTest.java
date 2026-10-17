@@ -20,7 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.time.LocalDate;
-import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -67,8 +67,10 @@ class PurchasesCostSyncTest {
         ProductCategory categoria = new ProductCategory();
         categoria.setName("LLANTAS");
         categoria.setColor("#e74c3c");
+        categoria.setYellowStockMin(5);
+        categoria.setRedStockMin(2);
         categoria.setTargetMargin(0.50);
-        categoria.setTaxTypes(new ArrayList<>(List.of(inventoryService.saveTaxType(iva))));
+        categoria.setTaxTypes(new HashSet<>(List.of(inventoryService.saveTaxType(iva))));
         categoria = inventoryService.saveCategory(categoria);
 
         llanta = fixture.crearProducto(categoria, "LLA-COSTO", 20000.0, 10);
