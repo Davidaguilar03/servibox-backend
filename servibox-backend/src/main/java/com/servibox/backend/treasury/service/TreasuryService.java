@@ -3,20 +3,18 @@ package com.servibox.backend.treasury.service;
 import com.servibox.backend.purchases.entity.Purchase;
 import com.servibox.backend.purchases.service.InsufficientBalanceException;
 import com.servibox.backend.sales.entity.Sale;
+import com.servibox.backend.shared.ResourceNotFoundException;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
+import com.servibox.backend.treasury.entity.MovementCategory;
 import com.servibox.backend.treasury.entity.MovementSourceType;
 import com.servibox.backend.treasury.entity.MovementType;
-import com.servibox.backend.treasury.entity.OccasionalIncome;
-import com.servibox.backend.treasury.entity.OperationalExpense;
-import com.servibox.backend.treasury.entity.Transfer;
 import com.servibox.backend.treasury.repository.AccountRepository;
 import com.servibox.backend.treasury.repository.MovementRepository;
-import com.servibox.backend.treasury.repository.OccasionalIncomeRepository;
-import com.servibox.backend.treasury.repository.OperationalExpenseRepository;
-import com.servibox.backend.treasury.repository.TransferRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,9 +28,10 @@ public class TreasuryService {
 
     private final AccountRepository accountRepository;
     private final MovementRepository movementRepository;
-    private final TransferRepository transferRepository;
-    private final OccasionalIncomeRepository occasionalIncomeRepository;
-    private final OperationalExpenseRepository operationalExpenseRepository;
+
+    /** Las dos patas de una transferencia: el EGRESO del origen y el INGRESO del destino. */
+    public record Transferencia(Movement egreso, Movement ingreso) {
+    }
 
     @Transactional(readOnly = true)
     public List<Account> findAllAccounts() {
@@ -51,11 +50,6 @@ public class TreasuryService {
             return Optional.empty();
         }
         return accountRepository.findByIdAndTenantId(id, tenantId);
-    }
-
-    @Transactional(readOnly = true)
-    public List<Movement> findMovementsByAccountId(Long accountId) {
-        return movementRepository.findByAccountIdOrderByDateDesc(accountId);
     }
 
     /**
@@ -97,79 +91,184 @@ public class TreasuryService {
                 });
     }
 
+    // ---- Consultas de movimientos ----
+
+    @Transactional(readOnly = true)
+    public Optional<Movement> findMovementById(Long id) {
+        Long tenantId = TenantContext.getTenantId();
+        if (tenantId == null) {
+            return Optional.empty();
+        }
+        return movementRepository.findByIdAndTenantId(id, tenantId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Movement> findMovementsByAccountId(Long accountId) {
+        return movementRepository.findByAccountIdOrderByDateDesc(accountId);
+    }
+
     /**
-     * Registra un ingreso o egreso suelto, de los que no vienen de una transferencia.
+     * Movimientos del tenant activo, del mas reciente al mas antiguo. Cada filtro es
+     * opcional: null no filtra, y solo se agregan al where los que vienen. El tenant lo pone
+     * el @Filter de Hibernate, que tambien aplica a las consultas Criteria.
+     */
+    @Transactional(readOnly = true)
+    public List<Movement> buscarMovimientos(Long accountId, MovementCategory categoria,
+                                            LocalDate desde, LocalDate hasta) {
+        Specification<Movement> filtro = (raiz, consulta, cb) -> cb.conjunction();
+        if (accountId != null) {
+            filtro = filtro.and((raiz, consulta, cb) -> cb.equal(raiz.get("account").get("id"), accountId));
+        }
+        if (categoria != null) {
+            filtro = filtro.and((raiz, consulta, cb) -> cb.equal(raiz.get("category"), categoria));
+        }
+        if (desde != null) {
+            filtro = filtro.and((raiz, consulta, cb) -> cb.greaterThanOrEqualTo(raiz.get("date"), desde));
+        }
+        if (hasta != null) {
+            filtro = filtro.and((raiz, consulta, cb) -> cb.lessThanOrEqualTo(raiz.get("date"), hasta));
+        }
+        return movementRepository.findAll(filtro, Sort.by(Sort.Order.desc("date"), Sort.Order.desc("id")));
+    }
+
+    /** Suma de los montos de una categoria en todo el historico del tenant. */
+    @Transactional(readOnly = true)
+    public double sumarPorCategoria(MovementCategory categoria) {
+        return movementRepository.sumAmountByCategory(categoria);
+    }
+
+    /** Suma de los montos de una categoria con fecha dentro de [desde, hasta]. */
+    @Transactional(readOnly = true)
+    public double sumarPorCategoria(MovementCategory categoria, LocalDate desde, LocalDate hasta) {
+        return movementRepository.sumAmountByCategoryAndDateBetween(categoria, desde, hasta);
+    }
+
+    // ---- Movimientos manuales: gastos operativos e ingresos ocasionales ----
+
+    /**
+     * Ingreso puntual que no viene de una venta: reintegros, venta de chatarra, un aporte
+     * del socio. Suma al saldo como cualquier INGRESO.
      */
     @Transactional
-    public Movement registrarMovimiento(Account cuenta, MovementType tipo, String concepto, Double monto) {
-        return aplicarMovimiento(recargar(cuenta), tipo, concepto, monto, null, null);
+    public Movement registrarIngresoOcasional(Account cuenta, String concepto, Double monto,
+                                              LocalDate fecha, String notas) {
+        return registrarMovimientoManual(cuenta, MovementCategory.INGRESO_OCASIONAL, concepto, monto, fecha, notas);
     }
 
     /**
-     * Ingreso generado por una venta: el del contado al facturar, o el de un abono. Queda
-     * ligado a la factura por (SALE, id) para poder revertirlo al anularla. La fecha es la
-     * de negocio (la de la factura o la del abono), para que restaurar una factura anulada
-     * recree el movimiento con la misma fecha que tuvo.
+     * Gasto puntual que no viene de una factura de compra: arriendo, servicios, papeleria.
+     *
+     * **No exige saldo suficiente**, a diferencia de registrarEgresoDeCompra. Autollantas
+     * tampoco: saveOperationalExpense resta del saldo sin comprobar nada, asi que una
+     * cuenta puede quedar en negativo. Ver 03-DECISIONS.md.
      */
     @Transactional
-    public Movement registrarIngresoDeVenta(Account cuenta, String concepto, Double monto, Sale venta,
-                                            LocalDate fecha) {
-        return aplicarMovimiento(recargar(cuenta), MovementType.INGRESO, concepto, monto,
-                MovementSourceType.SALE, venta.getId(), fecha);
+    public Movement registrarGastoOperativo(Account cuenta, String concepto, Double monto,
+                                            LocalDate fecha, String notas) {
+        return registrarMovimientoManual(cuenta, MovementCategory.GASTO_OPERATIVO, concepto, monto, fecha, notas);
     }
 
     /**
-     * Unico sitio donde se crea un Movement y se mueve el saldo de su cuenta. Las dos
-     * cosas van juntas a proposito: un movimiento guardado sin mover el saldo, o un saldo
-     * movido sin movimiento que lo explique, es un descuadre silencioso.
-     *
-     * Por eso tampoco hay una segunda via para tocar currentBalance: la transferencia
-     * pasa por aqui igual que el movimiento suelto, solo que con su origen.
-     * Mientras el signo del saldo se decida en un unico `if`, no hay forma de que las dos
-     * rutas se desincronicen.
-     *
-     * El origen viaja como (tipo, id) y no como una entidad por cada clase posible. Los
-     * metodos publicos de arriba son los que reciben la entidad tipada y sacan el id de
-     * ella; aqui abajo ya da igual de que tabla venia.
+     * Crea un movimiento manual. Solo GASTO_OPERATIVO (EGRESO) e INGRESO_OCASIONAL
+     * (INGRESO): el tipo sale de la categoria. Cualquier otra se rechaza, porque se
+     * gestiona desde su operacion.
      */
-    private Movement aplicarMovimiento(Account cuenta, MovementType tipo, String concepto,
-                                       Double monto, MovementSourceType tipoOrigen, Long idOrigen) {
-        return aplicarMovimiento(cuenta, tipo, concepto, monto, tipoOrigen, idOrigen, LocalDate.now());
-    }
+    @Transactional
+    public Movement registrarMovimientoManual(Account cuenta, MovementCategory categoria, String concepto,
+                                              Double monto, LocalDate fecha, String notas) {
+        exigirCategoriaManual(categoria);
+        validarManual(cuenta, monto);
 
-    private Movement aplicarMovimiento(Account cuenta, MovementType tipo, String concepto,
-                                       Double monto, MovementSourceType tipoOrigen, Long idOrigen,
-                                       LocalDate fecha) {
         Movement movimiento = new Movement();
-        movimiento.setAccount(cuenta);
-        movimiento.setType(tipo);
+        movimiento.setCategory(categoria);
+        movimiento.setType(tipoDeManual(categoria));
+        movimiento.setAccount(recargar(cuenta));
         movimiento.setConcept(concepto);
         movimiento.setAmount(monto);
-        movimiento.setDate(fecha != null ? fecha : LocalDate.now());
-        movimiento.setSourceType(tipoOrigen);
-        movimiento.setSourceId(idOrigen);
-        Movement guardado = movementRepository.save(movimiento);
-
-        double saldo = saldoDe(cuenta);
-        cuenta.setCurrentBalance(tipo == MovementType.INGRESO ? saldo + monto : saldo - monto);
-        accountRepository.save(cuenta);
-
-        return guardado;
+        movimiento.setDate(fecha);
+        movimiento.setNotes(notas);
+        return aplicarMovimiento(movimiento);
     }
+
+    /**
+     * Edita un movimiento manual en su misma fila: revierte el efecto anterior **sobre la
+     * cuenta anterior**, actualiza los campos y aplica el efecto nuevo sobre la cuenta
+     * nueva. Que la reversion mire la cuenta vieja es lo que hace que cambiar de cuenta
+     * salga bien: el dinero vuelve de donde salio. La categoria no cambia.
+     */
+    @Transactional
+    public Movement editarMovimientoManual(Long movimientoId, Account nuevaCuenta, String nuevoConcepto,
+                                           Double nuevoMonto, LocalDate nuevaFecha, String nuevasNotas) {
+        Movement movimiento = movimientoManual(movimientoId);
+        validarManual(nuevaCuenta, nuevoMonto);
+
+        deshacerEfecto(movimiento);
+
+        movimiento.setAccount(recargar(nuevaCuenta));
+        movimiento.setConcept(nuevoConcepto);
+        movimiento.setAmount(nuevoMonto);
+        movimiento.setDate(nuevaFecha);
+        movimiento.setNotes(nuevasNotas);
+        return aplicarMovimiento(movimiento);
+    }
+
+    /**
+     * Elimina un movimiento manual: revierte su efecto y **borra la fila**. Es lo que hace
+     * "Eliminar" en Autollantas: un gasto o un ingreso ocasional no es un documento fiscal
+     * ni tiene estado, no hay nada que conservar.
+     */
+    @Transactional
+    public void eliminarMovimientoManual(Long movimientoId) {
+        Movement movimiento = movimientoManual(movimientoId);
+        deshacerEfecto(movimiento);
+        movementRepository.delete(movimiento);
+    }
+
+    /** El movimiento del tenant activo, o 404; y 400 si no es manual. */
+    private Movement movimientoManual(Long movimientoId) {
+        Movement movimiento = findMovementById(movimientoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Movimiento no encontrado: " + movimientoId));
+        if (movimiento.getCategory() == null || !movimiento.getCategory().esManual()) {
+            throw new InvalidMovementOperationException("El movimiento " + movimientoId + " es de categoria "
+                    + movimiento.getCategory() + " y se gestiona desde su operacion");
+        }
+        return movimiento;
+    }
+
+    private void exigirCategoriaManual(MovementCategory categoria) {
+        if (categoria == null || !categoria.esManual()) {
+            throw new InvalidMovementOperationException("Un movimiento manual es GASTO_OPERATIVO o "
+                    + "INGRESO_OCASIONAL; " + categoria + " se gestiona desde su operacion");
+        }
+    }
+
+    private static void validarManual(Account cuenta, Double monto) {
+        if (cuenta == null) {
+            throw new IllegalArgumentException("El movimiento necesita una cuenta");
+        }
+        if (monto == null || monto <= 0) {
+            throw new IllegalArgumentException("El monto del movimiento debe ser mayor a cero");
+        }
+    }
+
+    private static MovementType tipoDeManual(MovementCategory categoria) {
+        return categoria == MovementCategory.GASTO_OPERATIVO ? MovementType.EGRESO : MovementType.INGRESO;
+    }
+
+    // ---- Transferencias ----
 
     /**
      * Debita el origen y acredita el destino por el mismo monto, en una sola transaccion:
-     * o se mueven los dos saldos o no se mueve ninguno. El dinero se conserva, el balance
-     * global del tenant queda igual que antes.
+     * o se mueven los dos saldos o no se mueve ninguno. El dinero se conserva.
      *
-     * Los saldos no se tocan aqui directamente: la transferencia genera un EGRESO en el
-     * origen y un INGRESO en el destino, los dos apuntando al Transfer con (TRANSFER, id),
-     * y son esos movimientos los que mueven el saldo. Asi el historial de una cuenta
-     * explica todos sus cambios de saldo, igual que en Autollantas.
+     * Son dos movimientos de categoria TRANSFERENCIA: un EGRESO en el origen y un INGRESO
+     * en el destino que apunta al EGRESO con relatedMovement. No hay tabla de
+     * transferencias. El concepto que manda el usuario va a las notas de las dos patas;
+     * el concepto de cada movimiento es el de siempre ("Transferencia a / desde").
      */
     @Transactional
-    public Transfer registrarTransferencia(Account cuentaOrigen, Account cuentaDestino,
-                                           String concepto, Double monto) {
+    public Transferencia registrarTransferencia(Account cuentaOrigen, Account cuentaDestino,
+                                                String concepto, Double monto, LocalDate fecha) {
         if (monto == null || monto <= 0) {
             throw new InvalidTransferException("El monto de la transferencia debe ser mayor a cero");
         }
@@ -183,212 +282,75 @@ public class TreasuryService {
         Account origen = recargar(cuentaOrigen);
         Account destino = recargar(cuentaDestino);
 
-        Transfer transferencia = new Transfer();
-        transferencia.setOriginAccount(origen);
-        transferencia.setDestinationAccount(destino);
-        transferencia.setAmount(monto);
-        transferencia.setConcept(concepto);
-        transferencia.setDate(LocalDate.now());
-        Transfer guardada = transferRepository.save(transferencia);
+        Movement egreso = new Movement();
+        egreso.setCategory(MovementCategory.TRANSFERENCIA);
+        egreso.setType(MovementType.EGRESO);
+        egreso.setAccount(origen);
+        egreso.setConcept("Transferencia a " + destino.getName());
+        egreso.setAmount(monto);
+        egreso.setDate(fecha);
+        egreso.setNotes(concepto);
+        Movement egresoGuardado = aplicarMovimiento(egreso);
 
-        aplicarMovimiento(origen, MovementType.EGRESO,
-                "Transferencia a " + destino.getName(), monto,
-                MovementSourceType.TRANSFER, guardada.getId());
-        aplicarMovimiento(destino, MovementType.INGRESO,
-                "Transferencia desde " + origen.getName(), monto,
-                MovementSourceType.TRANSFER, guardada.getId());
-
-        return guardada;
-    }
-
-    @Transactional(readOnly = true)
-    public List<OccasionalIncome> findAllOccasionalIncomes() {
-        return occasionalIncomeRepository.findAll();
-    }
-
-    @Transactional(readOnly = true)
-    public Optional<OccasionalIncome> findOccasionalIncomeById(Long id) {
-        Long tenantId = TenantContext.getTenantId();
-        if (tenantId == null) {
-            return Optional.empty();
-        }
-        return occasionalIncomeRepository.findByIdAndTenantId(id, tenantId);
-    }
-
-    /**
-     * Ingreso puntual que no viene de una venta. Pasa por aplicarMovimiento como todo lo
-     * demas: el saldo lo mueve el Movement, no este metodo.
-     */
-    @Transactional
-    public OccasionalIncome registrarIngresoOcasional(Account cuenta, String concepto,
-                                                      Double monto, LocalDate fecha) {
-        if (cuenta == null) {
-            throw new IllegalArgumentException("El ingreso ocasional necesita una cuenta");
-        }
-        if (monto == null || monto <= 0) {
-            throw new IllegalArgumentException("El monto del ingreso debe ser mayor a cero");
-        }
-
-        Account gestionada = recargar(cuenta);
-
-        OccasionalIncome ingreso = new OccasionalIncome();
-        ingreso.setConcept(concepto);
+        Movement ingreso = new Movement();
+        ingreso.setCategory(MovementCategory.TRANSFERENCIA);
+        ingreso.setType(MovementType.INGRESO);
+        ingreso.setAccount(destino);
+        ingreso.setConcept("Transferencia desde " + origen.getName());
         ingreso.setAmount(monto);
-        ingreso.setAccount(gestionada);
-        ingreso.setDate(fecha != null ? fecha : LocalDate.now());
-        OccasionalIncome guardado = occasionalIncomeRepository.save(ingreso);
+        ingreso.setDate(fecha);
+        ingreso.setNotes(concepto);
+        ingreso.setRelatedMovement(egresoGuardado);
+        Movement ingresoGuardado = aplicarMovimiento(ingreso);
 
-        aplicarMovimiento(gestionada, MovementType.INGRESO, concepto, monto,
-                MovementSourceType.OCCASIONAL_INCOME, guardado.getId());
-
-        return guardado;
+        return new Transferencia(egresoGuardado, ingresoGuardado);
     }
 
+    // ---- Movimientos de ventas y compras ----
+
     /**
-     * Deshace un ingreso ocasional: borra su movimiento, resta el importe del saldo y
-     * **elimina la fila**. Es lo que hace `deleteOccasionalIncome` de Autollantas, donde la
-     * accion en la interfaz se llama "Eliminar".
-     *
-     * Ojo con el nombre: aqui "anular" no deja un estado ANULADA como en una factura de
-     * venta, el registro desaparece. Un ingreso ocasional no es un documento fiscal, no hay
-     * nada que conservar. Ver 03-DECISIONS.md.
-     *
-     * Comparte con la anulacion de ventas la excepcion a la regla de que aplicarMovimiento
-     * es el unico punto que toca currentBalance, y por el mismo motivo.
+     * Ingreso generado por una venta: el del contado al facturar, o el de un abono.
+     * Categoria RECAUDO_VENTA, ligado a la factura por (SALE, id) para poder revertirlo al
+     * anularla. La fecha es la de negocio (la de la factura o la del abono).
      */
     @Transactional
-    public void anularIngresoOcasional(Long ingresoId) {
-        OccasionalIncome ingreso = findOccasionalIncomeById(ingresoId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Ingreso ocasional no encontrado: " + ingresoId));
-
-        revertir(movimientosDe(MovementSourceType.OCCASIONAL_INCOME, ingreso.getId()));
-        occasionalIncomeRepository.delete(ingreso);
-    }
-
-    @Transactional(readOnly = true)
-    public List<OperationalExpense> findAllOperationalExpenses() {
-        return operationalExpenseRepository.findAll();
-    }
-
-    @Transactional(readOnly = true)
-    public Optional<OperationalExpense> findOperationalExpenseById(Long id) {
-        Long tenantId = TenantContext.getTenantId();
-        if (tenantId == null) {
-            return Optional.empty();
-        }
-        return operationalExpenseRepository.findByIdAndTenantId(id, tenantId);
+    public Movement registrarIngresoDeVenta(Account cuenta, String concepto, Double monto, Sale venta,
+                                            LocalDate fecha) {
+        Movement movimiento = new Movement();
+        movimiento.setCategory(MovementCategory.RECAUDO_VENTA);
+        movimiento.setType(MovementType.INGRESO);
+        movimiento.setAccount(recargar(cuenta));
+        movimiento.setConcept(concepto);
+        movimiento.setAmount(monto);
+        movimiento.setDate(fecha);
+        movimiento.setSourceType(MovementSourceType.SALE);
+        movimiento.setSourceId(venta.getId());
+        return aplicarMovimiento(movimiento);
     }
 
     /**
-     * Gasto puntual que no viene de una factura de compra. Imagen espejo de
-     * registrarIngresoOcasional: pasa por aplicarMovimiento como todo lo demas, solo que
-     * el movimiento es un EGRESO.
-     *
-     * **No exige saldo suficiente**, a diferencia de registrarEgresoDeCompra. Autollantas
-     * tampoco: su formulario solo valida concepto, monto, cuenta y fecha, y
-     * saveOperationalExpense resta del saldo sin comprobar nada, asi que una cuenta puede
-     * quedar en negativo. Ver 03-DECISIONS.md.
-     */
-    @Transactional
-    public OperationalExpense registrarGastoOperativo(Account cuenta, String concepto, Double monto,
-                                                      LocalDate fecha, String notas) {
-        if (cuenta == null) {
-            throw new IllegalArgumentException("El gasto operativo necesita una cuenta");
-        }
-        if (monto == null || monto <= 0) {
-            throw new IllegalArgumentException("El monto del gasto debe ser mayor a cero");
-        }
-
-        Account gestionada = recargar(cuenta);
-
-        OperationalExpense gasto = new OperationalExpense();
-        gasto.setConcept(concepto);
-        gasto.setAmount(monto);
-        gasto.setAccount(gestionada);
-        gasto.setDate(fecha != null ? fecha : LocalDate.now());
-        gasto.setNotes(notas);
-        OperationalExpense guardado = operationalExpenseRepository.save(gasto);
-
-        aplicarMovimiento(gestionada, MovementType.EGRESO, concepto, monto,
-                MovementSourceType.OPERATIONAL_EXPENSE, guardado.getId());
-
-        return guardado;
-    }
-
-    /**
-     * Edita un gasto ya registrado. El mecanismo es **revertir y recrear**, no ajustar la
-     * diferencia: se revierte el movimiento anterior (devolviendole su importe a **la
-     * cuenta de ese movimiento**, que no tiene por que ser la nueva), se borra, se
-     * actualizan los campos del gasto y se registra un EGRESO nuevo con los valores
-     * actualizados.
-     *
-     * Es exactamente lo que hace `saveOperationalExpense(expense, editMode = true)` de
-     * Autollantas, el unico registro de su tesoreria que tiene modo edicion. Que la
-     * reversion mire la cuenta del movimiento viejo y no la del gasto editado es lo que
-     * hace que cambiar de cuenta salga bien: el dinero vuelve de donde salio.
-     */
-    @Transactional
-    public OperationalExpense editarGastoOperativo(Long gastoId, Account nuevaCuenta, String nuevoConcepto,
-                                                   Double nuevoMonto, LocalDate nuevaFecha, String nuevasNotas) {
-        OperationalExpense gasto = findOperationalExpenseById(gastoId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Gasto operativo no encontrado: " + gastoId));
-        if (nuevaCuenta == null) {
-            throw new IllegalArgumentException("El gasto operativo necesita una cuenta");
-        }
-        if (nuevoMonto == null || nuevoMonto <= 0) {
-            throw new IllegalArgumentException("El monto del gasto debe ser mayor a cero");
-        }
-
-        revertir(movimientosDe(MovementSourceType.OPERATIONAL_EXPENSE, gasto.getId()));
-
-        Account gestionada = recargar(nuevaCuenta);
-        gasto.setConcept(nuevoConcepto);
-        gasto.setAmount(nuevoMonto);
-        gasto.setAccount(gestionada);
-        gasto.setDate(nuevaFecha != null ? nuevaFecha : LocalDate.now());
-        gasto.setNotes(nuevasNotas);
-        OperationalExpense guardado = operationalExpenseRepository.save(gasto);
-
-        aplicarMovimiento(gestionada, MovementType.EGRESO, nuevoConcepto, nuevoMonto,
-                MovementSourceType.OPERATIONAL_EXPENSE, guardado.getId());
-
-        return guardado;
-    }
-
-    /**
-     * Deshace un gasto operativo: borra su movimiento, devuelve el importe al saldo y
-     * **elimina la fila**. Mismo criterio y mismo nombre enganoso que
-     * anularIngresoOcasional: en Autollantas la accion se llama "Eliminar" y
-     * `deleteOperationalExpense` borra el registro, no lo marca. Ver 03-DECISIONS.md.
-     */
-    @Transactional
-    public void anularGastoOperativo(Long gastoId) {
-        OperationalExpense gasto = findOperationalExpenseById(gastoId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Gasto operativo no encontrado: " + gastoId));
-
-        revertir(movimientosDe(MovementSourceType.OPERATIONAL_EXPENSE, gasto.getId()));
-        operationalExpenseRepository.delete(gasto);
-    }
-
-    /**
-     * Egreso generado por una compra: el del contado al facturar, o el de un pago. Queda
-     * ligado a la factura por (PURCHASE, id) para poder revertirlo al anularla.
+     * Egreso generado por una compra: el del contado al facturar, o el de un pago.
+     * Categoria PAGO_COMPRA, ligado a la factura por (PURCHASE, id).
      *
      * Valida que la cuenta tenga saldo. En Autollantas esa comprobacion vive en el
      * formulario; aqui vive donde se mueve el dinero, que es el unico sitio por el que
-     * pasan todos los egresos, la restauracion de una compra anulada incluida. La fecha,
-     * igual que en registrarIngresoDeVenta, es la de negocio.
+     * pasan todos los egresos de compras, la restauracion de una compra anulada incluida.
      */
     @Transactional
     public Movement registrarEgresoDeCompra(Account cuenta, String concepto, Double monto, Purchase compra,
                                             LocalDate fecha) {
         Account gestionada = recargar(cuenta);
         exigirSaldoSuficiente(gestionada, monto);
-        return aplicarMovimiento(gestionada, MovementType.EGRESO, concepto, monto,
-                MovementSourceType.PURCHASE, compra.getId(), fecha);
+        Movement movimiento = new Movement();
+        movimiento.setCategory(MovementCategory.PAGO_COMPRA);
+        movimiento.setType(MovementType.EGRESO);
+        movimiento.setAccount(gestionada);
+        movimiento.setConcept(concepto);
+        movimiento.setAmount(monto);
+        movimiento.setDate(fecha);
+        movimiento.setSourceType(MovementSourceType.PURCHASE);
+        movimiento.setSourceId(compra.getId());
+        return aplicarMovimiento(movimiento);
     }
 
     /** Lanza InsufficientBalanceException si la cuenta no puede cubrir el monto. */
@@ -403,8 +365,8 @@ public class TreasuryService {
     }
 
     /**
-     * Deshace en tesoreria todo lo que genero una compra. Espejo de
-     * revertirMovimientosDeVenta, con la misma excepcion a la regla de aplicarMovimiento.
+     * Deshace en tesoreria todo lo que genero una compra: revierte el saldo y borra sus
+     * movimientos. Espejo de revertirMovimientosDeVenta.
      */
     @Transactional
     public void revertirMovimientosDeCompra(Purchase compra) {
@@ -413,13 +375,8 @@ public class TreasuryService {
 
     /**
      * Borra los movimientos que genero una venta y deshace su efecto sobre el saldo de la
-     * cuenta. Es lo que hace `SalesService.cancelSale` de Autollantas al anular.
-     *
-     * **Es la unica excepcion a la regla de que aplicarMovimiento es el unico punto que
-     * toca currentBalance**, y esta aqui y no en SalesService a proposito: si el saldo se
-     * va a mover por fuera del camino normal, que al menos sea dentro del modulo que es
-     * dueno del saldo. El motivo de que sea una excepcion y no un contra-movimiento esta
-     * en 03-DECISIONS.md.
+     * cuenta. Es lo que hace `SalesService.cancelSale` de Autollantas al anular. Se
+     * redisena en el paso 3 del refactor, ver 04-DATA-MODEL.md.
      */
     @Transactional
     public void revertirMovimientosDeVenta(Sale venta) {
@@ -435,7 +392,7 @@ public class TreasuryService {
         return !movimientosDe(tipo, id).isEmpty();
     }
 
-    /** Los movimientos de un origen concreto, dentro del tenant activo. */
+    /** Los movimientos de una factura concreta, dentro del tenant activo. */
     private List<Movement> movimientosDe(MovementSourceType tipo, Long id) {
         Long tenantId = TenantContext.getTenantId();
         if (tenantId == null) {
@@ -444,19 +401,73 @@ public class TreasuryService {
         return movementRepository.findBySourceTypeAndSourceIdAndTenantId(tipo, id, tenantId);
     }
 
-    /** Deshace cada movimiento al reves: un INGRESO se resta, un EGRESO se suma. */
     private void revertir(List<Movement> movimientos) {
         for (Movement movimiento : movimientos) {
-            Account cuenta = movimiento.getAccount();
-            double monto = movimiento.getAmount() != null ? movimiento.getAmount() : 0.0;
-            if (cuenta != null) {
-                Account gestionada = recargar(cuenta);
-                gestionada.setCurrentBalance(movimiento.getType() == MovementType.INGRESO
-                        ? saldoDe(gestionada) - monto
-                        : saldoDe(gestionada) + monto);
-                accountRepository.save(gestionada);
-            }
+            deshacerEfecto(movimiento);
             movementRepository.delete(movimiento);
+        }
+    }
+
+    // ---- Saldos ----
+
+    /**
+     * Unico sitio donde se guarda un Movement y se aplica su efecto sobre el saldo de su
+     * cuenta. Las dos cosas van juntas a proposito: un movimiento guardado sin mover el
+     * saldo, o un saldo movido sin movimiento que lo explique, es un descuadre silencioso.
+     * Sirve para un movimiento nuevo y para uno editado (misma fila, efecto nuevo).
+     *
+     * Valida la coherencia entre tipo y categoria antes de escribir nada.
+     */
+    private Movement aplicarMovimiento(Movement movimiento) {
+        validarCoherencia(movimiento.getType(), movimiento.getCategory());
+        if (movimiento.getDate() == null) {
+            movimiento.setDate(LocalDate.now());
+        }
+        Movement guardado = movementRepository.save(movimiento);
+
+        Account cuenta = guardado.getAccount();
+        double saldo = saldoDe(cuenta);
+        double monto = guardado.getAmount();
+        cuenta.setCurrentBalance(guardado.getType() == MovementType.INGRESO ? saldo + monto : saldo - monto);
+        accountRepository.save(cuenta);
+
+        return guardado;
+    }
+
+    /**
+     * Revierte el efecto de un movimiento sobre **su** cuenta: un INGRESO se resta, un
+     * EGRESO se suma. Es la unica otra escritura de currentBalance, y la usan solo editar
+     * o eliminar un movimiento manual y anular una factura. El motivo de que anular sea
+     * una reversion y no un contra-movimiento esta en 03-DECISIONS.md.
+     */
+    private void deshacerEfecto(Movement movimiento) {
+        Account cuenta = movimiento.getAccount();
+        if (cuenta == null) {
+            return;
+        }
+        double monto = movimiento.getAmount() != null ? movimiento.getAmount() : 0.0;
+        Account gestionada = recargar(cuenta);
+        gestionada.setCurrentBalance(movimiento.getType() == MovementType.INGRESO
+                ? saldoDe(gestionada) - monto
+                : saldoDe(gestionada) + monto);
+        accountRepository.save(gestionada);
+    }
+
+    /**
+     * GASTO_OPERATIVO y PAGO_COMPRA son EGRESO; INGRESO_OCASIONAL y RECAUDO_VENTA son
+     * INGRESO; TRANSFERENCIA admite los dos (una pata cada uno).
+     */
+    private static void validarCoherencia(MovementType tipo, MovementCategory categoria) {
+        if (tipo == null || categoria == null) {
+            throw new IllegalArgumentException("Un movimiento necesita tipo y categoria");
+        }
+        boolean coherente = switch (categoria) {
+            case GASTO_OPERATIVO, PAGO_COMPRA -> tipo == MovementType.EGRESO;
+            case INGRESO_OCASIONAL, RECAUDO_VENTA -> tipo == MovementType.INGRESO;
+            case TRANSFERENCIA -> true;
+        };
+        if (!coherente) {
+            throw new IllegalArgumentException("Un movimiento de categoria " + categoria + " no puede ser " + tipo);
         }
     }
 
@@ -469,12 +480,6 @@ public class TreasuryService {
         return accountRepository.findAll().stream()
                 .mapToDouble(this::saldoDe)
                 .sum();
-    }
-
-    @Transactional(readOnly = true)
-    public List<Transfer> findTransfersByAccountId(Long accountId) {
-        return transferRepository.findByOriginAccountIdOrDestinationAccountIdOrderByDateDesc(
-                accountId, accountId);
     }
 
     /**

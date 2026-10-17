@@ -10,10 +10,9 @@ import com.servibox.backend.tenant.TenantRepository;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.AccountType;
 import com.servibox.backend.treasury.entity.Movement;
-import com.servibox.backend.treasury.entity.MovementSourceType;
 import com.servibox.backend.treasury.entity.MovementType;
-import com.servibox.backend.treasury.entity.OccasionalIncome;
 import com.servibox.backend.treasury.service.TreasuryService;
+import com.servibox.backend.treasury.entity.MovementCategory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,7 +35,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Ingresos ocasionales: registro, efecto en el saldo y eliminacion revirtiendo.
+ * Ingresos ocasionales (movimientos INGRESO_OCASIONAL): registro, efecto en el saldo y
+ * eliminacion revirtiendo.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -127,63 +127,61 @@ class OccasionalIncomeTest {
     }
 
     @Test
-    void registrarUnIngresoOcasionalSumaAlSaldoYDejaSuMovimiento() {
+    void registrarUnIngresoOcasionalSumaAlSaldoYEsUnMovimientoDeSuCategoria() {
         Account caja = crearCuentaEn(tenantUno, "Caja General");
         assertThat(saldoDe(caja)).isEqualTo(0.0);
 
-        OccasionalIncome ingreso = treasuryService.registrarIngresoOcasional(
-                caja, "Venta de chatarra", 30000.0, LocalDate.now());
+        Movement ingreso = treasuryService.registrarIngresoOcasional(
+                caja, "Venta de chatarra", 30000.0, LocalDate.now(), "Retal de rines");
 
         // El saldo quedo en 30000.
         assertThat(saldoDe(caja)).isEqualTo(30000.0);
 
-        assertThat(ingreso.getId()).isNotNull();
-        assertThat(ingreso.getConcept()).isEqualTo("Venta de chatarra");
-        assertThat(ingreso.getAmount()).isEqualTo(30000.0);
-        assertThat(ingreso.getAccount().getId()).isEqualTo(caja.getId());
-
-        // Y aparece en el listado de movimientos de esa cuenta, como INGRESO.
+        // No hay tabla de ingresos: el ingreso es el propio movimiento.
         List<Movement> movimientos = treasuryService.findMovementsByAccountId(caja.getId());
-        assertThat(movimientos).hasSize(1);
-        Movement movimiento = movimientos.get(0);
-        assertThat(movimiento.getType()).isEqualTo(MovementType.INGRESO);
-        assertThat(movimiento.getAmount()).isEqualTo(30000.0);
-        assertThat(movimiento.getConcept()).isEqualTo("Venta de chatarra");
-        assertThat(movimiento.getSourceType()).isEqualTo(MovementSourceType.OCCASIONAL_INCOME);
-        assertThat(movimiento.getSourceId()).isEqualTo(ingreso.getId());
+        assertThat(movimientos).singleElement().satisfies(m -> {
+            assertThat(m.getId()).isEqualTo(ingreso.getId());
+            assertThat(m.getType()).isEqualTo(MovementType.INGRESO);
+            assertThat(m.getCategory()).isEqualTo(MovementCategory.INGRESO_OCASIONAL);
+            assertThat(m.getAmount()).isEqualTo(30000.0);
+            assertThat(m.getConcept()).isEqualTo("Venta de chatarra");
+            assertThat(m.getNotes()).isEqualTo("Retal de rines");
+            assertThat(m.getAccount().getId()).isEqualTo(caja.getId());
+            assertThat(m.getSourceType()).isNull();
+            assertThat(m.getSourceId()).isNull();
+        });
 
         assertThat(treasuryService.balanceGlobal()).isEqualTo(30000.0);
     }
 
     @Test
-    void anularUnIngresoOcasionalBorraElMovimientoYDevuelveElSaldo() {
+    void eliminarUnIngresoOcasionalBorraLaFilaYDevuelveElSaldo() {
         Account caja = crearCuentaEn(tenantUno, "Caja General");
-        treasuryService.registrarIngresoOcasional(caja, "Saldo de apertura", 50000.0, null);
+        treasuryService.registrarIngresoOcasional(caja, "Saldo de apertura", 50000.0, null, null);
         double saldoPrevio = saldoDe(caja);
 
-        OccasionalIncome ingreso = treasuryService.registrarIngresoOcasional(
-                caja, "Venta de chatarra", 30000.0, null);
+        Movement ingreso = treasuryService.registrarIngresoOcasional(
+                caja, "Venta de chatarra", 30000.0, null, null);
         assertThat(saldoDe(caja)).isEqualTo(80000.0);
         assertThat(treasuryService.findMovementsByAccountId(caja.getId())).hasSize(2);
 
-        treasuryService.anularIngresoOcasional(ingreso.getId());
+        treasuryService.eliminarMovimientoManual(ingreso.getId());
 
         assertThat(saldoDe(caja)).isEqualTo(saldoPrevio);
-        assertThat(treasuryService.findMovementsByAccountId(caja.getId())).hasSize(1);
         // A diferencia de una factura anulada, el registro desaparece.
-        assertThat(treasuryService.findOccasionalIncomeById(ingreso.getId())).isEmpty();
-        assertThat(treasuryService.findAllOccasionalIncomes())
-                .extracting(OccasionalIncome::getConcept)
+        assertThat(treasuryService.findMovementById(ingreso.getId())).isEmpty();
+        assertThat(treasuryService.buscarMovimientos(null, MovementCategory.INGRESO_OCASIONAL, null, null))
+                .extracting(Movement::getConcept)
                 .containsExactly("Saldo de apertura");
     }
 
     @Test
     void unIngresoOcasionalDeUnTenantNoEsVisibleParaOtro() throws Exception {
         Account cajaUno = crearCuentaEn(tenantUno, "Caja General");
-        treasuryService.registrarIngresoOcasional(cajaUno, "Chatarra tenant uno", 30000.0, null);
+        treasuryService.registrarIngresoOcasional(cajaUno, "Chatarra tenant uno", 30000.0, null, null);
 
         Account cajaDos = crearCuentaEn(tenantDos, "Caja General");
-        treasuryService.registrarIngresoOcasional(cajaDos, "Reintegro tenant dos", 15000.0, null);
+        treasuryService.registrarIngresoOcasional(cajaDos, "Reintegro tenant dos", 15000.0, null, null);
         TenantContext.clear();
 
         assertThat(conceptosVisiblesPara(tokenUno)).containsExactly("Chatarra tenant uno");
@@ -197,7 +195,8 @@ class OccasionalIncomeTest {
     }
 
     private List<String> conceptosVisiblesPara(String token) throws Exception {
-        MvcResult result = mockMvc.perform(get("/api/treasury/occasional-incomes")
+        MvcResult result = mockMvc.perform(get("/api/treasury/movements")
+                        .param("category", "INGRESO_OCASIONAL")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andReturn();
@@ -205,41 +204,47 @@ class OccasionalIncomeTest {
     }
 
     @Test
-    void elEndpointRegistraElIngresoYLoDevuelveEnElListado() throws Exception {
+    void elEndpointRegistraElIngresoYLoDevuelveEnLosListados() throws Exception {
         Account caja = crearCuentaEn(tenantUno, "Caja General");
         TenantContext.clear();
 
-        MvcResult creado = mockMvc.perform(post("/api/treasury/occasional-incomes")
+        MvcResult creado = mockMvc.perform(post("/api/treasury/movements")
                         .header("Authorization", "Bearer " + tokenUno)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"accountId":%d,"concept":"Venta de chatarra","amount":30000}
+                                {"accountId":%d,"category":"INGRESO_OCASIONAL","concept":"Venta de chatarra","amount":30000}
                                 """.formatted(caja.getId())))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.type").value("INGRESO"))
+                .andExpect(jsonPath("$.category").value("INGRESO_OCASIONAL"))
                 .andExpect(jsonPath("$.concept").value("Venta de chatarra"))
                 .andExpect(jsonPath("$.amount").value(30000.0))
                 .andExpect(jsonPath("$.accountName").value("Caja General"))
                 .andReturn();
         Integer ingresoId = JsonPath.read(creado.getResponse().getContentAsString(), "$.id");
 
-        mockMvc.perform(get("/api/treasury/occasional-incomes")
+        mockMvc.perform(get("/api/treasury/movements")
+                        .param("category", "INGRESO_OCASIONAL")
                         .header("Authorization", "Bearer " + tokenUno))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1));
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(ingresoId));
 
-        // El movimiento quedo ligado al ingreso tambien via HTTP.
         mockMvc.perform(get("/api/treasury/accounts/" + caja.getId() + "/movements")
                         .header("Authorization", "Bearer " + tokenUno))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(ingresoId))
                 .andExpect(jsonPath("$[0].type").value("INGRESO"))
-                .andExpect(jsonPath("$[0].amount").value(30000.0))
-                .andExpect(jsonPath("$[0].concept").value("Venta de chatarra"))
-                .andExpect(jsonPath("$[0].sourceType").value("OCCASIONAL_INCOME"))
-                .andExpect(jsonPath("$[0].sourceId").value(ingresoId));
+                .andExpect(jsonPath("$[0].category").value("INGRESO_OCASIONAL"))
+                .andExpect(jsonPath("$[0].sourceType").doesNotExist());
     }
 
     @Test
-    void losIngresosOcasionalesExigenAutenticacion() throws Exception {
-        mockMvc.perform(get("/api/treasury/occasional-incomes")).andExpect(status().isUnauthorized());
+    void losMovimientosExigenAutenticacion() throws Exception {
+        mockMvc.perform(get("/api/treasury/movements")).andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/treasury/movements")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
     }
 }

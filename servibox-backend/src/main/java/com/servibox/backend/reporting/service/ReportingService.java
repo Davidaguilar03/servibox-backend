@@ -13,10 +13,9 @@ import com.servibox.backend.sales.entity.SaleStatus;
 import com.servibox.backend.sales.repository.SaleDetailRepository;
 import com.servibox.backend.sales.repository.SaleRepository;
 import com.servibox.backend.treasury.entity.Account;
-import com.servibox.backend.treasury.entity.OccasionalIncome;
-import com.servibox.backend.treasury.entity.OperationalExpense;
-import com.servibox.backend.treasury.repository.OccasionalIncomeRepository;
-import com.servibox.backend.treasury.repository.OperationalExpenseRepository;
+import com.servibox.backend.treasury.entity.Movement;
+import com.servibox.backend.treasury.entity.MovementCategory;
+import com.servibox.backend.treasury.service.TreasuryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,8 +47,7 @@ public class ReportingService {
     private final SaleRepository saleRepository;
     private final SaleDetailRepository saleDetailRepository;
     private final PurchaseRepository purchaseRepository;
-    private final OperationalExpenseRepository operationalExpenseRepository;
-    private final OccasionalIncomeRepository occasionalIncomeRepository;
+    private final TreasuryService treasuryService;
 
     /** Los 5 KPIs sobre todo el historico del tenant activo. */
     @Transactional(readOnly = true)
@@ -57,7 +55,7 @@ public class ReportingService {
         return KpisResponse.of(null, null,
                 saleRepository.sumTotalByStatusNot(SaleStatus.ANULADA),
                 purchaseRepository.sumTotalByStatusNot(PurchaseStatus.ANULADA),
-                operationalExpenseRepository.sumAmount());
+                treasuryService.sumarPorCategoria(MovementCategory.GASTO_OPERATIVO));
     }
 
     /** Los mismos 5 KPIs, por fecha de factura (o de gasto) dentro de [desde, hasta]. */
@@ -67,12 +65,14 @@ public class ReportingService {
         return KpisResponse.of(desde, hasta,
                 saleRepository.sumTotalByStatusNotAndInvoiceDateBetween(SaleStatus.ANULADA, desde, hasta),
                 purchaseRepository.sumTotalByStatusNotAndInvoiceDateBetween(PurchaseStatus.ANULADA, desde, hasta),
-                operationalExpenseRepository.sumAmountByDateBetween(desde, hasta));
+                treasuryService.sumarPorCategoria(MovementCategory.GASTO_OPERATIVO, desde, hasta));
     }
 
     /**
      * Ventas, compras, gastos operativos e ingresos ocasionales del rango, del mas reciente
      * al mas antiguo, cortado en MAX_MOVEMENTS. Portado de DashboardService.getMovements.
+     * Ventas y compras salen de sus facturas; GASTO e INGRESO de los movimientos de
+     * categoria GASTO_OPERATIVO e INGRESO_OCASIONAL, con el id del movimiento como sourceId.
      */
     @Transactional(readOnly = true)
     public List<MovementSummaryResponse> getMovements(LocalDate desde, LocalDate hasta) {
@@ -89,11 +89,11 @@ public class ReportingService {
             lista.add(renglon(compra.getInvoiceDate(), "COMPRA", compra.getId(),
                     concepto(compra.getInvoiceNumber(), proveedor), compra.getTotal(), compra.getAccount()));
         }
-        for (OperationalExpense gasto : operationalExpenseRepository.findByDateBetween(desde, hasta)) {
+        for (Movement gasto : treasuryService.buscarMovimientos(null, MovementCategory.GASTO_OPERATIVO, desde, hasta)) {
             lista.add(renglon(gasto.getDate(), "GASTO", gasto.getId(),
                     gasto.getConcept(), gasto.getAmount(), gasto.getAccount()));
         }
-        for (OccasionalIncome ingreso : occasionalIncomeRepository.findByDateBetween(desde, hasta)) {
+        for (Movement ingreso : treasuryService.buscarMovimientos(null, MovementCategory.INGRESO_OCASIONAL, desde, hasta)) {
             lista.add(renglon(ingreso.getDate(), "INGRESO", ingreso.getId(),
                     ingreso.getConcept(), ingreso.getAmount(), ingreso.getAccount()));
         }

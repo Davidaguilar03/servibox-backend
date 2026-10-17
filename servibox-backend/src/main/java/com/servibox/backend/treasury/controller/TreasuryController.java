@@ -1,21 +1,21 @@
 package com.servibox.backend.treasury.controller;
 
+import com.servibox.backend.shared.ResourceNotFoundException;
 import com.servibox.backend.treasury.dto.AccountRequest;
 import com.servibox.backend.treasury.dto.AccountResponse;
 import com.servibox.backend.treasury.dto.BalanceResponse;
 import com.servibox.backend.treasury.dto.MovementRequest;
 import com.servibox.backend.treasury.dto.MovementResponse;
-import com.servibox.backend.treasury.dto.OccasionalIncomeRequest;
-import com.servibox.backend.treasury.dto.OccasionalIncomeResponse;
-import com.servibox.backend.treasury.dto.OperationalExpenseRequest;
-import com.servibox.backend.treasury.dto.OperationalExpenseResponse;
 import com.servibox.backend.treasury.dto.TransferRequest;
 import com.servibox.backend.treasury.dto.TransferResponse;
-import com.servibox.backend.shared.ResourceNotFoundException;
 import com.servibox.backend.treasury.entity.Account;
+import com.servibox.backend.treasury.entity.Movement;
+import com.servibox.backend.treasury.entity.MovementCategory;
+import com.servibox.backend.treasury.service.InvalidMovementOperationException;
 import com.servibox.backend.treasury.service.TreasuryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,9 +24,11 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @RestController
@@ -52,19 +54,57 @@ public class TreasuryController {
     }
 
     @GetMapping("/accounts/{id}/movements")
-    public List<MovementResponse> listarMovimientos(@PathVariable Long id) {
+    public List<MovementResponse> listarMovimientosDeCuenta(@PathVariable Long id) {
         cuentaDeRuta(id);
         return treasuryService.findMovementsByAccountId(id).stream()
                 .map(MovementResponse::from)
                 .toList();
     }
 
+    /** Libro de movimientos del tenant, con filtros opcionales. */
+    @GetMapping("/movements")
+    public List<MovementResponse> listarMovimientos(
+            @RequestParam(required = false) Long accountId,
+            @RequestParam(required = false) MovementCategory category,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta) {
+        return treasuryService.buscarMovimientos(accountId, category, desde, hasta).stream()
+                .map(MovementResponse::from)
+                .toList();
+    }
+
+    /** Movimiento manual: GASTO_OPERATIVO o INGRESO_OCASIONAL. Otra categoria es 400. */
     @PostMapping("/movements")
     @ResponseStatus(HttpStatus.CREATED)
     public MovementResponse registrarMovimiento(@Valid @RequestBody MovementRequest request) {
         Account cuenta = cuentaObligatoria(request.accountId());
-        return MovementResponse.from(treasuryService.registrarMovimiento(
-                cuenta, request.type(), request.concept(), request.amount()));
+        return MovementResponse.from(treasuryService.registrarMovimientoManual(cuenta, request.category(),
+                request.concept(), request.amount(), request.date(), request.notes()));
+    }
+
+    /**
+     * PUT y no PATCH: el cuerpo trae el movimiento completo, igual que el formulario de
+     * Autollantas. La categoria del cuerpo tiene que ser la que ya tenia.
+     */
+    @PutMapping("/movements/{id}")
+    public MovementResponse editarMovimiento(@PathVariable Long id, @Valid @RequestBody MovementRequest request) {
+        Movement actual = movimientoDeRuta(id);
+        // Si no es manual, el service lo rechaza con "se gestiona desde su operacion".
+        if (actual.getCategory().esManual() && request.category() != actual.getCategory()) {
+            throw new InvalidMovementOperationException("La categoria de un movimiento no se puede cambiar: el "
+                    + id + " es " + actual.getCategory());
+        }
+        Account cuenta = cuentaObligatoria(request.accountId());
+        return MovementResponse.from(treasuryService.editarMovimientoManual(id, cuenta, request.concept(),
+                request.amount(), request.date(), request.notes()));
+    }
+
+    /** DELETE y no un /annul: el movimiento manual **desaparece**. Ver 02-CONVENTIONS.md. */
+    @DeleteMapping("/movements/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void eliminarMovimiento(@PathVariable Long id) {
+        movimientoDeRuta(id);
+        treasuryService.eliminarMovimientoManual(id);
     }
 
     @PostMapping("/transfers")
@@ -73,63 +113,7 @@ public class TreasuryController {
         Account origen = cuentaObligatoria(request.originAccountId());
         Account destino = cuentaObligatoria(request.destinationAccountId());
         return TransferResponse.from(treasuryService.registrarTransferencia(
-                origen, destino, request.concept(), request.amount()));
-    }
-
-    @GetMapping("/occasional-incomes")
-    public List<OccasionalIncomeResponse> listarIngresosOcasionales() {
-        return treasuryService.findAllOccasionalIncomes().stream()
-                .map(OccasionalIncomeResponse::from)
-                .toList();
-    }
-
-    @PostMapping("/occasional-incomes")
-    @ResponseStatus(HttpStatus.CREATED)
-    public OccasionalIncomeResponse registrarIngresoOcasional(
-            @Valid @RequestBody OccasionalIncomeRequest request) {
-        Account cuenta = cuentaObligatoria(request.accountId());
-        return OccasionalIncomeResponse.from(treasuryService.registrarIngresoOcasional(
-                cuenta, request.concept(), request.amount(), request.date()));
-    }
-
-    @GetMapping("/operational-expenses")
-    public List<OperationalExpenseResponse> listarGastosOperativos() {
-        return treasuryService.findAllOperationalExpenses().stream()
-                .map(OperationalExpenseResponse::from)
-                .toList();
-    }
-
-    @PostMapping("/operational-expenses")
-    @ResponseStatus(HttpStatus.CREATED)
-    public OperationalExpenseResponse registrarGastoOperativo(
-            @Valid @RequestBody OperationalExpenseRequest request) {
-        Account cuenta = cuentaObligatoria(request.accountId());
-        return OperationalExpenseResponse.from(treasuryService.registrarGastoOperativo(
-                cuenta, request.concept(), request.amount(), request.date(), request.notes()));
-    }
-
-    /**
-     * PUT y no PATCH: el cuerpo trae el gasto completo, igual que el formulario de
-     * Autollantas, que reenvia todos los campos al guardar en modo edicion.
-     */
-    @PutMapping("/operational-expenses/{id}")
-    public OperationalExpenseResponse editarGastoOperativo(
-            @PathVariable Long id, @Valid @RequestBody OperationalExpenseRequest request) {
-        gastoDeRuta(id);
-        Account cuenta = cuentaObligatoria(request.accountId());
-        return OperationalExpenseResponse.from(treasuryService.editarGastoOperativo(
-                id, cuenta, request.concept(), request.amount(), request.date(), request.notes()));
-    }
-
-    /**
-     * DELETE y no un /annul: el registro **desaparece**, no queda en un estado ANULADA.
-     * Es lo que hace "Eliminar" en Autollantas. Ver 02-CONVENTIONS.md.
-     */
-    @DeleteMapping("/operational-expenses/{id}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void eliminarGastoOperativo(@PathVariable Long id) {
-        gastoDeRuta(id);
-        treasuryService.anularGastoOperativo(id);
+                origen, destino, request.concept(), request.amount(), null));
     }
 
     @GetMapping("/balance")
@@ -146,10 +130,10 @@ public class TreasuryController {
                 .orElseThrow(() -> new ResourceNotFoundException("Cuenta no encontrada: " + id));
     }
 
-    /** Gasto operativo pedido por la ruta: si no existe para este tenant, 404. */
-    private void gastoDeRuta(Long id) {
-        treasuryService.findOperationalExpenseById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Gasto operativo no encontrado: " + id));
+    /** Movimiento pedido por la ruta: si no existe para este tenant, 404. */
+    private Movement movimientoDeRuta(Long id) {
+        return treasuryService.findMovementById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Movimiento no encontrado: " + id));
     }
 
     /**

@@ -11,7 +11,6 @@ import com.servibox.backend.purchases.service.PurchasesService;
 import com.servibox.backend.sales.SalesFixture;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
-import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.service.TreasuryService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -120,7 +119,7 @@ class PurchasesCostSyncTest {
      */
     @Test
     void unaCompraDeContadoTambienActualizaElCosto() {
-        treasuryService.registrarMovimiento(caja, MovementType.INGRESO, "Fondeo de prueba", 1000000.0);
+        treasuryService.registrarIngresoOcasional(caja, "Fondeo de prueba", 1000000.0, null, null);
 
         comprar("FAC-COSTO-2", PaymentType.CONTADO, caja,
                 new PurchasesService.LineaCompra(llanta.getId(), 2, 25000.0));

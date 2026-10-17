@@ -66,8 +66,8 @@ class PurchasesRestoreTest {
         llanta = fixture.crearProducto(categoria, "LLA-001", 100000.0, 10);
         caja = fixture.crearCuenta("Caja General");
         banco = fixture.crearCuenta("Bancolombia");
-        treasuryService.registrarMovimiento(caja, MovementType.INGRESO, "Fondeo de prueba", 1000000.0);
-        treasuryService.registrarMovimiento(banco, MovementType.INGRESO, "Fondeo de prueba", 1000000.0);
+        treasuryService.registrarIngresoOcasional(caja, "Fondeo de prueba", 1000000.0, null, null);
+        treasuryService.registrarIngresoOcasional(banco, "Fondeo de prueba", 1000000.0, null, null);
 
         proveedor = fixture.crearProveedor("Importadora Andina", "900987654");
     }
@@ -112,7 +112,7 @@ class PurchasesRestoreTest {
 
     /** Saca dinero de una cuenta sin pasar por una compra, para dejarla sin saldo. */
     private void retirar(Account cuenta, double monto) {
-        treasuryService.registrarMovimiento(cuenta, MovementType.EGRESO, "Retiro", monto);
+        treasuryService.registrarGastoOperativo(cuenta, "Retiro", monto, null, null);
     }
 
     private Product productoActual() {

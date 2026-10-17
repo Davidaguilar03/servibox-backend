@@ -12,13 +12,60 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-06: Transferencias, ingresos ocasionales y gastos operativos son movimientos con categoria
+
+* Decision: paso 2 del refactor de normalizacion (ver
+  [sessions/2026-10-06-refactor-normalizacion.md](sessions/2026-10-06-refactor-normalizacion.md)).
+  `Transfer`, `OccasionalIncome` y `OperationalExpense` desaparecen, con sus repositories,
+  DTOs y las tablas `TRANSFERENCIAS`, `INGRESOS_OCASIONALES` y `GASTOS_OPERATIVOS`. Todo es
+  un `Movement` con `category` (enum `MovementCategory`, `categoria_movimiento`,
+  obligatoria): `GASTO_OPERATIVO`, `INGRESO_OCASIONAL`, `TRANSFERENCIA`, `PAGO_COMPRA` y
+  `RECAUDO_VENTA`. `Movement` gana tambien `notes` (`notas`) y `relatedMovement`
+  (`id_movimiento_relacionado`, clave foranea real). Es lo que pide
+  [04-DATA-MODEL.md](04-DATA-MODEL.md): un solo libro de movimientos en vez de una tabla
+  por clase de dinero.
+* **El tipo da el signo, la categoria el origen.** `MovementType` sigue siendo solo
+  `INGRESO` o `EGRESO`. El diccionario lista TRANSFERENCIA entre los valores de
+  `tipo_movimiento`, pero una transferencia no tiene direccion por si sola; aqui es una
+  categoria (decision ya anotada en 04-DATA-MODEL.md). `aplicarMovimiento` valida la
+  coherencia: GASTO_OPERATIVO y PAGO_COMPRA son EGRESO, INGRESO_OCASIONAL y RECAUDO_VENTA
+  son INGRESO, TRANSFERENCIA una pata de cada uno.
+* **Transferencia = dos movimientos enlazados.** Un EGRESO en el origen y un INGRESO en el
+  destino, los dos TRANSFERENCIA; el INGRESO apunta al EGRESO con `relatedMovement`. Los
+  conceptos siguen siendo "Transferencia a / desde {cuenta}"; el concepto que escribe el
+  usuario, que antes vivia en `Transfer.concept`, pasa a `notes` de las dos patas para no
+  perderlo. La respuesta de `POST /transfers` lleva los ids de las dos patas.
+* **Movimientos manuales.** Solo GASTO_OPERATIVO e INGRESO_OCASIONAL se crean, editan y
+  eliminan a mano (`/api/treasury/movements`). Los demas se gestionan desde su operacion:
+  editarlos o eliminarlos es 400 y no toca nada. Al editar, la categoria no se cambia.
+* **Editar ya no es revertir y recrear.** Antes se borraba el movimiento y se creaba uno
+  nuevo colgado del mismo gasto. Ahora el gasto **es** el movimiento, asi que se revierte
+  el efecto viejo sobre la cuenta vieja, se actualiza **la misma fila** y se aplica el
+  efecto nuevo. El id no cambia. Eliminar revierte y borra la fila, como antes.
+* **El ingreso ocasional gana `notes`.** Antes no se habia portado; ahora es la misma
+  columna de todo movimiento.
+* **La fecha del movimiento es la de negocio.** Antes el gasto y el ingreso guardaban su
+  fecha en su propia fila y su movimiento quedaba con la de captura. Ahora solo hay una
+  fila, con la fecha que manda el usuario (hoy si no manda ninguna).
+* **Se elimina el movimiento suelto** (`registrarMovimiento` y el `POST /movements` con
+  `type`): ya no existe un movimiento sin categoria. Los tests que fondeaban cuentas asi
+  usan un ingreso ocasional.
+* `MovementSourceType` queda solo con `SALE` y `PURCHASE`, que siguen enlazando los
+  movimientos de facturas hasta el paso 3.
+* Reporting: `operatingExpenses` es la suma de los GASTO_OPERATIVO; los renglones GASTO e
+  INGRESO de `getMovements` salen de esos movimientos, con el id del movimiento como
+  `sourceId`. Los ingresos ocasionales siguen sin entrar en `netProfit`.
+* El listado con filtros opcionales usa una `Specification` y no un
+  `(:p IS NULL OR ...)` en JPQL, por los problemas de tipado en PostgreSQL ya anotados en
+  la seccion de Reporting de 01-ARCHITECTURE.md.
+
 ## 2026-10-06: Clientes y proveedores se unifican en terceros (Counterparty)
 
 * Decision: paso 1 del refactor de normalizacion (ver
   [sessions/2026-10-06-refactor-normalizacion.md](sessions/2026-10-06-refactor-normalizacion.md)).
   `Customer` (`CLIENTES`) y `Supplier` (`PROVEEDORES`) desaparecen; los reemplaza
   `Counterparty` (`TERCEROS`) en el paquete `counterparties`, como manda
-  [04-DATA-MODEL.md](../04-DATA-MODEL.md). `Sale.customer` y `Purchase.supplier` apuntan a
+  [04-DATA-MODEL.md](04-DATA-MODEL.md). `Sale.customer` y `Purchase.supplier` apuntan a
   un `Counterparty` por la columna `id_tercero`. Una persona o empresa existe **una sola vez
   por tenant**, identificada por su numero de documento (`uk_tercero_tenant_document`).
 * **Promocion a AMBOS.** `CounterpartyService.obtenerOCrear` busca por documento: si no
@@ -230,6 +277,10 @@ Formato de cada entrada:
 
 ## 2026-09-08: Gastos operativos, con edicion (revertir y recrear) y eliminacion
 
+> **SUPERADO** por "Transferencias, ingresos ocasionales y gastos operativos son movimientos con categoria" (2026-10-06): `OperationalExpense` ya no existe como entidad, el gasto es un
+> `Movement` `GASTO_OPERATIVO`, y editar actualiza la misma fila en vez de borrar y
+> recrear el movimiento. Sigue vigente: no exige saldo y eliminar borra de verdad.
+
 Cierra la nota *Donde vive OperationalExpense, para la proxima migracion* (2026-09-07).
 
 * Hallazgo, verificado leyendo `treasury/model/OperationalExpense.java`,
@@ -354,6 +405,11 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
   afirmaba nada sobre `suggestedPrice`.
 
 ## 2026-09-07: El origen de un Movement pasa a ser (tipo, id)
+
+> **Parcialmente SUPERADO** por "Transferencias, ingresos ocasionales y gastos operativos son movimientos con categoria" (2026-10-06): los origenes TRANSFER, OCCASIONAL_INCOME y
+> OPERATIONAL_EXPENSE desaparecen, porque esos registros ahora son movimientos con
+> categoria. El par `(sourceType, sourceId)` sigue solo para SALE y PURCHASE, hasta el
+> paso 3.
 
 * Decision: se eliminan las cuatro relaciones `ManyToOne` opcionales de `Movement`
   (`sourceTransfer`, `sourceSale`, `sourcePurchase`, `sourceOccasionalIncome`) y se
@@ -532,6 +588,8 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
 
 ## 2026-09-07: Donde vive OperationalExpense, para la proxima migracion (RESUELTO el 2026-09-08)
 
+> **SUPERADO** por "Transferencias, ingresos ocasionales y gastos operativos son movimientos con categoria" (2026-10-06): ya no hay entidad `OperationalExpense`.
+
 * Ubicacion en Autollantas: **`treasury`**, no `purchases`, aunque en la interfaz aparezca
   bajo Egresos junto a las facturas de compra. Archivos:
   `treasury/model/OperationalExpense.java`, `treasury/repository/OperationalExpenseRepository.java`,
@@ -555,6 +613,10 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
 > eliminacion**, y el mecanismo exacto de la edicion.
 
 ## 2026-09-07: Ingresos ocasionales, con eliminacion porque Autollantas la tiene
+
+> **SUPERADO** por "Transferencias, ingresos ocasionales y gastos operativos son movimientos con categoria" (2026-10-06): `OccasionalIncome` ya no existe como entidad, el ingreso es un
+> `Movement` `INGRESO_OCASIONAL` (que ahora si tiene `notes`). Sigue vigente que se
+> elimina de verdad.
 
 * Decision: `OccasionalIncome` vive **dentro de `treasury`**, no en un modulo propio.
   `registrarIngresoOcasional` pasa por `aplicarMovimiento` como todo lo demas, y **si** se
@@ -705,6 +767,10 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
 
 ## 2026-09-07: La transferencia genera sus dos movimientos, con relacion al Transfer
 
+> **SUPERADO** por "Transferencias, ingresos ocasionales y gastos operativos son movimientos con categoria" (2026-10-06): no hay entidad `Transfer` ni origen `(TRANSFER, id)`. Siguen
+> siendo dos movimientos, de categoria TRANSFERENCIA, enlazados entre si con
+> `relatedMovement`.
+
 > **Parcialmente SUPERADO:** la generacion de los dos movimientos sigue vigente, pero la
 > relacion `sourceTransfer` se reemplazo por `(TRANSFER, id)`, ver "El origen de un
 > Movement pasa a ser (tipo, id)".
@@ -848,6 +914,9 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
   con el que se mueve la plata.
 
 ## 2026-09-07: La transferencia no genera movimientos automaticos (RESUELTO el mismo dia)
+
+> **SUPERADO** por "Transferencias, ingresos ocasionales y gastos operativos son movimientos con categoria" (2026-10-06): `Transfer` ya no existe; la transferencia son sus dos
+> movimientos.
 
 > **RESUELTO.** Se implemento la generacion de los dos movimientos, con una relacion
 > `Movement.sourceTransfer` que Autollantas no tiene. Ver la entrada "La transferencia

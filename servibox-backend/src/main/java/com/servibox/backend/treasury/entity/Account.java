@@ -34,7 +34,7 @@ public class Account extends TenantAwareEntity {
     @Column(name = "balance_inicial")
     private Double initialBalance;
 
-    /** Saldo vivo. Lo mueven registrarMovimiento y registrarTransferencia. */
+    /** Saldo vivo. Solo lo mueve TreasuryService, a traves de los movimientos de la cuenta. */
     @Column(name = "saldo_actual")
     private Double currentBalance;
 

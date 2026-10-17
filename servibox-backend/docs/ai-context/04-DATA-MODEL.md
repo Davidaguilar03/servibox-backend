@@ -287,9 +287,10 @@ Decididas durante el refactor. Cada una se anota tambien en `03-DECISIONS.md`.
 
 ## Pendientes
 
-Decisiones que se toman en los pasos 18 y 19 del refactor, cuando haya que resolver el esquema fisico:
+Decisiones que se toman en los pasos 4 y 5 del refactor (ver `sessions/2026-10-06-refactor-normalizacion.md`), cuando haya que resolver el esquema fisico:
 
 * Semantica de `iva_producto`: el diccionario lo describe como tarifa, pero el codigo guarda un monto en pesos por unidad.
 * Roles de usuario (el diccionario dice ADMIN, MECANICO, CAJERO; el codigo tiene ADMIN y EMPLEADO) y tipos de cuenta (el diccionario agrega DIGITAL).
 * Tipos fisicos frente a los del codigo: identificadores (INTEGER contra Long), montos (NUMERIC contra Double), porcentajes (5,2 contra fracciones), fechas (TIMESTAMP en UTC contra LocalDate).
 * Unicos que el codigo ya aplica y el diccionario no lista: nombre de cuenta y numero de factura de compra por tenant.
+* `id_tercero` es NOT NULL en VENTAS y COMPRAS segun el modelo, pero hoy una factura puede no tener tercero (`customerId` y `supplierId` son opcionales en la API). Se decide en el paso 4.

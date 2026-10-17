@@ -357,105 +357,81 @@ Todas sus entidades extienden `TenantAwareEntity`.
 
   Una cuenta nueva arranca con `currentBalance` igual a su `initialBalance`: mientras no
   haya movimientos, el saldo vivo es el saldo de apertura.
-* `Movement` (`MOVIMIENTOS`): `ManyToOne` a `Account`, `type` (enum `MovementType`,
-  `INGRESO` o `EGRESO`), `concept`, `amount`, `date` (`LocalDate`), y el par de origen
-  `sourceType` / `sourceId`. Dos divergencias deliberadas respecto de Autollantas, ambas
-  en [03-DECISIONS.md](03-DECISIONS.md): el tipo es enum y no `String`, y `concept` es una
-  columna real y no una descripcion derivada de `(tabla_origen, id_origen)`.
+* `Movement` (`MOVIMIENTOS`): **el libro de movimientos**, y desde el paso 2 del refactor
+  de normalizacion la unica entidad de tesoreria ademas de `Account`. Gastos operativos,
+  ingresos ocasionales y transferencias **no tienen tabla propia**: son movimientos con su
+  categoria. Ver [04-DATA-MODEL.md](04-DATA-MODEL.md), MOVIMIENTOS.
 
-  **El origen de un movimiento: `sourceType` + `sourceId`.**
-  `sourceType` es el enum `MovementSourceType` (`TRANSFER`, `SALE`, `PURCHASE`,
-  `OCCASIONAL_INCOME`) y `sourceId` es el id del registro que lo genero, interpretado
-  segun ese tipo. Los dos van juntos: o ambos poblados, o ambos null, y ambos null
-  significa movimiento suelto, registrado a mano.
-
-  | `sourceType` | `sourceId` apunta a | Movimientos que genera |
+  | Campo | Columna | Notas |
   |-|-|-|
-  | `TRANSFER` | `Transfer` | el EGRESO del origen y el INGRESO del destino |
-  | `SALE` | `Sale` | el INGRESO del contado y el de cada abono |
-  | `PURCHASE` | `Purchase` | el EGRESO del contado y el de cada pago |
-  | `OCCASIONAL_INCOME` | `OccasionalIncome` | su INGRESO |
-  | `OPERATIONAL_EXPENSE` | `OperationalExpense` | su EGRESO |
-  | null | (nada) | movimiento suelto |
+  | `account` | `id_cuenta` | `ManyToOne` a `Account` |
+  | `type` | `tipo_movimiento` | Enum `MovementType`: solo `INGRESO` o `EGRESO`. Es lo que da el signo sobre el saldo |
+  | `category` | `categoria_movimiento` | Enum `MovementCategory`, obligatorio (NOT NULL en la base) |
+  | `concept` | `concepto_movimiento` | Columna real, divergencia deliberada respecto de Autollantas |
+  | `amount` | `monto_movimiento` | |
+  | `date` | `fecha_movimiento` | Fecha de negocio (`LocalDate`), no de auditoria |
+  | `notes` | `notas` | Opcional, 255 |
+  | `relatedMovement` | `id_movimiento_relacionado` | `ManyToOne` a `Movement`, clave foranea real. Solo en la pata INGRESO de una transferencia, apuntando a la pata EGRESO. Excluido de `toString` y `equals` |
+  | `sourceType` / `sourceId` | `tipo_origen_movimiento` / `id_origen_movimiento` | Factura de origen: `SALE` o `PURCHASE`. Sin clave foranea. **Desaparece en el paso 3**, cuando se usen `id_venta` / `id_compra` |
 
-  Sustituye a cuatro relaciones `ManyToOne` opcionales, una por origen, que era el diseno
-  anterior. **Agregar un origen nuevo ahora es agregar un valor al enum y nada mas**: sin
-  columna nueva, sin cambio de esquema y sin un parametro mas en `aplicarMovimiento`.
-  `OPERATIONAL_EXPENSE` fue el primero en estrenarlo, y costo exactamente eso: una linea.
-  Motivo completo y la contrapartida (no hay clave foranea) en
-  [03-DECISIONS.md](03-DECISIONS.md).
+  Las columnas que ya existian conservan su nombre en este paso; se alinean con el
+  diccionario en el paso 4.
 
-  Para recuperar los movimientos de un origen concreto hay un unico metodo,
-  `MovementRepository.findBySourceTypeAndSourceIdAndTenantId`, que reemplaza a los tres
-  buscadores que habia antes.
-* `OccasionalIncome` (`INGRESOS_OCASIONALES`): `concept`, `amount`, `ManyToOne` a
-  `Account`, `date`. Ingreso puntual que no viene de una venta: reintegros, venta de
-  chatarra, un aporte del socio. Autollantas tiene ademas un campo `notes` que no se porto.
-* `OperationalExpense` (`GASTOS_OPERATIVOS`): `concept` (`concepto_gasto`), `amount`
-  (`monto_gasto`), `ManyToOne` a `Account`, `date` (`fecha_gasto`) y `notes`. Gasto puntual
-  que no viene de una factura de compra: arriendo, servicios publicos, papeleria. Es la
-  imagen espejo de `OccasionalIncome` con el signo invertido. **Aqui `notes` si se porto**:
-  es el campo "Observaciones" del formulario de Autollantas y es **opcional** (su
-  `validateFields` solo exige concepto, monto, cuenta y fecha). En la interfaz de
-  Autollantas vive bajo Egresos, junto a las facturas de compra, pero el codigo esta en
-  `treasury` y aqui tambien.
-* `Transfer` (`TRANSFERENCIAS`): `ManyToOne` a `Account` origen y destino, `amount`,
-  `concept`, `date`. Autollantas llama a esas relaciones `sourceAccount` /
-  `destinationAccount`; aqui son `originAccount` / `destinationAccount`, que es como
-  aparecen en la vista (columnas Origin / Destination de `tablaTransferencias`).
+  **Categorias** (`MovementCategory`) y su tipo, validado en `TreasuryService`:
+
+  | Categoria | Tipo | Quien la crea | Manual |
+  |-|-|-|-|
+  | `GASTO_OPERATIVO` | `EGRESO` | El usuario: arriendo, servicios, papeleria | Si |
+  | `INGRESO_OCASIONAL` | `INGRESO` | El usuario: chatarra, reintegros, aporte del socio | Si |
+  | `TRANSFERENCIA` | `EGRESO` en el origen, `INGRESO` en el destino | `registrarTransferencia` | No |
+  | `PAGO_COMPRA` | `EGRESO` | La compra de contado y cada pago (`(PURCHASE, id)`) | No |
+  | `RECAUDO_VENTA` | `INGRESO` | La venta de contado y cada abono (`(SALE, id)`) | No |
+
+  Solo las dos manuales se crean, editan y eliminan directamente. Las demas se gestionan
+  desde su operacion; editarlas o eliminarlas a mano es **400** y no toca nada.
 
 **`TreasuryService`**
 
-* `registrarMovimiento(cuenta, tipo, concepto, monto)`: registra un ingreso o egreso
-  suelto. Delega en `aplicarMovimiento` sin origen (`sourceType` y `sourceId` null).
-* `aplicarMovimiento(cuenta, tipo, concepto, monto, sourceType, sourceId)` (privado):
-  **el unico sitio del modulo donde se crea un `Movement` y se mueve el `currentBalance`
-  de su cuenta.** Suma si es `INGRESO`, resta si es `EGRESO`. Las dos cosas van juntas a
-  proposito: un movimiento guardado sin mover el saldo, o un saldo movido sin movimiento
-  que lo explique, es un descuadre silencioso. Como no hay ninguna otra via para tocar
-  `currentBalance`, las dos rutas que lo mueven no se pueden desincronizar.
-* `registrarTransferencia(origen, destino, concepto, monto)`: guarda el `Transfer` y
-  genera **dos movimientos** por `aplicarMovimiento`, un `EGRESO` en el origen con
-  concepto "Transferencia a {destino}" y un `INGRESO` en el destino con concepto
-  "Transferencia desde {origen}", los dos con `(TRANSFER, id del Transfer)`.
-  Son esos movimientos los que mueven los saldos; la transferencia no toca
-  `currentBalance` por su cuenta. Todo en una sola transaccion. **El dinero se conserva**:
-  el balance global del tenant queda igual que antes. Rechaza con
-  `InvalidTransferException` (**400**) si las dos cuentas son la misma o si el monto no es
-  mayor a cero; en ese caso no se mueve ningun saldo ni queda ningun movimiento colgando.
-* `registrarIngresoOcasional(cuenta, concepto, monto, fecha)`: guarda el
-  `OccasionalIncome` y genera su `INGRESO` por `aplicarMovimiento`, con
-  `(OCCASIONAL_INCOME, id)`. **No toca `currentBalance` por su
-  cuenta**: el saldo lo mueve el movimiento, igual que la transferencia. Rechaza monto no
-  positivo y cuenta ausente.
-* `anularIngresoOcasional(id)`: borra el movimiento, resta el importe del saldo y
-  **elimina la fila**. Es `deleteOccasionalIncome` de Autollantas, donde la accion en la
-  interfaz se llama "Eliminar". Ojo: a diferencia de una factura de venta, aqui no queda
-  ningun estado `ANULADA`, el registro desaparece. Ver
-  [03-DECISIONS.md](03-DECISIONS.md).
-* `registrarGastoOperativo(cuenta, concepto, monto, fecha, notas)`: guarda el
-  `OperationalExpense` y genera su `EGRESO` por `aplicarMovimiento`, con
-  `(OPERATIONAL_EXPENSE, id)`. Espejo exacto de `registrarIngresoOcasional`. **No exige
-  saldo suficiente**, a diferencia de `registrarEgresoDeCompra`: Autollantas tampoco, asi
-  que una cuenta puede quedar en negativo por un gasto. Ver
-  [03-DECISIONS.md](03-DECISIONS.md).
-* `editarGastoOperativo(id, cuenta, concepto, monto, fecha, notas)`: **el unico registro de
-  tesoreria que se puede editar.** El mecanismo es **revertir y recrear**, no ajustar la
-  diferencia:
-
-  1. Revierte el movimiento anterior con el mismo `revertir(...)` que usa la anulacion, que
-     le devuelve el importe a **la cuenta de ese movimiento**, y lo borra.
-  2. Actualiza los campos del gasto (misma fila, mismo id).
-  3. Registra un `EGRESO` nuevo por `aplicarMovimiento` con los valores actualizados.
-
-  Es lo que hace `saveOperationalExpense(expense, editMode = true)` de Autollantas. Que el
-  paso 1 mire la cuenta del movimiento viejo y no la del gasto ya editado es lo que hace
-  que **cambiar de cuenta** salga bien: el dinero vuelve de donde salio. Al terminar queda
-  **un solo movimiento**, el nuevo, no un par movimiento + contra-movimiento.
-* `anularGastoOperativo(id)`: borra el movimiento, devuelve el importe al saldo y **elimina
-  la fila**. Es `deleteOperationalExpense` de Autollantas, donde la accion se llama
-  "Eliminar". Mismo nombre enganoso y mismo criterio que `anularIngresoOcasional`: no queda
-  ningun estado `ANULADA`.
+* `aplicarMovimiento(movimiento)` (privado): **el unico sitio donde se guarda un
+  `Movement` y se aplica su efecto sobre el `currentBalance` de su cuenta.** Suma si es
+  `INGRESO`, resta si es `EGRESO`, y antes valida la coherencia entre tipo y categoria.
+  Sirve para un movimiento nuevo y para uno editado (misma fila, efecto nuevo). La unica
+  otra escritura del saldo es `deshacerEfecto`, que revierte el efecto de un movimiento
+  sobre **su** cuenta; la usan editar y eliminar un movimiento manual y anular una
+  factura.
+* `registrarIngresoOcasional(cuenta, concepto, monto, fecha, notas)` y
+  `registrarGastoOperativo(cuenta, concepto, monto, fecha, notas)`: crean un `INGRESO`
+  `INGRESO_OCASIONAL` o un `EGRESO` `GASTO_OPERATIVO`. Delegan en
+  `registrarMovimientoManual(cuenta, categoria, ...)`, que es lo que usa el endpoint y
+  rechaza cualquier otra categoria (`InvalidMovementOperationException`, **400**). Monto no
+  positivo o cuenta ausente, 400. **No exigen saldo suficiente**, igual que Autollantas:
+  un gasto puede dejar la cuenta en negativo. Ver [03-DECISIONS.md](03-DECISIONS.md).
+* `editarMovimientoManual(id, cuenta, concepto, monto, fecha, notas)`: solo
+  `GASTO_OPERATIVO` e `INGRESO_OCASIONAL`. Revierte el efecto anterior **sobre la cuenta
+  anterior**, actualiza **la misma fila** y aplica el efecto nuevo sobre la cuenta nueva,
+  asi que cambiar de cuenta devuelve el dinero de donde salio. Queda un solo movimiento,
+  sin contra-movimiento. La categoria no se cambia.
+* `eliminarMovimientoManual(id)`: mismas dos categorias. Revierte el saldo y **borra la
+  fila**: no tienen factura ni estado, no queda nada `ANULADA`. Es "Eliminar" en
+  Autollantas.
+* Las dos anteriores buscan con `findByIdAndTenantId`: si el movimiento no es del tenant,
+  `ResourceNotFoundException` (**404**); si es de otra categoria,
+  `InvalidMovementOperationException` (**400**, "se gestiona desde su operacion").
+* `registrarTransferencia(origen, destino, concepto, monto, fecha)`: **dos movimientos de
+  categoria `TRANSFERENCIA`**, un `EGRESO` en el origen ("Transferencia a {destino}") y un
+  `INGRESO` en el destino ("Transferencia desde {origen}") cuyo `relatedMovement` es el
+  `EGRESO`. El concepto que manda el usuario va a `notes` en las dos patas. Devuelve el
+  record `Transferencia(egreso, ingreso)`. Todo en una transaccion; **el dinero se
+  conserva**. Rechaza con `InvalidTransferException` (**400**) cuentas iguales o monto no
+  positivo, sin mover ningun saldo ni dejar movimientos.
+* `registrarIngresoDeVenta` y `registrarEgresoDeCompra`: crean los movimientos
+  `RECAUDO_VENTA` y `PAGO_COMPRA` de las facturas, con `(SALE, id)` o `(PURCHASE, id)`.
+  El de compra exige saldo suficiente. `revertirMovimientosDeVenta` / `...DeCompra` los
+  revierten y borran al anular (se redisena en el paso 3).
+* Consultas: `findMovementById`, `findMovementsByAccountId`,
+  `buscarMovimientos(accountId, categoria, desde, hasta)` con los cuatro filtros
+  opcionales, y `sumarPorCategoria(categoria)` / `sumarPorCategoria(categoria, desde,
+  hasta)`, que usa Reporting.
 * `balanceGlobal()`: suma de los `currentBalance` de todas las cuentas del tenant activo.
   Es el "Total Global" (`lblTotalGlobal`) de `Accounts.fxml`.
 
@@ -466,24 +442,28 @@ historia en [03-DECISIONS.md](03-DECISIONS.md).
 **Endpoints** (todos requieren JWT)
 
 * `GET` y `POST` `/api/treasury/accounts`
-* `GET /api/treasury/accounts/{id}/movements`
-* `POST /api/treasury/movements` (registra un ingreso o un egreso)
-* `POST /api/treasury/transfers`
-* `GET` y `POST` `/api/treasury/occasional-incomes`
-* `GET` y `POST` `/api/treasury/operational-expenses`
-* `PUT /api/treasury/operational-expenses/{id}`: edita el gasto; 404 si no existe para el
-  tenant. `PUT` y no `PATCH` porque el cuerpo trae el gasto completo, igual que el
-  formulario de Autollantas, que reenvia todos los campos al guardar en modo edicion.
-* `DELETE /api/treasury/operational-expenses/{id}`: **204**; 404 si no existe para el
-  tenant. `DELETE` y no un `/annul` porque el registro desaparece, no queda en estado
-  `ANULADA`.
+* `GET /api/treasury/accounts/{id}/movements`: 404 si la cuenta no es del tenant
+* `GET /api/treasury/movements?accountId=&category=&desde=&hasta=`: el libro del tenant,
+  todos los filtros opcionales, del mas reciente al mas antiguo
+* `POST /api/treasury/movements`: movimiento manual. Cuerpo `MovementRequest`:
+  `accountId`, `category` (solo `GASTO_OPERATIVO` o `INGRESO_OCASIONAL`, otra es 400),
+  `concept`, `amount`, `date` (opcional, hoy por defecto) y `notes` (opcional)
+* `PUT /api/treasury/movements/{id}`: mismo cuerpo; la `category` tiene que ser la que ya
+  tenia (si no, 400). 404 si no es del tenant. `PUT` y no `PATCH` porque el cuerpo trae
+  el movimiento completo, como el formulario de Autollantas
+* `DELETE /api/treasury/movements/{id}`: **204**; 404 si no es del tenant. `DELETE` y no
+  un `/annul` porque el registro desaparece
+* `POST /api/treasury/transfers`: mismo cuerpo que antes (`originAccountId`,
+  `destinationAccountId`, `concept`, `amount`); la respuesta lleva `outgoingMovementId` e
+  `incomingMovementId`
 * `GET /api/treasury/balance` (balance global)
 
+Desaparecieron `/api/treasury/occasional-incomes` y `/api/treasury/operational-expenses`.
+
 Las respuestas van siempre por DTO (`AccountResponse`, `MovementResponse`,
-`TransferResponse`, `OccasionalIncomeResponse`, `OperationalExpenseResponse`,
-`BalanceResponse`), nunca la entidad JPA.
-`MovementResponse` incluye `sourceType` (como `String`) y `sourceId`, los dos null en los
-movimientos sueltos, para que el cliente distinga en el listado de que viene cada renglon.
+`TransferResponse`, `BalanceResponse`), nunca la entidad JPA. `MovementResponse` expone
+`id`, `accountId`, `accountName`, `type`, `category`, `concept`, `amount`, `date`,
+`notes`, `sourceType`, `sourceId` y `relatedMovementId`.
 
 **Semilla de desarrollo.** `DevDataInitializer` crea ademas las 2 cuentas por defecto de
 Autollantas para el tenant `demo`: `Caja General` (`CASH`) y `Bancolombia` (`BANK`), las
@@ -493,7 +473,7 @@ dos con saldo inicial 0.
 
 Terceros: la persona o empresa con la que el taller comercia. Unifica el cliente de una
 venta y el proveedor de una compra (paso 1 del refactor de normalizacion, ver
-[04-DATA-MODEL.md](../04-DATA-MODEL.md), TERCEROS). No tiene controller propio todavia.
+[04-DATA-MODEL.md](04-DATA-MODEL.md), TERCEROS). No tiene controller propio todavia.
 
 **Entidad** `Counterparty` (`TERCEROS`):
 
@@ -765,10 +745,12 @@ operativos entraron como parte de Treasury. Migrado desde
 `reporting/service/DashboardService` y `ReportService.buildReporteIva` de Autollantas.
 
 **No tiene entidades propias ni escribe nada.** Agrega los datos de todos los modulos
-anteriores: `Sale` y `SaleDetail` (Sales), `Purchase` (Purchases), `OperationalExpense` y
-`OccasionalIncome` (Treasury), y la categoria de `Product` (Inventory). Las consultas viven
-en los repositorios de cada modulo (`sumTotalByStatusNot...`, `findBy...DateBetween...`),
-no en `reporting/repository`, que sigue vacio: la consulta pertenece a la entidad que lee.
+anteriores: `Sale` y `SaleDetail` (Sales), `Purchase` (Purchases), los `Movement` de
+categoria `GASTO_OPERATIVO` e `INGRESO_OCASIONAL` (Treasury) y la categoria de `Product`
+(Inventory). Las consultas viven en el modulo dueno de cada entidad
+(`sumTotalByStatusNot...`, `findBy...DateBetween...`; en Treasury, `TreasuryService.
+sumarPorCategoria` y `buscarMovimientos`), no en `reporting/repository`, que sigue vacio:
+la consulta pertenece a la entidad que lee.
 El aislamiento por tenant lo da el filtro de Hibernate, porque todas son consultas JPQL o
 derivadas; ninguna pasa por `findById`.
 
@@ -782,7 +764,7 @@ eliminan, y al eliminarse desaparecen solos.
 
 * `getGlobalKpis()`: los 5 KPIs sobre todo el historico del tenant.
 * `getPeriodKpis(desde, hasta)`: los mismos 5, por `invoiceDate` de la factura o `date`
-  del gasto dentro de `[desde, hasta]`, ambos inclusive. Dos metodos y dos consultas por
+  del movimiento de gasto dentro de `[desde, hasta]`, ambos inclusive. Dos metodos y dos consultas por
   cifra, no uno con fechas opcionales: un `(:desde IS NULL OR ...)` en JPQL da problemas de
   tipado en PostgreSQL.
 
@@ -790,7 +772,7 @@ eliminan, y al eliminarse desaparecen solos.
   totalSales        = suma(Sale.total)            sin ANULADA
   totalPurchases    = suma(Purchase.total)        sin ANULADA
   grossProfit       = totalSales - totalPurchases
-  operatingExpenses = suma(OperationalExpense.amount)
+  operatingExpenses = suma(Movement.amount)       categoria GASTO_OPERATIVO
   netProfit         = grossProfit - operatingExpenses
   ```
 
@@ -798,8 +780,10 @@ eliminan, y al eliminarse desaparecen solos.
   entran en ningun KPI.
 * `getMovements(desde, hasta)`: ventas, compras, gastos e ingresos ocasionales del rango
   como renglones (`VENTA`, `COMPRA`, `GASTO`, `INGRESO`), del mas reciente al mas antiguo y
-  cortado en `MAX_MOVEMENTS` (100), igual que Autollantas. No son `Movement` de tesoreria:
-  son los documentos de negocio. Una venta a credito aparece aunque no haya movido caja.
+  cortado en `MAX_MOVEMENTS` (100), igual que Autollantas. `VENTA` y `COMPRA` salen de las
+  facturas, no de sus movimientos: una venta a credito aparece aunque no haya movido caja.
+  `GASTO` e `INGRESO` salen de los movimientos `GASTO_OPERATIVO` e `INGRESO_OCASIONAL`, y
+  su `sourceId` es el id del movimiento. Las transferencias no aparecen.
 * `buildReporteIva(desde, hasta)`: por cada linea de venta no anulada del rango, agrupa
   por nombre de categoria del producto:
 

@@ -168,7 +168,7 @@ class TreasuryTenantIsolationTest {
                         .header("Authorization", "Bearer " + tokenUno)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"accountId":%d,"type":"INGRESO","concept":"Venta","amount":50000}
+                                {"accountId":%d,"category":"INGRESO_OCASIONAL","concept":"Venta","amount":50000}
                                 """.formatted(cuentaDeUno)))
                 .andExpect(status().isCreated());
 
@@ -197,8 +197,8 @@ class TreasuryTenantIsolationTest {
     }
 
     /**
-     * El endpoint de movimientos tiene que mostrar tambien los que genera una
-     * transferencia, con su (sourceType, sourceId). Ver 03-DECISIONS.md.
+     * El endpoint de movimientos tiene que mostrar tambien las dos patas de una
+     * transferencia, de categoria TRANSFERENCIA, con el INGRESO apuntando al EGRESO.
      */
     @Test
     void elListadoDeMovimientosMuestraLosGeneradosPorUnaTransferencia() throws Exception {
@@ -212,8 +212,11 @@ class TreasuryTenantIsolationTest {
                                 {"originAccountId":%d,"destinationAccountId":%d,"concept":"Consignacion del dia","amount":10000}
                                 """.formatted(cajaGeneral, bancolombia)))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.concept").value("Consignacion del dia"))
+                .andExpect(jsonPath("$.amount").value(10000.0))
                 .andReturn();
-        Integer transferId = JsonPath.read(creada.getResponse().getContentAsString(), "$.id");
+        Integer egresoId = JsonPath.read(creada.getResponse().getContentAsString(), "$.outgoingMovementId");
+        Integer ingresoId = JsonPath.read(creada.getResponse().getContentAsString(), "$.incomingMovementId");
 
         mockMvc.perform(get("/api/treasury/accounts/" + cajaGeneral + "/movements")
                         .header("Authorization", "Bearer " + tokenUno))
@@ -221,9 +224,11 @@ class TreasuryTenantIsolationTest {
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].type").value("EGRESO"))
                 .andExpect(jsonPath("$[0].amount").value(10000.0))
+                .andExpect(jsonPath("$[0].id").value(egresoId))
                 .andExpect(jsonPath("$[0].concept").value("Transferencia a Bancolombia"))
-                .andExpect(jsonPath("$[0].sourceType").value("TRANSFER"))
-                .andExpect(jsonPath("$[0].sourceId").value(transferId));
+                .andExpect(jsonPath("$[0].category").value("TRANSFERENCIA"))
+                .andExpect(jsonPath("$[0].notes").value("Consignacion del dia"))
+                .andExpect(jsonPath("$[0].relatedMovementId").doesNotExist());
 
         mockMvc.perform(get("/api/treasury/accounts/" + bancolombia + "/movements")
                         .header("Authorization", "Bearer " + tokenUno))
@@ -231,14 +236,89 @@ class TreasuryTenantIsolationTest {
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].type").value("INGRESO"))
                 .andExpect(jsonPath("$[0].amount").value(10000.0))
+                .andExpect(jsonPath("$[0].id").value(ingresoId))
                 .andExpect(jsonPath("$[0].concept").value("Transferencia desde Caja General"))
-                .andExpect(jsonPath("$[0].sourceType").value("TRANSFER"))
-                .andExpect(jsonPath("$[0].sourceId").value(transferId));
+                .andExpect(jsonPath("$[0].category").value("TRANSFERENCIA"))
+                .andExpect(jsonPath("$[0].relatedMovementId").value(egresoId));
+    }
+
+    private void registrar(String token, Long cuenta, String categoria, String concepto, int monto, String fecha)
+            throws Exception {
+        mockMvc.perform(post("/api/treasury/movements")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"accountId":%d,"category":"%s","concept":"%s","amount":%d,"date":"%s"}
+                                """.formatted(cuenta, categoria, concepto, monto, fecha)))
+                .andExpect(status().isCreated());
+    }
+
+    private List<String> conceptos(String token, String... filtros) throws Exception {
+        var peticion = get("/api/treasury/movements").header("Authorization", "Bearer " + token);
+        for (int i = 0; i < filtros.length; i += 2) {
+            peticion.param(filtros[i], filtros[i + 1]);
+        }
+        MvcResult result = mockMvc.perform(peticion).andExpect(status().isOk()).andReturn();
+        return JsonPath.read(result.getResponse().getContentAsString(), "$[*].concept");
+    }
+
+    @Test
+    void elLibroDeMovimientosFiltraPorCuentaCategoriaYRangoSinMostrarOtroTenant() throws Exception {
+        Long caja = crearCuenta(tokenUno, "Caja General", "CASH");
+        Long banco = crearCuenta(tokenUno, "Bancolombia", "BANK");
+        Long cajaAjena = crearCuenta(tokenDos, "Caja General", "CASH");
+
+        registrar(tokenUno, caja, "INGRESO_OCASIONAL", "Chatarra agosto", 30000, "2026-08-20");
+        registrar(tokenUno, caja, "GASTO_OPERATIVO", "Arriendo septiembre", 10000, "2026-09-05");
+        registrar(tokenUno, banco, "INGRESO_OCASIONAL", "Reintegro septiembre", 5000, "2026-09-10");
+        registrar(tokenDos, cajaAjena, "INGRESO_OCASIONAL", "Ajeno", 99000, "2026-09-10");
+
+        // Sin filtros: todo lo del tenant, del mas reciente al mas antiguo, nada del otro.
+        assertThat(conceptos(tokenUno))
+                .containsExactly("Reintegro septiembre", "Arriendo septiembre", "Chatarra agosto");
+        assertThat(conceptos(tokenUno, "accountId", caja.toString()))
+                .containsExactly("Arriendo septiembre", "Chatarra agosto");
+        assertThat(conceptos(tokenUno, "category", "INGRESO_OCASIONAL"))
+                .containsExactly("Reintegro septiembre", "Chatarra agosto");
+        assertThat(conceptos(tokenUno, "desde", "2026-09-01", "hasta", "2026-09-30"))
+                .containsExactly("Reintegro septiembre", "Arriendo septiembre");
+        assertThat(conceptos(tokenUno, "accountId", caja.toString(), "category", "GASTO_OPERATIVO",
+                "desde", "2026-09-01", "hasta", "2026-09-30"))
+                .containsExactly("Arriendo septiembre");
+
+        // Filtrar por la cuenta del otro tenant no la destapa.
+        assertThat(conceptos(tokenUno, "accountId", cajaAjena.toString())).isEmpty();
+        assertThat(conceptos(tokenDos)).containsExactly("Ajeno");
+    }
+
+    @Test
+    void crearUnMovimientoManualConUnaCategoriaQueNoEsManualResponde400() throws Exception {
+        Long caja = crearCuenta(tokenUno, "Caja General", "CASH");
+
+        for (String categoria : List.of("PAGO_COMPRA", "RECAUDO_VENTA", "TRANSFERENCIA")) {
+            mockMvc.perform(post("/api/treasury/movements")
+                            .header("Authorization", "Bearer " + tokenUno)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"accountId":%d,"category":"%s","concept":"Trampa","amount":1000}
+                                    """.formatted(caja, categoria)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("Un movimiento manual es GASTO_OPERATIVO o "
+                            + "INGRESO_OCASIONAL; " + categoria + " se gestiona desde su operacion"));
+        }
+
+        assertThat(conceptos(tokenUno)).isEmpty();
+        mockMvc.perform(get("/api/treasury/balance").header("Authorization", "Bearer " + tokenUno))
+                .andExpect(jsonPath("$.total").value(0.0));
     }
 
     @Test
     void laTesoreriaExigeAutenticacion() throws Exception {
         mockMvc.perform(get("/api/treasury/accounts")).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/treasury/balance")).andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/treasury/transfers")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
     }
 }

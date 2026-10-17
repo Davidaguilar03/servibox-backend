@@ -12,6 +12,7 @@ import com.servibox.backend.sales.service.InsufficientStockException;
 import com.servibox.backend.sales.service.InvalidSaleOperationException;
 import com.servibox.backend.treasury.service.DuplicateAccountNameException;
 import com.servibox.backend.treasury.service.InvalidTransferException;
+import com.servibox.backend.treasury.service.InvalidMovementOperationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -92,6 +93,12 @@ public class GlobalExceptionHandler {
     /** Tercero que no sirve para la operacion: rol equivocado o datos obligatorios vacios. */
     @ExceptionHandler(InvalidCounterpartyException.class)
     public ResponseEntity<ErrorResponse> manejarTerceroInvalido(InvalidCounterpartyException ex) {
+        return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** Operacion manual sobre un movimiento que se gestiona desde su operacion. */
+    @ExceptionHandler(InvalidMovementOperationException.class)
+    public ResponseEntity<ErrorResponse> manejarMovimientoInvalido(InvalidMovementOperationException ex) {
         return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
