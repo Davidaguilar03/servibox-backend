@@ -24,6 +24,7 @@ import com.servibox.backend.tenant.Tenant;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.tenant.TenantRepository;
 import com.servibox.backend.treasury.entity.Account;
+import com.servibox.backend.treasury.entity.Movement;
 import com.servibox.backend.treasury.service.TreasuryService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -203,7 +204,7 @@ class ReportingTest {
         t.gastar("Arriendo", HOY, 50.0);
         t.gastar("Servicios", HOY, 30.0);
         // Un ingreso ocasional no es venta: no entra en ningun KPI.
-        treasuryService.registrarIngresoOcasional(t.caja, "Chatarra", 1000.0, HOY);
+        treasuryService.registrarIngresoOcasional(t.caja, "Chatarra", 1000.0, HOY, null);
 
         KpisResponse kpis = reportingService.getGlobalKpis();
 
@@ -313,7 +314,7 @@ class ReportingTest {
         Sale venta = t.vender("FV-1", LocalDate.of(2026, 9, 10), t.llanta, 1, 100.0);
         Purchase compra = t.comprar("FC-1", LocalDate.of(2026, 9, 12), t.llanta, 1, 100.0);
         t.gastar("Arriendo", LocalDate.of(2026, 9, 5), 50.0);
-        treasuryService.registrarIngresoOcasional(t.caja, "Chatarra", 20.0, LocalDate.of(2026, 9, 14));
+        treasuryService.registrarIngresoOcasional(t.caja, "Chatarra", 20.0, LocalDate.of(2026, 9, 14), null);
 
         List<MovementSummaryResponse> movimientos =
                 reportingService.getMovements(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
@@ -325,6 +326,42 @@ class ReportingTest {
         assertThat(movimientos.get(2).sourceId()).isEqualTo(venta.getId());
         assertThat(movimientos.get(2).amount()).isCloseTo(119.0, within(DELTA));
         assertThat(movimientos.get(3).accountName()).isEqualTo("Caja General");
+    }
+
+    /**
+     * Gastos e ingresos ocasionales no tienen tabla propia: salen de los movimientos de su
+     * categoria, con el id del movimiento como sourceId. Una transferencia no es ni gasto
+     * ni ingreso, y editar o eliminar el movimiento se refleja en el reporte.
+     */
+    @Test
+    void gastosEIngresosOcasionalesSalenDeLosMovimientosDeSuCategoria() {
+        Taller t = new Taller(tenantUno);
+        LocalDate dia = LocalDate.of(2026, 9, 10);
+        Movement gasto = treasuryService.registrarGastoOperativo(t.caja, "Arriendo", 50.0, dia, null);
+        Movement ingreso = treasuryService.registrarIngresoOcasional(t.caja, "Chatarra", 20.0, dia, null);
+        Account banco = fixture.crearCuenta("Banco");
+        treasuryService.registrarTransferencia(t.caja, banco, "Consignacion", 10.0, dia);
+
+        List<MovementSummaryResponse> renglones = reportingService.getMovements(dia, dia);
+        assertThat(renglones).extracting(MovementSummaryResponse::type)
+                .containsExactlyInAnyOrder("GASTO", "INGRESO");
+        assertThat(renglones).filteredOn(r -> r.type().equals("GASTO")).singleElement()
+                .satisfies(r -> {
+                    assertThat(r.sourceId()).isEqualTo(gasto.getId());
+                    assertThat(r.concept()).isEqualTo("Arriendo");
+                    assertThat(r.accountName()).isEqualTo("Caja General");
+                });
+        assertThat(renglones).filteredOn(r -> r.type().equals("INGRESO")).singleElement()
+                .satisfies(r -> assertThat(r.sourceId()).isEqualTo(ingreso.getId()));
+        assertThat(reportingService.getPeriodKpis(dia, dia).operatingExpenses()).isCloseTo(50.0, within(DELTA));
+
+        treasuryService.editarMovimientoManual(gasto.getId(), t.caja, "Arriendo", 70.0, dia, null);
+        assertThat(reportingService.getGlobalKpis().operatingExpenses()).isCloseTo(70.0, within(DELTA));
+
+        treasuryService.eliminarMovimientoManual(gasto.getId());
+        assertThat(reportingService.getGlobalKpis().operatingExpenses()).isCloseTo(0.0, within(DELTA));
+        assertThat(reportingService.getMovements(dia, dia)).extracting(MovementSummaryResponse::type)
+                .containsExactly("INGRESO");
     }
 
     // ---- Reporte de IVA ----

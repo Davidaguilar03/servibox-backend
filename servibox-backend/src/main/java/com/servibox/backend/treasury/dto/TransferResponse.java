@@ -1,11 +1,17 @@
 package com.servibox.backend.treasury.dto;
 
-import com.servibox.backend.treasury.entity.Transfer;
+import com.servibox.backend.treasury.entity.Movement;
+import com.servibox.backend.treasury.service.TreasuryService;
 
 import java.time.LocalDate;
 
+/**
+ * Una transferencia no tiene fila propia: son sus dos movimientos. outgoingMovementId es
+ * la pata EGRESO del origen e incomingMovementId la pata INGRESO del destino.
+ */
 public record TransferResponse(
-        Long id,
+        Long outgoingMovementId,
+        Long incomingMovementId,
         Long originAccountId,
         String originAccountName,
         Long destinationAccountId,
@@ -15,16 +21,19 @@ public record TransferResponse(
         LocalDate date
 ) {
 
-    public static TransferResponse from(Transfer transfer) {
+    public static TransferResponse from(TreasuryService.Transferencia transferencia) {
+        Movement egreso = transferencia.egreso();
+        Movement ingreso = transferencia.ingreso();
         return new TransferResponse(
-                transfer.getId(),
-                transfer.getOriginAccount() != null ? transfer.getOriginAccount().getId() : null,
-                transfer.getOriginAccount() != null ? transfer.getOriginAccount().getName() : null,
-                transfer.getDestinationAccount() != null ? transfer.getDestinationAccount().getId() : null,
-                transfer.getDestinationAccount() != null ? transfer.getDestinationAccount().getName() : null,
-                transfer.getConcept(),
-                transfer.getAmount(),
-                transfer.getDate()
+                egreso.getId(),
+                ingreso.getId(),
+                egreso.getAccount().getId(),
+                egreso.getAccount().getName(),
+                ingreso.getAccount().getId(),
+                ingreso.getAccount().getName(),
+                egreso.getNotes(),
+                egreso.getAmount(),
+                egreso.getDate()
         );
     }
 }

@@ -1,22 +1,19 @@
 package com.servibox.backend.treasury.entity;
 
 /**
- * De donde salio un movimiento automatico. Junto con Movement.sourceId forma el par
- * (tipo, id) que reemplazo a las cuatro relaciones ManyToOne opcionales que habia antes.
+ * Factura que genero un movimiento de venta o de compra. Junto con Movement.sourceId forma
+ * el par (tipo, id) con el que se enlazan hoy los movimientos RECAUDO_VENTA y PAGO_COMPRA.
  *
- * **Agregar un origen nuevo es agregar un valor aqui y nada mas.** No hay columna nueva,
- * ni migracion de esquema, ni un parametro mas en aplicarMovimiento. Ese era justamente el
- * problema del diseno anterior. Ver 03-DECISIONS.md.
+ * **Desaparece en el paso 3 del refactor de normalizacion**, cuando esos movimientos pasen
+ * a enlazarse con las claves foraneas `id_venta` / `id_compra` del diccionario. Los
+ * origenes TRANSFER, OCCASIONAL_INCOME y OPERATIONAL_EXPENSE ya se quitaron en el paso 2:
+ * esos registros ahora son movimientos con categoria. Ver 03-DECISIONS.md.
  *
- * El id al que apunta sourceId se interpreta segun este tipo: SALE es un id de Sale,
- * PURCHASE de Purchase, y asi. No hay clave foranea que lo garantice; la garantia esta en
- * que todo Movement se crea desde un metodo de TreasuryService que recibe la entidad
- * tipada, nunca un id suelto.
+ * El id al que apunta sourceId se interpreta segun este tipo: SALE es un id de Sale y
+ * PURCHASE de Purchase. No hay clave foranea que lo garantice; la garantia esta en que
+ * todo Movement se crea desde un metodo de TreasuryService que recibe la entidad tipada.
  */
 public enum MovementSourceType {
-    TRANSFER,
     SALE,
-    PURCHASE,
-    OCCASIONAL_INCOME,
-    OPERATIONAL_EXPENSE
+    PURCHASE
 }

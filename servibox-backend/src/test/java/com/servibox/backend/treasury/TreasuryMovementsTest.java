@@ -1,14 +1,16 @@
 package com.servibox.backend.treasury;
 
+import com.servibox.backend.shared.ResourceNotFoundException;
 import com.servibox.backend.tenant.Tenant;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.tenant.TenantRepository;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.AccountType;
 import com.servibox.backend.treasury.entity.Movement;
-import com.servibox.backend.treasury.entity.MovementSourceType;
+import com.servibox.backend.treasury.entity.MovementCategory;
 import com.servibox.backend.treasury.entity.MovementType;
-import com.servibox.backend.treasury.entity.Transfer;
+import com.servibox.backend.treasury.repository.MovementRepository;
+import com.servibox.backend.treasury.service.InvalidMovementOperationException;
 import com.servibox.backend.treasury.service.InvalidTransferException;
 import com.servibox.backend.treasury.service.TreasuryService;
 import org.junit.jupiter.api.AfterEach;
@@ -16,16 +18,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Movimientos y transferencias sobre el saldo real de las cuentas. El invariante que
- * importa: un movimiento cambia el balance global, una transferencia no.
+ * El libro de movimientos: saldos, transferencias como dos movimientos y lo que la base y
+ * el service impiden.
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -33,6 +37,9 @@ class TreasuryMovementsTest {
 
     @Autowired
     private TreasuryService treasuryService;
+
+    @Autowired
+    private MovementRepository movementRepository;
 
     @Autowired
     private TenantRepository tenantRepository;
@@ -70,43 +77,52 @@ class TreasuryMovementsTest {
         return treasuryService.findAccountById(cuenta.getId()).orElseThrow().getCurrentBalance();
     }
 
+    private void fondear(Account cuenta, double monto) {
+        treasuryService.registrarIngresoOcasional(cuenta, "Saldo de apertura", monto, null, null);
+    }
+
+    private List<Movement> todos() {
+        return treasuryService.buscarMovimientos(null, null, null, null);
+    }
+
     @Test
     void unIngresoSumaAlSaldoYUnEgresoResta() {
         assertThat(saldoDe(cuentaA)).isEqualTo(0.0);
 
-        treasuryService.registrarMovimiento(cuentaA, MovementType.INGRESO, "Venta de contado", 50000.0);
+        treasuryService.registrarIngresoOcasional(cuentaA, "Venta de chatarra", 50000.0, null, null);
         assertThat(saldoDe(cuentaA)).isEqualTo(50000.0);
 
-        treasuryService.registrarMovimiento(cuentaA, MovementType.EGRESO, "Pago de servicios", 20000.0);
+        treasuryService.registrarGastoOperativo(cuentaA, "Pago de servicios", 20000.0, null, null);
         assertThat(saldoDe(cuentaA)).isEqualTo(30000.0);
     }
 
     @Test
     void elMovimientoQuedaGuardadoYAsociadoASuCuenta() {
-        Movement movimiento = treasuryService.registrarMovimiento(
-                cuentaA, MovementType.INGRESO, "Venta de contado", 50000.0);
+        Movement movimiento = treasuryService.registrarIngresoOcasional(
+                cuentaA, "Venta de chatarra", 50000.0, null, null);
 
         assertThat(movimiento.getId()).isNotNull();
         assertThat(movimiento.getType()).isEqualTo(MovementType.INGRESO);
-        assertThat(movimiento.getConcept()).isEqualTo("Venta de contado");
-        assertThat(movimiento.getDate()).isNotNull();
+        assertThat(movimiento.getCategory()).isEqualTo(MovementCategory.INGRESO_OCASIONAL);
+        assertThat(movimiento.getConcept()).isEqualTo("Venta de chatarra");
+        assertThat(movimiento.getDate()).isEqualTo(LocalDate.now());
 
         assertThat(treasuryService.findMovementsByAccountId(cuentaA.getId()))
                 .extracting(Movement::getConcept)
-                .containsExactly("Venta de contado");
+                .containsExactly("Venta de chatarra");
     }
 
     @Test
     void unaTransferenciaDebitaElOrigenAcreditaElDestinoYConservaElDinero() {
-        treasuryService.registrarMovimiento(cuentaA, MovementType.INGRESO, "Saldo de apertura", 50000.0);
-        treasuryService.registrarMovimiento(cuentaA, MovementType.EGRESO, "Pago de servicios", 20000.0);
+        fondear(cuentaA, 50000.0);
+        treasuryService.registrarGastoOperativo(cuentaA, "Pago de servicios", 20000.0, null, null);
         assertThat(saldoDe(cuentaA)).isEqualTo(30000.0);
         assertThat(saldoDe(cuentaB)).isEqualTo(0.0);
 
         double totalAntes = treasuryService.balanceGlobal();
 
-        Transfer transferencia = treasuryService.registrarTransferencia(
-                cuentaA, cuentaB, "Consignacion del dia", 10000.0);
+        TreasuryService.Transferencia transferencia = treasuryService.registrarTransferencia(
+                cuentaA, cuentaB, "Consignacion del dia", 10000.0, null);
 
         assertThat(saldoDe(cuentaA)).isEqualTo(20000.0);
         assertThat(saldoDe(cuentaB)).isEqualTo(10000.0);
@@ -115,64 +131,66 @@ class TreasuryMovementsTest {
         assertThat(saldoDe(cuentaA) + saldoDe(cuentaB)).isEqualTo(30000.0);
         assertThat(treasuryService.balanceGlobal()).isEqualTo(totalAntes);
 
-        assertThat(transferencia.getId()).isNotNull();
-        assertThat(transferencia.getOriginAccount().getId()).isEqualTo(cuentaA.getId());
-        assertThat(transferencia.getDestinationAccount().getId()).isEqualTo(cuentaB.getId());
+        assertThat(transferencia.egreso().getAccount().getId()).isEqualTo(cuentaA.getId());
+        assertThat(transferencia.ingreso().getAccount().getId()).isEqualTo(cuentaB.getId());
     }
 
     /**
-     * La transferencia deja rastro en el historial de las dos cuentas. Antes movia los
-     * saldos directamente y no generaba ningun Movement, asi que el extracto de una
-     * cuenta no explicaba todos sus cambios de saldo. Ver 03-DECISIONS.md.
+     * Una transferencia no tiene tabla propia: son un EGRESO y un INGRESO de categoria
+     * TRANSFERENCIA, y el INGRESO apunta al EGRESO. La suma de saldos no cambia.
      */
     @Test
-    void unaTransferenciaGeneraElEgresoYElIngresoApuntandoAlTransfer() {
-        treasuryService.registrarMovimiento(cuentaA, MovementType.INGRESO, "Saldo de apertura", 30000.0);
+    void unaTransferenciaSonDosMovimientosYElIngresoApuntaAlEgreso() {
+        fondear(cuentaA, 30000.0);
+        double sumaAntes = saldoDe(cuentaA) + saldoDe(cuentaB);
+        LocalDate fecha = LocalDate.now().minusDays(2);
 
-        Transfer transferencia = treasuryService.registrarTransferencia(
-                cuentaA, cuentaB, "Consignacion del dia", 10000.0);
+        TreasuryService.Transferencia transferencia = treasuryService.registrarTransferencia(
+                cuentaA, cuentaB, "Consignacion del dia", 10000.0, fecha);
 
-        Movement egreso = treasuryService.findMovementsByAccountId(cuentaA.getId()).stream()
-                .filter(m -> m.getSourceType() == MovementSourceType.TRANSFER)
-                .findFirst()
-                .orElseThrow();
+        Movement egreso = treasuryService.findMovementById(transferencia.egreso().getId()).orElseThrow();
         assertThat(egreso.getType()).isEqualTo(MovementType.EGRESO);
+        assertThat(egreso.getCategory()).isEqualTo(MovementCategory.TRANSFERENCIA);
         assertThat(egreso.getAmount()).isEqualTo(10000.0);
         assertThat(egreso.getConcept()).isEqualTo("Transferencia a Bancolombia");
-        assertThat(egreso.getSourceId()).isEqualTo(transferencia.getId());
+        assertThat(egreso.getNotes()).isEqualTo("Consignacion del dia");
+        assertThat(egreso.getDate()).isEqualTo(fecha);
         assertThat(egreso.getAccount().getId()).isEqualTo(cuentaA.getId());
+        assertThat(egreso.getRelatedMovement()).isNull();
+        assertThat(egreso.getSourceType()).isNull();
 
         List<Movement> deB = treasuryService.findMovementsByAccountId(cuentaB.getId());
-        assertThat(deB).hasSize(1);
-        Movement ingreso = deB.get(0);
-        assertThat(ingreso.getType()).isEqualTo(MovementType.INGRESO);
-        assertThat(ingreso.getAmount()).isEqualTo(10000.0);
-        assertThat(ingreso.getConcept()).isEqualTo("Transferencia desde Caja General");
-        assertThat(ingreso.getSourceType()).isEqualTo(MovementSourceType.TRANSFER);
-        assertThat(ingreso.getSourceId()).isEqualTo(transferencia.getId());
-        assertThat(ingreso.getAccount().getId()).isEqualTo(cuentaB.getId());
+        assertThat(deB).singleElement().satisfies(ingreso -> {
+            assertThat(ingreso.getId()).isEqualTo(transferencia.ingreso().getId());
+            assertThat(ingreso.getType()).isEqualTo(MovementType.INGRESO);
+            assertThat(ingreso.getCategory()).isEqualTo(MovementCategory.TRANSFERENCIA);
+            assertThat(ingreso.getAmount()).isEqualTo(10000.0);
+            assertThat(ingreso.getConcept()).isEqualTo("Transferencia desde Caja General");
+            assertThat(ingreso.getDate()).isEqualTo(fecha);
+            assertThat(ingreso.getRelatedMovement().getId()).isEqualTo(egreso.getId());
+        });
 
-        // Los dos movimientos salen del mismo Transfer.
-        assertThat(egreso.getSourceId()).isEqualTo(ingreso.getSourceId());
+        assertThat(saldoDe(cuentaA) + saldoDe(cuentaB)).isEqualTo(sumaAntes);
     }
 
-    /** Un ingreso o egreso registrado a mano no viene de ninguna transferencia. */
+    /** Un movimiento manual no viene de ninguna factura. */
     @Test
-    void unMovimientoSueltoNoTieneTransferDeOrigen() {
-        treasuryService.registrarMovimiento(cuentaA, MovementType.INGRESO, "Venta de contado", 50000.0);
+    void unMovimientoManualNoTieneFacturaDeOrigen() {
+        treasuryService.registrarIngresoOcasional(cuentaA, "Venta de chatarra", 50000.0, null, null);
 
         assertThat(treasuryService.findMovementsByAccountId(cuentaA.getId()))
                 .singleElement()
                 .satisfies(m -> {
                     assertThat(m.getSourceType()).isNull();
                     assertThat(m.getSourceId()).isNull();
+                    assertThat(m.getRelatedMovement()).isNull();
                 });
     }
 
     /** Una transferencia rechazada no deja movimientos colgando. */
     @Test
     void unaTransferenciaRechazadaNoGeneraMovimientos() {
-        assertThatThrownBy(() -> treasuryService.registrarTransferencia(cuentaA, cuentaB, "Cero", 0.0))
+        assertThatThrownBy(() -> treasuryService.registrarTransferencia(cuentaA, cuentaB, "Cero", 0.0, null))
                 .isInstanceOf(InvalidTransferException.class);
 
         assertThat(treasuryService.findMovementsByAccountId(cuentaA.getId())).isEmpty();
@@ -182,27 +200,27 @@ class TreasuryMovementsTest {
     @Test
     void rechazaTransferirUnaCuentaASiMisma() {
         assertThatThrownBy(() -> treasuryService.registrarTransferencia(
-                cuentaA, cuentaA, "Sin sentido", 10000.0))
+                cuentaA, cuentaA, "Sin sentido", 10000.0, null))
                 .isInstanceOf(InvalidTransferException.class)
                 .hasMessage("La cuenta origen y la cuenta destino no pueden ser la misma");
     }
 
     @Test
     void rechazaMontosCeroONegativos() {
-        assertThatThrownBy(() -> treasuryService.registrarTransferencia(cuentaA, cuentaB, "Cero", 0.0))
+        assertThatThrownBy(() -> treasuryService.registrarTransferencia(cuentaA, cuentaB, "Cero", 0.0, null))
                 .isInstanceOf(InvalidTransferException.class)
                 .hasMessage("El monto de la transferencia debe ser mayor a cero");
 
-        assertThatThrownBy(() -> treasuryService.registrarTransferencia(cuentaA, cuentaB, "Negativo", -5000.0))
+        assertThatThrownBy(() -> treasuryService.registrarTransferencia(cuentaA, cuentaB, "Negativo", -5000.0, null))
                 .isInstanceOf(InvalidTransferException.class)
                 .hasMessage("El monto de la transferencia debe ser mayor a cero");
     }
 
     @Test
     void unaTransferenciaRechazadaNoMueveNingunSaldo() {
-        treasuryService.registrarMovimiento(cuentaA, MovementType.INGRESO, "Saldo de apertura", 30000.0);
+        fondear(cuentaA, 30000.0);
 
-        assertThatThrownBy(() -> treasuryService.registrarTransferencia(cuentaA, cuentaB, "Cero", 0.0))
+        assertThatThrownBy(() -> treasuryService.registrarTransferencia(cuentaA, cuentaB, "Cero", 0.0, null))
                 .isInstanceOf(InvalidTransferException.class);
 
         assertThat(saldoDe(cuentaA)).isEqualTo(30000.0);
@@ -211,9 +229,73 @@ class TreasuryMovementsTest {
 
     @Test
     void elBalanceGlobalSumaLasCuentasDelTenantActivo() {
-        treasuryService.registrarMovimiento(cuentaA, MovementType.INGRESO, "Venta", 50000.0);
-        treasuryService.registrarMovimiento(cuentaB, MovementType.INGRESO, "Consignacion", 25000.0);
+        fondear(cuentaA, 50000.0);
+        fondear(cuentaB, 25000.0);
 
         assertThat(treasuryService.balanceGlobal()).isEqualTo(75000.0);
+    }
+
+    /** Las dos patas de una transferencia se gestionan desde la transferencia, no a mano. */
+    @Test
+    void editarOEliminarUnaPataDeTransferenciaSeRechazaSinTocarNada() {
+        fondear(cuentaA, 30000.0);
+        TreasuryService.Transferencia transferencia = treasuryService.registrarTransferencia(
+                cuentaA, cuentaB, "Consignacion", 10000.0, null);
+        List<Movement> antes = todos();
+
+        for (Movement pata : List.of(transferencia.egreso(), transferencia.ingreso())) {
+            assertThatThrownBy(() -> treasuryService.editarMovimientoManual(
+                    pata.getId(), cuentaA, "Editado", 1.0, null, null))
+                    .isInstanceOf(InvalidMovementOperationException.class)
+                    .hasMessage("El movimiento " + pata.getId()
+                            + " es de categoria TRANSFERENCIA y se gestiona desde su operacion");
+            assertThatThrownBy(() -> treasuryService.eliminarMovimientoManual(pata.getId()))
+                    .isInstanceOf(InvalidMovementOperationException.class);
+        }
+
+        assertThat(saldoDe(cuentaA)).isEqualTo(20000.0);
+        assertThat(saldoDe(cuentaB)).isEqualTo(10000.0);
+        assertThat(todos()).usingRecursiveFieldByFieldElementComparatorIgnoringFields("account", "relatedMovement")
+                .containsExactlyElementsOf(antes);
+    }
+
+    @Test
+    void editarOEliminarUnMovimientoQueNoExisteEsUn404() {
+        assertThatThrownBy(() -> treasuryService.eliminarMovimientoManual(999999L))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessage("Movimiento no encontrado: 999999");
+    }
+
+    /** La base frena un movimiento sin categoria aunque se salte el service. */
+    @Test
+    void laBaseFrenaUnMovimientoSinCategoria() {
+        Movement crudo = new Movement();
+        crudo.setAccount(cuentaA);
+        crudo.setType(MovementType.INGRESO);
+        crudo.setConcept("Sin categoria");
+        crudo.setAmount(1000.0);
+        crudo.setDate(LocalDate.now());
+
+        assertThatThrownBy(() -> movementRepository.saveAndFlush(crudo))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /** id_movimiento_relacionado es una clave foranea de verdad. */
+    @Test
+    void laBaseFrenaUnMovimientoRelacionadoQueNoExiste() {
+        Movement inexistente = new Movement();
+        inexistente.setId(999999L);
+
+        Movement crudo = new Movement();
+        crudo.setAccount(cuentaA);
+        crudo.setType(MovementType.INGRESO);
+        crudo.setCategory(MovementCategory.TRANSFERENCIA);
+        crudo.setConcept("Pata huerfana");
+        crudo.setAmount(1000.0);
+        crudo.setDate(LocalDate.now());
+        crudo.setRelatedMovement(inexistente);
+
+        assertThatThrownBy(() -> movementRepository.saveAndFlush(crudo))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 }

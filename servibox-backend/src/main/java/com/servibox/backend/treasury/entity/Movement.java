@@ -10,12 +10,15 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.ToString;
 
 import java.time.LocalDate;
 
 /**
- * Un ingreso o egreso sobre una cuenta. Cada movimiento ya viene aplicado al
- * currentBalance de su cuenta, ver TreasuryService.registrarMovimiento.
+ * El libro de movimientos de tesoreria: todo ingreso o egreso sobre una cuenta, ya
+ * aplicado a su currentBalance. Gastos operativos, ingresos ocasionales y transferencias
+ * no tienen tabla propia: son movimientos con su `category`. Ver 04-DATA-MODEL.md,
+ * MOVIMIENTOS.
  *
  * concept es una divergencia deliberada respecto de Autollantas, donde MOVIMIENTOS no
  * tiene columna de concepto y la descripcion se deriva de (tabla_origen, id_origen).
@@ -31,9 +34,15 @@ public class Movement extends TenantAwareEntity {
     @JoinColumn(name = "id_cuenta")
     private Account account;
 
+    /** Solo INGRESO o EGRESO: es lo que da el signo sobre el saldo. */
     @Enumerated(EnumType.STRING)
     @Column(name = "tipo_movimiento")
     private MovementType type;
+
+    /** De donde viene el movimiento. TRANSFERENCIA es una categoria, no un tipo. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "categoria_movimiento", length = 50, nullable = false)
+    private MovementCategory category;
 
     @Column(name = "concepto_movimiento")
     private String concept;
@@ -45,25 +54,31 @@ public class Movement extends TenantAwareEntity {
     @Column(name = "fecha_movimiento")
     private LocalDate date;
 
+    /** Observaciones libres. Opcional. */
+    @Column(name = "notas", length = 255)
+    private String notes;
+
     /**
-     * Que clase de cosa genero este movimiento, o null si es un movimiento suelto
-     * registrado a mano.
-     *
-     * Junto con sourceId reemplaza a las cuatro relaciones ManyToOne opcionales
-     * (sourceTransfer, sourceSale, sourcePurchase, sourceOccasionalIncome) que habia
-     * antes. Ver 03-DECISIONS.md.
+     * Contrapartida de una transferencia: la pata INGRESO apunta a la pata EGRESO. Null en
+     * cualquier otro movimiento. Excluido de toString y equals: es una autorreferencia.
+     */
+    @ManyToOne
+    @JoinColumn(name = "id_movimiento_relacionado")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private Movement relatedMovement;
+
+    /**
+     * Factura que genero el movimiento (SALE o PURCHASE), o null. Desaparece en el paso 3,
+     * ver MovementSourceType.
      */
     @Enumerated(EnumType.STRING)
     @Column(name = "tipo_origen_movimiento")
     private MovementSourceType sourceType;
 
     /**
-     * Id del registro que genero el movimiento, interpretado segun sourceType. Null en un
-     * movimiento suelto, y siempre acompanado de sourceType cuando no lo es.
-     *
-     * **No es una clave foranea a proposito**: apunta a tablas distintas segun el tipo. La
-     * seguridad de tipos no se pierde porque nadie escribe un Movement con un id suelto:
-     * todo pasa por metodos de TreasuryService que reciben la entidad real.
+     * Id de la factura de origen, interpretado segun sourceType. **No es una clave
+     * foranea a proposito**: apunta a tablas distintas segun el tipo.
      */
     @Column(name = "id_origen_movimiento")
     private Long sourceId;

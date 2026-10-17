@@ -77,7 +77,7 @@ class PurchasesFlowTest {
 
     /** Mete dinero en la caja para poder comprar de contado. */
     private void fondear(double monto) {
-        treasuryService.registrarMovimiento(caja, MovementType.INGRESO, "Fondeo de prueba", monto);
+        treasuryService.registrarIngresoOcasional(caja, "Fondeo de prueba", monto, null, null);
     }
 
     private Purchase comprar(String numero, PaymentType tipo, Account cuenta, int cantidad, double precio) {
