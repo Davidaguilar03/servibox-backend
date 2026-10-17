@@ -17,6 +17,7 @@ import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
 import com.servibox.backend.treasury.entity.MovementCategory;
 import com.servibox.backend.treasury.entity.MovementType;
+import com.servibox.backend.treasury.repository.MovementRepository;
 import com.servibox.backend.treasury.service.InvalidMovementOperationException;
 import com.servibox.backend.treasury.service.TreasuryService;
 import org.junit.jupiter.api.AfterEach;
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
@@ -77,6 +79,9 @@ class InvoiceMovementCategoryTest {
     @Autowired
     private TreasuryService treasuryService;
 
+    @Autowired
+    private MovementRepository movementRepository;
+
     private Product llanta;
     private Account caja;
     private Counterparty cliente;
@@ -127,7 +132,8 @@ class InvoiceMovementCategoryTest {
         assertThat(deCategoria(MovementCategory.RECAUDO_VENTA))
                 .hasSize(2)
                 .allSatisfy(m -> assertThat(m.getType()).isEqualTo(MovementType.INGRESO))
-                .extracting(Movement::getSourceId)
+                .allSatisfy(m -> assertThat(m.getPurchase()).isNull())
+                .extracting(m -> m.getSale().getId())
                 .containsExactlyInAnyOrder(contado.getId(), credito.getId());
     }
 
@@ -140,7 +146,8 @@ class InvoiceMovementCategoryTest {
         assertThat(deCategoria(MovementCategory.PAGO_COMPRA))
                 .hasSize(2)
                 .allSatisfy(m -> assertThat(m.getType()).isEqualTo(MovementType.EGRESO))
-                .extracting(Movement::getSourceId)
+                .allSatisfy(m -> assertThat(m.getSale()).isNull())
+                .extracting(m -> m.getPurchase().getId())
                 .containsExactlyInAnyOrder(contado.getId(), credito.getId());
     }
 
@@ -231,6 +238,57 @@ class InvoiceMovementCategoryTest {
         assertThat(saldoDe(caja)).isEqualTo(saldoCaja);
         assertThat(saldoDe(banco)).isEqualTo(saldoBanco);
         assertThat(filas()).containsExactlyElementsOf(filasAntes);
+    }
+
+    // ---- Lo que la base frena aunque se salte el service ----
+
+    private Movement crudo(MovementCategory categoria, MovementType tipo, Sale venta, Purchase compra) {
+        Movement movimiento = new Movement();
+        movimiento.setAccount(caja);
+        movimiento.setCategory(categoria);
+        movimiento.setType(tipo);
+        movimiento.setConcept("Insertado a mano");
+        movimiento.setAmount(1000.0);
+        movimiento.setDate(LocalDate.now());
+        movimiento.setSale(venta);
+        movimiento.setPurchase(compra);
+        return movimiento;
+    }
+
+    private void laBaseLoRechazaPor(Movement movimiento, String restriccion) {
+        assertThatThrownBy(() -> movementRepository.saveAndFlush(movimiento))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .satisfies(e -> assertThat(e.getMessage()).containsIgnoringCase(restriccion));
+    }
+
+    @Test
+    void laBaseFrenaUnMovimientoConUnaVentaQueNoExiste() {
+        Sale inexistente = new Sale();
+        inexistente.setId(999999L);
+
+        laBaseLoRechazaPor(crudo(MovementCategory.RECAUDO_VENTA, MovementType.INGRESO, inexistente, null),
+                "fk_movimiento_venta");
+    }
+
+    @Test
+    void laBaseFrenaUnMovimientoConVentaYCompraALaVez() {
+        Sale venta = vender("VEN-00005", com.servibox.backend.sales.entity.PaymentType.CREDITO, null);
+        Purchase compra = comprar("FAC-00005", com.servibox.backend.purchases.entity.PaymentType.CREDITO, null);
+
+        laBaseLoRechazaPor(crudo(MovementCategory.RECAUDO_VENTA, MovementType.INGRESO, venta, compra),
+                "ck_movimiento_factura");
+    }
+
+    @Test
+    void laBaseFrenaUnRecaudoDeVentaSinVenta() {
+        laBaseLoRechazaPor(crudo(MovementCategory.RECAUDO_VENTA, MovementType.INGRESO, null, null),
+                "ck_movimiento_factura");
+    }
+
+    @Test
+    void laBaseFrenaUnPagoDeCompraSinCompra() {
+        laBaseLoRechazaPor(crudo(MovementCategory.PAGO_COMPRA, MovementType.EGRESO, null, null),
+                "ck_movimiento_factura");
     }
 
     /** Cada fila de MOVIMIENTOS del tenant, reducida a lo que editar o eliminar cambiaria. */

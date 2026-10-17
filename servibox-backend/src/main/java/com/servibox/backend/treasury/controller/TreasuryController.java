@@ -61,14 +61,19 @@ public class TreasuryController {
                 .toList();
     }
 
-    /** Libro de movimientos del tenant, con filtros opcionales. */
+    /**
+     * Libro de movimientos activos del tenant, con filtros opcionales. Los de una factura
+     * ANULADA no salen, ni siquiera filtrando por su saleId o purchaseId.
+     */
     @GetMapping("/movements")
     public List<MovementResponse> listarMovimientos(
             @RequestParam(required = false) Long accountId,
             @RequestParam(required = false) MovementCategory category,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta) {
-        return treasuryService.buscarMovimientos(accountId, category, desde, hasta).stream()
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
+            @RequestParam(required = false) Long saleId,
+            @RequestParam(required = false) Long purchaseId) {
+        return treasuryService.buscarMovimientos(accountId, category, desde, hasta, saleId, purchaseId).stream()
                 .map(MovementResponse::from)
                 .toList();
     }

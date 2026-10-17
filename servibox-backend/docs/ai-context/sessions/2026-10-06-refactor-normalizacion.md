@@ -11,8 +11,9 @@ en cinco pasos, cada uno con `./mvnw test` completo en verde.
 - [x] **2. Movimientos con categoria.** Transferencias, ingresos ocasionales y gastos
   operativos pasan a ser movimientos con `categoria_movimiento`. Hecho el 2026-10-06, rama
   `refactor/16-unify-treasury-movements`.
-- [ ] **3. Abonos y pagos como movimientos.** Abonos y pagos pasan a ser movimientos con FK
-  a la factura (`id_venta`, `id_compra`), y anular y restaurar se redisenan.
+- [x] **3. Abonos y pagos como movimientos.** Abonos y pagos pasan a ser movimientos con FK
+  a la factura (`id_venta`, `id_compra`), y anular y restaurar se redisenan. Hecho el
+  2026-10-17, rama `refactor/17-collections-payments-as-movements`.
 - [ ] **4. Atributos y nombres.** Alinear atributos y nombres de columna con el diccionario.
 - [ ] **5. Flyway.** Migracion V1 escrita desde el diccionario.
 
@@ -60,3 +61,28 @@ en cinco pasos, cada uno con `./mvnw test` completo en verde.
 
 * Las columnas que ya existian en `MOVIMIENTOS` conservan su nombre (`concepto_movimiento`,
   `monto_movimiento`); el diccionario dice `concepto` y `monto`.
+
+## Paso 3: abonos y pagos como movimientos
+
+* `Movement` cambia `sourceType` / `sourceId` por `sale` (`id_venta`) y `purchase`
+  (`id_compra`), claves foraneas reales sin cascada, con el `CHECK`
+  `ck_movimiento_factura`. Se eliminaron `MovementSourceType`, `Collection`, `Payment`,
+  sus repositories, sus DTOs de respuesta y las tablas `RECAUDOS` y `PAGOS`.
+* Un abono es un `RECAUDO_VENTA` con `sale` y un pago un `PAGO_COMPRA` con `purchase`; el
+  contado tambien. `/collections` y `/payments` responden con `MovementResponse`, que
+  expone `saleId` y `purchaseId`.
+* `Sale` y `Purchase` ya no guardan cuenta (`id_cuenta`), ni la exponen en la respuesta.
+* Movimiento activo: el de una factura `ANULADA` es inactivo, derivado del estado con
+  `MovementSpecifications.activo()`; todos los listados y sumas lo aplican.
+  `GET /api/treasury/movements` gana `saleId` y `purchaseId`.
+* Anular revierte saldos sin borrar filas; restaurar vuelve a aplicarlos (en compras, con
+  saldo suficiente validado entero antes de escribir).
+* Reporting: la cuenta de los renglones `VENTA` / `COMPRA` sale del ultimo movimiento de
+  la factura.
+* Decisiones: [03-DECISIONS.md](../03-DECISIONS.md), entrada "Abonos y pagos son
+  movimientos, y anular deja los movimientos inactivos".
+* Limitacion conocida: el historial de movimientos de una factura anulada queda en la base
+  pero ningun endpoint lo expone.
+* Tests: 159 antes, 169 despues. `SalesRestoreTest` y `PurchasesRestoreTest` pierden el
+  test de la defensa contra movimientos vivos (ya no aplica) y ganan uno cada uno, asi que
+  quedan igual (9); `InvoiceMovementsApiTest` es nueva (4).

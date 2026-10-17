@@ -82,12 +82,14 @@ public class ReportingService {
         for (Sale venta : saleRepository.findByInvoiceDateBetweenAndStatusNot(desde, hasta, SaleStatus.ANULADA)) {
             String cliente = venta.getCustomer() != null ? venta.getCustomer().getName() : null;
             lista.add(renglon(venta.getInvoiceDate(), "VENTA", venta.getId(),
-                    concepto(venta.getInvoiceNumber(), cliente), venta.getTotal(), venta.getAccount()));
+                    concepto(venta.getInvoiceNumber(), cliente), venta.getTotal(),
+                    ultimaCuenta(treasuryService.movimientosDeVenta(venta))));
         }
         for (Purchase compra : purchaseRepository.findByInvoiceDateBetweenAndStatusNot(desde, hasta, PurchaseStatus.ANULADA)) {
             String proveedor = compra.getSupplier() != null ? compra.getSupplier().getName() : null;
             lista.add(renglon(compra.getInvoiceDate(), "COMPRA", compra.getId(),
-                    concepto(compra.getInvoiceNumber(), proveedor), compra.getTotal(), compra.getAccount()));
+                    concepto(compra.getInvoiceNumber(), proveedor), compra.getTotal(),
+                    ultimaCuenta(treasuryService.movimientosDeCompra(compra))));
         }
         for (Movement gasto : treasuryService.buscarMovimientos(null, MovementCategory.GASTO_OPERATIVO, desde, hasta)) {
             lista.add(renglon(gasto.getDate(), "GASTO", gasto.getId(),
@@ -150,6 +152,16 @@ public class ReportingService {
         if (desde.isAfter(hasta)) {
             throw new IllegalArgumentException("La fecha desde no puede ser posterior a la fecha hasta");
         }
+    }
+
+    /**
+     * La cuenta de una factura en el renglon: la de su ultimo movimiento (el contado, o el
+     * ultimo abono o pago), o null si no tiene ninguno. Es la que antes guardaba la factura
+     * en id_cuenta, que se reescribia con cada abono o pago.
+     */
+    private static Account ultimaCuenta(List<Movement> movimientosDeLaFactura) {
+        return movimientosDeLaFactura.isEmpty() ? null
+                : movimientosDeLaFactura.get(movimientosDeLaFactura.size() - 1).getAccount();
     }
 
     private static String concepto(String numero, String tercero) {

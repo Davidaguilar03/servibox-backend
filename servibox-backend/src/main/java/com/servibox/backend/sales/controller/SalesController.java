@@ -3,14 +3,13 @@ package com.servibox.backend.sales.controller;
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.sales.dto.CollectionRequest;
-import com.servibox.backend.sales.dto.CollectionResponse;
 import com.servibox.backend.sales.dto.SaleRequest;
 import com.servibox.backend.sales.dto.SaleResponse;
-import com.servibox.backend.sales.entity.Collection;
 import com.servibox.backend.sales.entity.PaymentType;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.sales.service.SalesService;
 import com.servibox.backend.shared.ResourceNotFoundException;
+import com.servibox.backend.treasury.dto.MovementResponse;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.service.TreasuryService;
 import jakarta.validation.Valid;
@@ -79,13 +78,13 @@ public class SalesController {
         return responder(venta);
     }
 
+    /** Un abono es un movimiento RECAUDO_VENTA: la respuesta es ese movimiento. */
     @PostMapping("/{id}/collections")
     @ResponseStatus(HttpStatus.CREATED)
-    public CollectionResponse registrarAbono(@PathVariable Long id,
-                                             @Valid @RequestBody CollectionRequest request) {
+    public MovementResponse registrarAbono(@PathVariable Long id,
+                                           @Valid @RequestBody CollectionRequest request) {
         facturaDeRuta(id);
-        Collection abono = salesService.registrarAbono(id, request.accountId(), request.amount());
-        return CollectionResponse.from(abono, salesService.saldoPendiente(abono.getSale()));
+        return MovementResponse.from(salesService.registrarAbono(id, request.accountId(), request.amount()));
     }
 
     @PostMapping("/{id}/annul")

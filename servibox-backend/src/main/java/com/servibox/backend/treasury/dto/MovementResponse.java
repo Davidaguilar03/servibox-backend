@@ -16,10 +16,10 @@ public record MovementResponse(
         Double amount,
         LocalDate date,
         String notes,
-        /** Factura que genero el movimiento (SALE, PURCHASE), o null. */
-        String sourceType,
-        /** Id de la factura de origen, interpretado segun sourceType. */
-        Long sourceId,
+        /** Venta de un RECAUDO_VENTA (contado o abono), o null. */
+        Long saleId,
+        /** Compra de un PAGO_COMPRA (contado o pago), o null. */
+        Long purchaseId,
         /** En la pata INGRESO de una transferencia, el id de la pata EGRESO. */
         Long relatedMovementId
 ) {
@@ -35,8 +35,8 @@ public record MovementResponse(
                 movement.getAmount(),
                 movement.getDate(),
                 movement.getNotes(),
-                movement.getSourceType() != null ? movement.getSourceType().name() : null,
-                movement.getSourceId(),
+                movement.getSale() != null ? movement.getSale().getId() : null,
+                movement.getPurchase() != null ? movement.getPurchase().getId() : null,
                 movement.getRelatedMovement() != null ? movement.getRelatedMovement().getId() : null
         );
     }

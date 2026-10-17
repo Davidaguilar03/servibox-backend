@@ -2,7 +2,6 @@ package com.servibox.backend.purchases.entity;
 
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.shared.TenantAwareEntity;
-import com.servibox.backend.treasury.entity.Account;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -21,6 +20,9 @@ import java.time.LocalDate;
  *
  * El numero de factura es unico dentro de un tenant con restriccion de base, igual que en
  * Sale y a diferencia de Autollantas, que lo valida solo en la aplicacion.
+ *
+ * No guarda cuenta: la cuenta de cada pago vive en su movimiento PAGO_COMPRA, que apunta a
+ * esta compra por id_compra.
  */
 @Entity
 @Data
@@ -51,11 +53,6 @@ public class Purchase extends TenantAwareEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "forma_pago_compra")
     private PaymentType paymentType;
-
-    /** Nullable: una compra a credito no tiene cuenta hasta que se le paga. */
-    @ManyToOne
-    @JoinColumn(name = "id_cuenta")
-    private Account account;
 
     @Column(name = "medio_pago_compra")
     private String paymentMethod;

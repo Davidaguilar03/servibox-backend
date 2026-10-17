@@ -12,6 +12,61 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-17: Abonos y pagos son movimientos, y anular deja los movimientos inactivos
+
+* Decision: paso 3 del refactor de normalizacion (ver
+  [sessions/2026-10-06-refactor-normalizacion.md](sessions/2026-10-06-refactor-normalizacion.md)).
+  * **Movement enlaza su factura con claves foraneas reales.** `sourceType` / `sourceId`
+    y `MovementSourceType` desaparecen. `Movement` gana `sale` (`id_venta`,
+    `fk_movimiento_venta`) y `purchase` (`id_compra`, `fk_movimiento_compra`), opcionales
+    y **sin cascada**: nada que tenga movimientos se borra. Coherencia en el service y en
+    la base con el `CHECK` `ck_movimiento_factura`: `RECAUDO_VENTA` lleva venta y no
+    compra, `PAGO_COMPRA` compra y no venta, las demas ninguna. Hibernate 7 lo genera desde
+    `@Table(check = @CheckConstraint(...))` y H2 lo acepta, asi que no hizo falta dejarlo
+    solo en el service.
+  * **Abonos y pagos son movimientos.** Se eliminan `Collection` y `Payment`, sus
+    repositories, sus DTOs de respuesta y las tablas `RECAUDOS` y `PAGOS`. Un abono es un
+    `RECAUDO_VENTA` con `sale`; un pago, un `PAGO_COMPRA` con `purchase`; el contado de
+    cada factura tambien. Los conceptos no cambian. Las rutas `/collections` y `/payments`
+    se conservan, con sus DTOs de entrada (`CollectionRequest`, `PaymentRequest`), y
+    responden con el `MovementResponse` creado.
+  * **La factura no guarda cuenta.** `Sale` y `Purchase` pierden `id_cuenta`, como en el
+    modelo. `crearFactura` sigue recibiendo la cuenta, obligatoria en el contado, solo para
+    crear el movimiento. `SaleResponse` y `PurchaseResponse` pierden `accountId` y
+    `accountName`. En los renglones `VENTA` / `COMPRA` de Reporting, la cuenta pasa a ser
+    la del ultimo movimiento de la factura, que es la que antes se guardaba ahi.
+  * **Saldo pendiente** = `total` menos todos los movimientos de la factura, activos o
+    no, con la tolerancia de un peso. Consecuencia: una venta o compra de contado ahora
+    tiene pendiente 0 (antes salia igual al total, porque el contado no era un abono).
+  * **Movimiento activo.** Un movimiento enlazado a una factura `ANULADA` es inactivo; se
+    deriva del estado, no se guarda. Un unico predicado, `MovementSpecifications.activo()`,
+    lo define, y pasan por el todos los listados y sumas: el extracto de una cuenta, el
+    libro (`GET /api/treasury/movements`, que gana los filtros `saleId` y `purchaseId`) y
+    `sumarPorCategoria`, que ahora suma en memoria sobre ese listado en vez de con JPQL
+    propio. Invariante: `currentBalance` = `initialBalance` + movimientos activos.
+  * **Anular no borra.** `anularFactura` y `anularCompra` revierten el saldo de la cuenta
+    de cada movimiento (`revertirSaldosDeVenta` / `...DeCompra`, sin validar), devuelven el
+    stock y dejan la factura `ANULADA`. Las filas se quedan.
+  * **Restaurar reactiva.** Vuelve a aplicar el saldo de esos mismos movimientos. En
+    compras, con la regla de saldo suficiente, simulada entera antes de escribir y
+    acumulando sobre el saldo corriente si varios egresos salen de la misma cuenta. El
+    estado se deriva igual para contado y credito: `PAGADA` si el pendiente cae en la
+    tolerancia, `PENDIENTE` si no.
+  * Se elimina la defensa de restaurar contra "movimientos vivos de una factura anulada" y
+    sus tests: los movimientos de una anulada siempre existen, asi que ya no indica datos
+    rotos.
+* Alternativas consideradas: un contra-movimiento al anular, que deja dos renglones por
+  algo que no ocurrio y obliga a decidir que hacer con ellos al restaurar; una columna
+  `activo` en `MOVIMIENTOS`, que duplica el estado de la factura y puede contradecirlo;
+  seguir borrando y recreando, que cambia los ids y obligaba a conservar `Collection` y
+  `Payment` solo para poder recrear.
+* Motivo: es lo que fija [04-DATA-MODEL.md](04-DATA-MODEL.md), "Anular y restaurar
+  facturas". Ademas, restaurar deja exactamente las mismas filas, ids incluidos, que es una
+  propiedad mas fuerte que la de antes.
+* **Limitacion conocida.** El historial de movimientos de una factura `ANULADA` queda en
+  la base pero **no se expone**: todo listado pasa por el predicado de movimiento activo,
+  incluido el filtro por `saleId` o `purchaseId`. Verlo necesitaria un endpoint propio.
+
 ## 2026-10-06: Transferencias, ingresos ocasionales y gastos operativos son movimientos con categoria
 
 * Decision: paso 2 del refactor de normalizacion (ver
@@ -97,6 +152,12 @@ Formato de cada entrada:
   (`id_tenant` en todas las tablas) en el paso de Flyway.
 
 ## 2026-10-06: Restaurar es el inverso exacto de anular
+
+> **Parcialmente SUPERADO** por "Abonos y pagos son movimientos, y anular deja los movimientos inactivos" (2026-10-17): la propiedad
+> se mantiene (y ahora con los mismos ids), pero cambia el mecanismo. Anular ya no borra
+> movimientos y restaurar ya no los recrea desde `Collection` / `Payment`: vuelve a aplicar
+> el saldo de los mismos movimientos. Ya no existe la defensa contra movimientos vivos de
+> una factura anulada.
 
 * Decision: `restaurarFactura` y `restaurarCompra` deshacen exactamente lo que hizo la
   anulacion. Lo que anular saco, restaurar lo devuelve:
@@ -406,6 +467,10 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
 
 ## 2026-09-07: El origen de un Movement pasa a ser (tipo, id)
 
+> **SUPERADO** por "Abonos y pagos son movimientos, y anular deja los movimientos inactivos" (2026-10-17): el par `(sourceType, sourceId)`
+> y `MovementSourceType` desaparecen; un movimiento enlaza su factura con las claves
+> foraneas `id_venta` / `id_compra`.
+>
 > **Parcialmente SUPERADO** por "Transferencias, ingresos ocasionales y gastos operativos son movimientos con categoria" (2026-10-06): los origenes TRANSFER, OCCASIONAL_INCOME y
 > OPERATIONAL_EXPENSE desaparecen, porque esos registros ahora son movimientos con
 > categoria. El par `(sourceType, sourceId)` sigue solo para SALE y PURCHASE, hasta el
@@ -660,6 +725,10 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
   jerarquia de origen o volver al par polimorfico con un indice compuesto.
 
 ## 2026-09-07: Anular una factura muta el balance directamente, saltandose aplicarMovimiento
+
+> **SUPERADO** por "Abonos y pagos son movimientos, y anular deja los movimientos inactivos" (2026-10-17): anular ya **no borra** los
+> movimientos de la factura; solo revierte su efecto sobre el saldo y los deja inactivos.
+> Sigue vigente que no hay contra-movimiento y que el ajuste vive en `TreasuryService`.
 
 * Decision: `TreasuryService.revertirMovimientosDeVenta(Sale)` **borra** los movimientos
   de la venta y ajusta `currentBalance` a mano, al reves de cada movimiento borrado. Es la

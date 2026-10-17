@@ -2,7 +2,6 @@ package com.servibox.backend.sales.entity;
 
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.shared.TenantAwareEntity;
-import com.servibox.backend.treasury.entity.Account;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -20,6 +19,9 @@ import java.time.LocalDate;
  * Factura de venta. El numero de factura es unico dentro de un tenant y la restriccion
  * esta en la base, a diferencia de Autollantas que solo lo valida en la aplicacion.
  * Ver 03-DECISIONS.md.
+ *
+ * No guarda cuenta: la cuenta de cada cobro vive en su movimiento RECAUDO_VENTA (el del
+ * contado o el de un abono), que apunta a esta venta por id_venta.
  */
 @Entity
 @Data
@@ -50,11 +52,6 @@ public class Sale extends TenantAwareEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "forma_pago_venta")
     private PaymentType paymentType;
-
-    /** Nullable: una factura a CREDITO todavia no tiene cuenta de cobro asignada. */
-    @ManyToOne
-    @JoinColumn(name = "id_cuenta")
-    private Account account;
 
     @Column(name = "medio_pago_venta")
     private String paymentMethod;

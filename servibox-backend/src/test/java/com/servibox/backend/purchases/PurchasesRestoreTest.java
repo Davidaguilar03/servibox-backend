@@ -13,7 +13,7 @@ import com.servibox.backend.purchases.service.PurchasesService;
 import com.servibox.backend.sales.SalesFixture;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
-import com.servibox.backend.treasury.entity.MovementSourceType;
+import com.servibox.backend.treasury.entity.MovementCategory;
 import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.service.TreasuryService;
 import org.junit.jupiter.api.AfterEach;
@@ -24,17 +24,16 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.time.LocalDate;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Restaurar una compra ANULADA es el inverso exacto de anularla, con la validacion de
- * saldo de la creacion. Misma propiedad central que SalesRestoreTest.
+ * saldo de la creacion. Misma propiedad central que SalesRestoreTest: la foto, ids de los
+ * movimientos incluidos, sale identica.
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -77,19 +76,21 @@ class PurchasesRestoreTest {
         TenantContext.clear();
     }
 
-    record Mov(MovementType type, Double amount, String concept, Long accountId, LocalDate date,
-               MovementSourceType sourceType, Long sourceId) {
+    /** Una fila de MOVIMIENTOS de la compra, con todo lo que la identifica. */
+    record Mov(Long id, MovementType type, MovementCategory category, Double amount, String concept,
+               Long accountId, LocalDate date, Long saleId, Long purchaseId) {
     }
 
     record Foto(PurchaseStatus estado, Map<String, Double> saldos, int stock, List<Mov> movimientos) {
     }
 
+    /** Todas las filas de la compra, activas o no, en orden de id. */
     private Foto foto(Purchase compra) {
-        List<Mov> movimientos = Stream.of(caja, banco)
-                .flatMap(c -> treasuryService.findMovementsByAccountId(c.getId()).stream())
-                .map(m -> new Mov(m.getType(), m.getAmount(), m.getConcept(), m.getAccount().getId(),
-                        m.getDate(), m.getSourceType(), m.getSourceId()))
-                .sorted(Comparator.comparing(Mov::toString))
+        List<Mov> movimientos = treasuryService.movimientosDeCompra(compra).stream()
+                .map(m -> new Mov(m.getId(), m.getType(), m.getCategory(), m.getAmount(), m.getConcept(),
+                        m.getAccount().getId(), m.getDate(),
+                        m.getSale() != null ? m.getSale().getId() : null,
+                        m.getPurchase() != null ? m.getPurchase().getId() : null))
                 .toList();
         return new Foto(estadoDe(compra),
                 Map.of("caja", saldoDe(caja), "banco", saldoDe(banco)),
@@ -97,22 +98,45 @@ class PurchasesRestoreTest {
                 movimientos);
     }
 
+    /**
+     * Anula y restaura, y exige que todo quede como estaba antes de anular. Comprueba el
+     * invariante de saldos despues de cada paso.
+     */
     private Purchase anularYRestaurarSinCambios(Purchase compra) {
         Foto antes = foto(compra);
         purchasesService.anularFactura(compra.getId());
+        fixture.verificarInvariante();
+        Foto anulada = foto(compra);
+        assertThat(anulada.estado()).isEqualTo(PurchaseStatus.ANULADA);
+        assertThat(anulada.movimientos()).isEqualTo(antes.movimientos());
+
         Purchase restaurada = purchasesService.restaurarCompra(compra.getId());
+        fixture.verificarInvariante();
         assertThat(foto(compra)).isEqualTo(antes);
         return restaurada;
     }
 
     private Purchase comprar(String numero, PaymentType tipo, Account cuenta, int cantidad, double precio) {
-        return purchasesService.crearFactura(numero, proveedor, FECHA_FACTURA, null, tipo, cuenta,
+        Purchase compra = purchasesService.crearFactura(numero, proveedor, FECHA_FACTURA, null, tipo, cuenta,
                 "Efectivo", List.of(new PurchasesService.LineaCompra(llanta.getId(), cantidad, precio)));
+        fixture.verificarInvariante();
+        return compra;
+    }
+
+    private void pagar(Purchase compra, Account cuenta, double monto) {
+        purchasesService.registrarPago(compra.getId(), cuenta.getId(), monto);
+        fixture.verificarInvariante();
+    }
+
+    private void anular(Purchase compra) {
+        purchasesService.anularFactura(compra.getId());
+        fixture.verificarInvariante();
     }
 
     /** Saca dinero de una cuenta sin pasar por una compra, para dejarla sin saldo. */
     private void retirar(Account cuenta, double monto) {
         treasuryService.registrarGastoOperativo(cuenta, "Retiro", monto, null, null);
+        fixture.verificarInvariante();
     }
 
     private Product productoActual() {
@@ -139,7 +163,7 @@ class PurchasesRestoreTest {
 
         assertThat(restaurada.getStatus()).isEqualTo(PurchaseStatus.PAGADA);
         assertThat(treasuryService.findMovementsByAccountId(caja.getId()))
-                .filteredOn(m -> m.getSourceType() == MovementSourceType.PURCHASE)
+                .filteredOn(m -> m.getPurchase() != null)
                 .singleElement()
                 .satisfies(m -> {
                     assertThat(m.getConcept()).isEqualTo("Compra FAC-00001");
@@ -151,7 +175,7 @@ class PurchasesRestoreTest {
     @Test
     void compraACreditoConPagoParcialQuedaPendienteConElMismoSaldo() {
         Purchase compra = comprar("FAC-00002", PaymentType.CREDITO, null, 1, 100000.0);
-        purchasesService.registrarPago(compra.getId(), caja.getId(), 19000.0);
+        pagar(compra, caja, 19000.0);
 
         Purchase restaurada = anularYRestaurarSinCambios(compra);
 
@@ -162,30 +186,31 @@ class PurchasesRestoreTest {
     @Test
     void compraACreditoPagadaPorCompletoQuedaPagada() {
         Purchase compra = comprar("FAC-00003", PaymentType.CREDITO, null, 1, 100000.0);
-        purchasesService.registrarPago(compra.getId(), caja.getId(), 100000.0);
-        purchasesService.registrarPago(compra.getId(), banco.getId(), 19000.0);
+        pagar(compra, caja, 100000.0);
+        pagar(compra, banco, 19000.0);
 
         Purchase restaurada = anularYRestaurarSinCambios(compra);
 
         assertThat(restaurada.getStatus()).isEqualTo(PurchaseStatus.PAGADA);
         assertThat(pendienteDe(compra)).isEqualTo(0.0);
+        assertThat(foto(compra).movimientos()).extracting(Mov::accountId)
+                .containsExactly(caja.getId(), banco.getId());
     }
 
     @Test
-    void compraACreditoSinPagosNoRecreaNadaYQuedaPendiente() {
+    void compraACreditoSinPagosNoTieneMovimientosYQuedaPendiente() {
         Purchase compra = comprar("FAC-00004", PaymentType.CREDITO, null, 5, 100000.0);
 
         Purchase restaurada = anularYRestaurarSinCambios(compra);
 
         assertThat(restaurada.getStatus()).isEqualTo(PurchaseStatus.PENDIENTE);
-        assertThat(foto(compra).movimientos())
-                .noneMatch(m -> m.sourceType() == MovementSourceType.PURCHASE);
+        assertThat(foto(compra).movimientos()).isEmpty();
     }
 
     @Test
     void compraDeContadoSinSaldoEnLaCuentaSeRechazaSinCambiarNada() {
         Purchase compra = comprar("FAC-00005", PaymentType.CONTADO, caja, 5, 100000.0);
-        purchasesService.anularFactura(compra.getId());
+        anular(compra);
         retirar(caja, 500000.0); // quedan 500000, la compra cuesta 595000
         Foto antes = foto(compra);
 
@@ -195,15 +220,17 @@ class PurchasesRestoreTest {
         assertThat(foto(compra)).isEqualTo(antes);
         assertThat(antes.estado()).isEqualTo(PurchaseStatus.ANULADA);
         assertThat(antes.stock()).isEqualTo(10);
+        assertThat(antes.movimientos()).hasSize(1);
+        fixture.verificarInvariante();
     }
 
     /** El primer pago se recrea y el segundo no alcanza: el primero tampoco queda. */
     @Test
     void conVariosPagosSiElUltimoNoAlcanzaNoQuedaNadaAMedias() {
         Purchase compra = comprar("FAC-00006", PaymentType.CREDITO, null, 1, 100000.0);
-        purchasesService.registrarPago(compra.getId(), caja.getId(), 60000.0);
-        purchasesService.registrarPago(compra.getId(), banco.getId(), 59000.0);
-        purchasesService.anularFactura(compra.getId());
+        pagar(compra, caja, 60000.0);
+        pagar(compra, banco, 59000.0);
+        anular(compra);
         retirar(banco, 950000.0); // quedan 50000, el pago del banco fue de 59000
         Foto antes = foto(compra);
 
@@ -212,6 +239,30 @@ class PurchasesRestoreTest {
 
         assertThat(foto(compra)).isEqualTo(antes);
         assertThat(antes.saldos()).containsEntry("caja", 1000000.0).containsEntry("banco", 50000.0);
+        assertThat(antes.movimientos()).hasSize(2);
+        fixture.verificarInvariante();
+    }
+
+    /**
+     * Dos pagos de la misma cuenta: cada uno cabe por separado en el saldo, pero no los dos
+     * juntos. La validacion acumula sobre el saldo corriente y rechaza sin tocar nada.
+     */
+    @Test
+    void dosPagosDeLaMismaCuentaSeValidanAcumuladosSobreElSaldoCorriente() {
+        Purchase compra = comprar("FAC-00011", PaymentType.CREDITO, null, 1, 100000.0);
+        pagar(compra, caja, 60000.0);
+        pagar(compra, caja, 59000.0);
+        anular(compra);
+        retirar(caja, 900000.0); // quedan 100000: alcanza para 60000 o para 59000, no para 119000
+        Foto antes = foto(compra);
+
+        assertThatThrownBy(() -> purchasesService.restaurarCompra(compra.getId()))
+                .isInstanceOf(InsufficientBalanceException.class)
+                .hasMessageContaining("Caja General");
+
+        assertThat(foto(compra)).isEqualTo(antes);
+        assertThat(antes.saldos()).containsEntry("caja", 100000.0);
+        fixture.verificarInvariante();
     }
 
     /** Ni la anulacion ni la restauracion tocan el costo que la compra le puso al producto. */
@@ -227,21 +278,6 @@ class PurchasesRestoreTest {
         Product despues = productoActual();
         assertThat(despues.getPurchaseCost()).isEqualTo(antes.getPurchaseCost());
         assertThat(despues.getSuggestedPrice()).isEqualTo(antes.getSuggestedPrice());
-    }
-
-    @Test
-    void unaAnuladaQueConservaMovimientosConSuOrigenSeRechazaPorInconsistencia() {
-        Purchase compra = comprar("FAC-00008", PaymentType.CREDITO, null, 1, 100000.0);
-        purchasesService.anularFactura(compra.getId());
-        treasuryService.registrarEgresoDeCompra(caja, "Huerfano", 5000.0, compra, LocalDate.now());
-        Foto antes = foto(compra);
-
-        assertThatThrownBy(() -> purchasesService.restaurarCompra(compra.getId()))
-                .isInstanceOf(InvalidPurchaseOperationException.class)
-                .hasMessage("Inconsistencia: la compra FAC-00008 esta ANULADA pero todavia tiene "
-                        + "movimientos de tesoreria; no se restaura");
-
-        assertThat(foto(compra)).isEqualTo(antes);
     }
 
     @Test

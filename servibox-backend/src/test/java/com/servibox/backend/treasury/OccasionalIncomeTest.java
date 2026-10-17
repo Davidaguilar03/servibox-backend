@@ -147,8 +147,8 @@ class OccasionalIncomeTest {
             assertThat(m.getConcept()).isEqualTo("Venta de chatarra");
             assertThat(m.getNotes()).isEqualTo("Retal de rines");
             assertThat(m.getAccount().getId()).isEqualTo(caja.getId());
-            assertThat(m.getSourceType()).isNull();
-            assertThat(m.getSourceId()).isNull();
+            assertThat(m.getSale()).isNull();
+            assertThat(m.getPurchase()).isNull();
         });
 
         assertThat(treasuryService.balanceGlobal()).isEqualTo(30000.0);
@@ -236,7 +236,8 @@ class OccasionalIncomeTest {
                 .andExpect(jsonPath("$[0].id").value(ingresoId))
                 .andExpect(jsonPath("$[0].type").value("INGRESO"))
                 .andExpect(jsonPath("$[0].category").value("INGRESO_OCASIONAL"))
-                .andExpect(jsonPath("$[0].sourceType").doesNotExist());
+                .andExpect(jsonPath("$[0].saleId").doesNotExist())
+                .andExpect(jsonPath("$[0].purchaseId").doesNotExist());
     }
 
     @Test

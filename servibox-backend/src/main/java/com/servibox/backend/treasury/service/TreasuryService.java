@@ -8,10 +8,10 @@ import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
 import com.servibox.backend.treasury.entity.MovementCategory;
-import com.servibox.backend.treasury.entity.MovementSourceType;
 import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.repository.AccountRepository;
 import com.servibox.backend.treasury.repository.MovementRepository;
+import com.servibox.backend.treasury.repository.MovementSpecifications;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
@@ -19,7 +19,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -102,20 +104,35 @@ public class TreasuryService {
         return movementRepository.findByIdAndTenantId(id, tenantId);
     }
 
+    /** Extracto de una cuenta: sus movimientos activos, del mas reciente al mas antiguo. */
     @Transactional(readOnly = true)
     public List<Movement> findMovementsByAccountId(Long accountId) {
-        return movementRepository.findByAccountIdOrderByDateDesc(accountId);
+        return buscarMovimientos(accountId, null, null, null);
     }
 
-    /**
-     * Movimientos del tenant activo, del mas reciente al mas antiguo. Cada filtro es
-     * opcional: null no filtra, y solo se agregan al where los que vienen. El tenant lo pone
-     * el @Filter de Hibernate, que tambien aplica a las consultas Criteria.
-     */
     @Transactional(readOnly = true)
     public List<Movement> buscarMovimientos(Long accountId, MovementCategory categoria,
                                             LocalDate desde, LocalDate hasta) {
-        Specification<Movement> filtro = (raiz, consulta, cb) -> cb.conjunction();
+        return buscarMovimientos(accountId, categoria, desde, hasta, null, null);
+    }
+
+    /**
+     * Movimientos **activos** del tenant activo, del mas reciente al mas antiguo. Cada
+     * filtro es opcional: null no filtra, y solo se agregan al where los que vienen. El
+     * tenant lo pone el @Filter de Hibernate, que tambien aplica a las consultas Criteria.
+     * Los de una factura ANULADA no salen nunca, ni filtrando por su saleId o purchaseId.
+     */
+    @Transactional(readOnly = true)
+    public List<Movement> buscarMovimientos(Long accountId, MovementCategory categoria,
+                                            LocalDate desde, LocalDate hasta,
+                                            Long saleId, Long purchaseId) {
+        Specification<Movement> filtro = MovementSpecifications.activo();
+        if (saleId != null) {
+            filtro = filtro.and((raiz, consulta, cb) -> cb.equal(raiz.get("sale").get("id"), saleId));
+        }
+        if (purchaseId != null) {
+            filtro = filtro.and((raiz, consulta, cb) -> cb.equal(raiz.get("purchase").get("id"), purchaseId));
+        }
         if (accountId != null) {
             filtro = filtro.and((raiz, consulta, cb) -> cb.equal(raiz.get("account").get("id"), accountId));
         }
@@ -131,16 +148,23 @@ public class TreasuryService {
         return movementRepository.findAll(filtro, Sort.by(Sort.Order.desc("date"), Sort.Order.desc("id")));
     }
 
-    /** Suma de los montos de una categoria en todo el historico del tenant. */
+    /**
+     * Suma de los montos activos de una categoria en todo el historico del tenant. Suma en
+     * memoria sobre el mismo listado para no duplicar en JPQL la regla de movimiento activo.
+     */
     @Transactional(readOnly = true)
     public double sumarPorCategoria(MovementCategory categoria) {
-        return movementRepository.sumAmountByCategory(categoria);
+        return sumar(buscarMovimientos(null, categoria, null, null));
     }
 
-    /** Suma de los montos de una categoria con fecha dentro de [desde, hasta]. */
+    /** Suma de los montos activos de una categoria con fecha dentro de [desde, hasta]. */
     @Transactional(readOnly = true)
     public double sumarPorCategoria(MovementCategory categoria, LocalDate desde, LocalDate hasta) {
-        return movementRepository.sumAmountByCategoryAndDateBetween(categoria, desde, hasta);
+        return sumar(buscarMovimientos(null, categoria, desde, hasta));
+    }
+
+    private static double sumar(List<Movement> movimientos) {
+        return movimientos.stream().mapToDouble(m -> m.getAmount() != null ? m.getAmount() : 0.0).sum();
     }
 
     // ---- Movimientos manuales: gastos operativos e ingresos ocasionales ----
@@ -309,9 +333,9 @@ public class TreasuryService {
     // ---- Movimientos de ventas y compras ----
 
     /**
-     * Ingreso generado por una venta: el del contado al facturar, o el de un abono.
-     * Categoria RECAUDO_VENTA, ligado a la factura por (SALE, id) para poder revertirlo al
-     * anularla. La fecha es la de negocio (la de la factura o la del abono).
+     * Ingreso generado por una venta: el del contado al facturar, o un abono. Categoria
+     * RECAUDO_VENTA, enlazado a la venta por id_venta. La fecha es la de negocio (la de la
+     * factura o la del abono).
      */
     @Transactional
     public Movement registrarIngresoDeVenta(Account cuenta, String concepto, Double monto, Sale venta,
@@ -323,18 +347,17 @@ public class TreasuryService {
         movimiento.setConcept(concepto);
         movimiento.setAmount(monto);
         movimiento.setDate(fecha);
-        movimiento.setSourceType(MovementSourceType.SALE);
-        movimiento.setSourceId(venta.getId());
+        movimiento.setSale(venta);
         return aplicarMovimiento(movimiento);
     }
 
     /**
-     * Egreso generado por una compra: el del contado al facturar, o el de un pago.
-     * Categoria PAGO_COMPRA, ligado a la factura por (PURCHASE, id).
+     * Egreso generado por una compra: el del contado al facturar, o un pago. Categoria
+     * PAGO_COMPRA, enlazado a la compra por id_compra.
      *
      * Valida que la cuenta tenga saldo. En Autollantas esa comprobacion vive en el
      * formulario; aqui vive donde se mueve el dinero, que es el unico sitio por el que
-     * pasan todos los egresos de compras, la restauracion de una compra anulada incluida.
+     * pasan todos los egresos de compras.
      */
     @Transactional
     public Movement registrarEgresoDeCompra(Account cuenta, String concepto, Double monto, Purchase compra,
@@ -348,8 +371,7 @@ public class TreasuryService {
         movimiento.setConcept(concepto);
         movimiento.setAmount(monto);
         movimiento.setDate(fecha);
-        movimiento.setSourceType(MovementSourceType.PURCHASE);
-        movimiento.setSourceId(compra.getId());
+        movimiento.setPurchase(compra);
         return aplicarMovimiento(movimiento);
     }
 
@@ -365,80 +387,114 @@ public class TreasuryService {
     }
 
     /**
-     * Deshace en tesoreria todo lo que genero una compra: revierte el saldo y borra sus
-     * movimientos. Espejo de revertirMovimientosDeVenta.
-     */
-    @Transactional
-    public void revertirMovimientosDeCompra(Purchase compra) {
-        revertir(movimientosDe(MovementSourceType.PURCHASE, compra.getId()));
-    }
-
-    /**
-     * Borra los movimientos que genero una venta y deshace su efecto sobre el saldo de la
-     * cuenta. Es lo que hace `SalesService.cancelSale` de Autollantas al anular. Se
-     * redisena en el paso 3 del refactor, ver 04-DATA-MODEL.md.
-     */
-    @Transactional
-    public void revertirMovimientosDeVenta(Sale venta) {
-        revertir(movimientosDe(MovementSourceType.SALE, venta.getId()));
-    }
-
-    /**
-     * Si queda algun movimiento vivo con ese origen. Una factura ANULADA no deberia tener
-     * ninguno: restaurar lo usa para no duplicar dinero si los datos estan inconsistentes.
+     * Todos los movimientos de una venta, **activos o no**, en orden de creacion. Para el
+     * saldo pendiente, anular y restaurar; nunca para mostrar ni sumar en tesoreria.
      */
     @Transactional(readOnly = true)
-    public boolean tieneMovimientos(MovementSourceType tipo, Long id) {
-        return !movimientosDe(tipo, id).isEmpty();
-    }
-
-    /** Los movimientos de una factura concreta, dentro del tenant activo. */
-    private List<Movement> movimientosDe(MovementSourceType tipo, Long id) {
+    public List<Movement> movimientosDeVenta(Sale venta) {
         Long tenantId = TenantContext.getTenantId();
         if (tenantId == null) {
             return List.of();
         }
-        return movementRepository.findBySourceTypeAndSourceIdAndTenantId(tipo, id, tenantId);
+        return movementRepository.findBySaleIdAndTenantIdOrderByIdAsc(venta.getId(), tenantId);
     }
 
-    private void revertir(List<Movement> movimientos) {
-        for (Movement movimiento : movimientos) {
-            deshacerEfecto(movimiento);
-            movementRepository.delete(movimiento);
+    /** Todos los movimientos de una compra, activos o no. Mismo uso que movimientosDeVenta. */
+    @Transactional(readOnly = true)
+    public List<Movement> movimientosDeCompra(Purchase compra) {
+        Long tenantId = TenantContext.getTenantId();
+        if (tenantId == null) {
+            return List.of();
         }
+        return movementRepository.findByPurchaseIdAndTenantIdOrderByIdAsc(compra.getId(), tenantId);
+    }
+
+    /**
+     * Al anular una venta: deshace el efecto de cada uno de sus movimientos sobre el saldo
+     * de su cuenta, sin validar nada. **No borra filas**: con la venta ANULADA quedan
+     * inactivos. Ver "Anular y restaurar facturas" en 04-DATA-MODEL.md.
+     */
+    @Transactional
+    public void revertirSaldosDeVenta(Sale venta) {
+        movimientosDeVenta(venta).forEach(this::deshacerEfecto);
+    }
+
+    /** Espejo de revertirSaldosDeVenta: cada egreso de la compra vuelve a su cuenta. */
+    @Transactional
+    public void revertirSaldosDeCompra(Purchase compra) {
+        movimientosDeCompra(compra).forEach(this::deshacerEfecto);
+    }
+
+    /**
+     * Al restaurar una venta: vuelve a aplicar cada uno de sus movimientos sobre el saldo de
+     * su cuenta. Son ingresos, asi que no hay nada que validar.
+     */
+    @Transactional
+    public void reaplicarSaldosDeVenta(Sale venta) {
+        movimientosDeVenta(venta).forEach(this::aplicarEfecto);
+    }
+
+    /**
+     * Al restaurar una compra: vuelve a aplicar cada egreso con la regla de saldo suficiente
+     * de crear y pagar. Primero lo simula entero, acumulando sobre el saldo corriente
+     * cuando varios egresos salen de la misma cuenta, y solo si todos alcanzan toca algun
+     * saldo: si uno no alcanza, InsufficientBalanceException sin haber escrito nada.
+     */
+    @Transactional
+    public void reaplicarSaldosDeCompra(Purchase compra) {
+        List<Movement> egresos = movimientosDeCompra(compra);
+        Map<Long, Double> saldoCorriente = new HashMap<>();
+        for (Movement egreso : egresos) {
+            Account cuenta = recargar(egreso.getAccount());
+            double saldo = saldoCorriente.computeIfAbsent(cuenta.getId(), id -> saldoDe(cuenta));
+            double monto = egreso.getAmount() != null ? egreso.getAmount() : 0.0;
+            if (saldo < monto) {
+                throw new InsufficientBalanceException(cuenta.getName(), saldo, monto);
+            }
+            saldoCorriente.put(cuenta.getId(), saldo - monto);
+        }
+        egresos.forEach(this::aplicarEfecto);
     }
 
     // ---- Saldos ----
 
     /**
-     * Unico sitio donde se guarda un Movement y se aplica su efecto sobre el saldo de su
-     * cuenta. Las dos cosas van juntas a proposito: un movimiento guardado sin mover el
-     * saldo, o un saldo movido sin movimiento que lo explique, es un descuadre silencioso.
-     * Sirve para un movimiento nuevo y para uno editado (misma fila, efecto nuevo).
+     * Unico sitio donde se guarda un Movement nuevo o editado, junto con su efecto sobre el
+     * saldo de su cuenta. Las dos cosas van juntas a proposito: un movimiento guardado sin
+     * mover el saldo, o un saldo movido sin movimiento que lo explique, es un descuadre
+     * silencioso.
      *
-     * Valida la coherencia entre tipo y categoria antes de escribir nada.
+     * Valida la coherencia entre tipo, categoria y factura antes de escribir nada.
      */
     private Movement aplicarMovimiento(Movement movimiento) {
-        validarCoherencia(movimiento.getType(), movimiento.getCategory());
+        validarCoherencia(movimiento);
         if (movimiento.getDate() == null) {
             movimiento.setDate(LocalDate.now());
         }
         Movement guardado = movementRepository.save(movimiento);
-
-        Account cuenta = guardado.getAccount();
-        double saldo = saldoDe(cuenta);
-        double monto = guardado.getAmount();
-        cuenta.setCurrentBalance(guardado.getType() == MovementType.INGRESO ? saldo + monto : saldo - monto);
-        accountRepository.save(cuenta);
-
+        aplicarEfecto(guardado);
         return guardado;
     }
 
     /**
+     * Aplica el efecto de un movimiento sobre **su** cuenta: un INGRESO suma, un EGRESO
+     * resta. Lo usan aplicarMovimiento y restaurar una factura, cuyos movimientos ya
+     * existen. Junto con deshacerEfecto, son las unicas escrituras de currentBalance.
+     */
+    private void aplicarEfecto(Movement movimiento) {
+        Account cuenta = recargar(movimiento.getAccount());
+        double monto = movimiento.getAmount() != null ? movimiento.getAmount() : 0.0;
+        cuenta.setCurrentBalance(movimiento.getType() == MovementType.INGRESO
+                ? saldoDe(cuenta) + monto
+                : saldoDe(cuenta) - monto);
+        accountRepository.save(cuenta);
+    }
+
+    /**
      * Revierte el efecto de un movimiento sobre **su** cuenta: un INGRESO se resta, un
-     * EGRESO se suma. Es la unica otra escritura de currentBalance, y la usan solo editar
-     * o eliminar un movimiento manual y anular una factura. El motivo de que anular sea
-     * una reversion y no un contra-movimiento esta en 03-DECISIONS.md.
+     * EGRESO se suma. La usan editar o eliminar un movimiento manual y anular una factura.
+     * El motivo de que anular sea una reversion y no un contra-movimiento esta en
+     * 03-DECISIONS.md.
      */
     private void deshacerEfecto(Movement movimiento) {
         Account cuenta = movimiento.getAccount();
@@ -455,9 +511,13 @@ public class TreasuryService {
 
     /**
      * GASTO_OPERATIVO y PAGO_COMPRA son EGRESO; INGRESO_OCASIONAL y RECAUDO_VENTA son
-     * INGRESO; TRANSFERENCIA admite los dos (una pata cada uno).
+     * INGRESO; TRANSFERENCIA admite los dos (una pata cada uno). RECAUDO_VENTA lleva venta
+     * y no compra, PAGO_COMPRA compra y no venta, y las demas ninguna de las dos: la misma
+     * regla que ck_movimiento_factura en la base.
      */
-    private static void validarCoherencia(MovementType tipo, MovementCategory categoria) {
+    private static void validarCoherencia(Movement movimiento) {
+        MovementType tipo = movimiento.getType();
+        MovementCategory categoria = movimiento.getCategory();
         if (tipo == null || categoria == null) {
             throw new IllegalArgumentException("Un movimiento necesita tipo y categoria");
         }
@@ -468,6 +528,17 @@ public class TreasuryService {
         };
         if (!coherente) {
             throw new IllegalArgumentException("Un movimiento de categoria " + categoria + " no puede ser " + tipo);
+        }
+        boolean conVenta = movimiento.getSale() != null;
+        boolean conCompra = movimiento.getPurchase() != null;
+        boolean facturaCoherente = switch (categoria) {
+            case RECAUDO_VENTA -> conVenta && !conCompra;
+            case PAGO_COMPRA -> conCompra && !conVenta;
+            default -> !conVenta && !conCompra;
+        };
+        if (!facturaCoherente) {
+            throw new IllegalArgumentException("Un movimiento de categoria " + categoria
+                    + " no puede ir enlazado a esa factura (venta: " + conVenta + ", compra: " + conCompra + ")");
         }
     }
 

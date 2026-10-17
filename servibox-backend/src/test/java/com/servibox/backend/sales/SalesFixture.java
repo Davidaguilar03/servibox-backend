@@ -13,11 +13,15 @@ import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.tenant.TenantRepository;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.AccountType;
+import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.service.TreasuryService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * Semilla comun de los tests de Sales: un tenant con su IVA del 19 por ciento, una
@@ -94,6 +98,23 @@ public class SalesFixture {
     public Counterparty crearProveedor(String nombre, String nit) {
         return counterpartyService.obtenerOCrear(CounterpartyRole.PROVEEDOR, DocumentType.NIT, nit,
                 nombre, null, null);
+    }
+
+    /**
+     * Invariante de tesoreria: en cada cuenta del tenant activo, saldo_actual es
+     * balance_inicial mas la suma de sus movimientos activos (los ingresos suman, los
+     * egresos restan). Los de una factura ANULADA no cuentan. Llamar despues de cada
+     * operacion que mueva dinero.
+     */
+    public void verificarInvariante() {
+        for (Account cuenta : treasuryService.findAllAccounts()) {
+            double neto = treasuryService.findMovementsByAccountId(cuenta.getId()).stream()
+                    .mapToDouble(m -> m.getType() == MovementType.INGRESO ? m.getAmount() : -m.getAmount())
+                    .sum();
+            assertThat(cuenta.getCurrentBalance())
+                    .as("saldo_actual de %s = balance_inicial + movimientos activos", cuenta.getName())
+                    .isCloseTo(cuenta.getInitialBalance() + neto, within(0.001));
+        }
     }
 
     public void usarTenant(Long tenantId) {
