@@ -319,4 +319,30 @@ class InvoiceMovementCategoryTest {
                 .andReturn();
         return JsonPath.read(result.getResponse().getContentAsString(), "$.token");
     }
+
+    /**
+     * La suma por categoria la hace la base con el mismo predicado de movimiento activo:
+     * excluye los de facturas anuladas y respeta el rango de fechas.
+     */
+    @Test
+    void laSumaPorCategoriaExcluyeAnuladasYRespetaElRango() {
+        Sale vigente = vender("VEN-00020", com.servibox.backend.sales.entity.PaymentType.CREDITO, null);
+        Sale anulada = vender("VEN-00021", com.servibox.backend.sales.entity.PaymentType.CREDITO, null);
+        salesService.registrarAbono(vigente.getId(), caja.getId(), 10000.0);
+        salesService.registrarAbono(anulada.getId(), caja.getId(), 7000.0);
+        treasuryService.registrarIngresoDeVenta(caja, "Abono viejo", 3000.0, vigente, LocalDate.now().minusDays(40));
+        assertThat(treasuryService.sumarPorCategoria(MovementCategory.RECAUDO_VENTA)).isEqualTo(20000.0);
+
+        salesService.anularFactura(anulada.getId());
+
+        assertThat(treasuryService.sumarPorCategoria(MovementCategory.RECAUDO_VENTA)).isEqualTo(13000.0);
+        assertThat(treasuryService.sumarPorCategoria(MovementCategory.RECAUDO_VENTA,
+                LocalDate.now().minusDays(1), LocalDate.now())).isEqualTo(10000.0);
+        assertThat(treasuryService.sumarPorCategoria(MovementCategory.RECAUDO_VENTA,
+                LocalDate.now().minusDays(60), LocalDate.now().minusDays(30))).isEqualTo(3000.0);
+        assertThat(treasuryService.sumarPorCategoria(MovementCategory.PAGO_COMPRA)).isEqualTo(0.0);
+        // El mismo resultado que sumar el listado de movimientos activos.
+        assertThat(treasuryService.buscarMovimientos(null, MovementCategory.RECAUDO_VENTA, null, null).stream()
+                .mapToDouble(Movement::getAmount).sum()).isEqualTo(13000.0);
+    }
 }

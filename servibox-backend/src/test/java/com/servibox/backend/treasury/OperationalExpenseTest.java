@@ -121,7 +121,7 @@ class OperationalExpenseTest {
         TenantContext.setTenantId(tenantId);
         Account cuenta = new Account();
         cuenta.setName(nombre);
-        cuenta.setType(AccountType.CASH);
+        cuenta.setType(AccountType.EFECTIVO);
         cuenta.setInitialBalance(saldoInicial);
         return treasuryService.saveAccount(cuenta);
     }

@@ -21,6 +21,7 @@ public record PurchaseResponse(
         Double subtotal,
         Double ivaTotal,
         Double total,
+        /** Lo que falta por pagar. 0 en una ANULADA: una compra anulada no se debe. */
         Double pendingBalance,
         List<PurchaseDetailResponse> details
 ) {
@@ -39,7 +40,7 @@ public record PurchaseResponse(
                 purchase.getSubtotal(),
                 purchase.getIvaTotal(),
                 purchase.getTotal(),
-                pendingBalance,
+                purchase.getStatus() == PurchaseStatus.ANULADA ? 0.0 : pendingBalance,
                 details.stream().map(PurchaseDetailResponse::from).toList()
         );
     }

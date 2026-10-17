@@ -2,7 +2,8 @@
 
 Objetivo: llevar el modelo de datos de ServiBox al esquema de
 [04-DATA-MODEL.md](../04-DATA-MODEL.md) (14 entidades en tercera forma normal). Se hace
-en cinco pasos, cada uno con `./mvnw test` completo en verde.
+en seis pasos (eran cinco; el 2026-10-17 el antiguo paso 4 se partio en dos), cada uno con
+`./mvnw test` completo en verde.
 
 ## Plan
 
@@ -14,8 +15,14 @@ en cinco pasos, cada uno con `./mvnw test` completo en verde.
 - [x] **3. Abonos y pagos como movimientos.** Abonos y pagos pasan a ser movimientos con FK
   a la factura (`id_venta`, `id_compra`), y anular y restaurar se redisenan. Hecho el
   2026-10-17, rama `refactor/17-collections-payments-as-movements`.
-- [ ] **4. Atributos y nombres.** Alinear atributos y nombres de columna con el diccionario.
-- [ ] **5. Flyway.** Migracion V1 escrita desde el diccionario.
+- [x] **4. Comportamiento y atributos.** Alinear comportamiento y atributos con el
+  diccionario (roles, tipos de cuenta, comision de tarjeta, tercero obligatorio) y
+  corregir lo que dejo la revision del paso 3. Sin renombrar tablas ni columnas ni cambiar
+  tipos fisicos. Hecho el 2026-10-17, rama `refactor/18-align-attributes-with-dictionary`.
+- [ ] **5. Nombres fisicos, nulabilidad y longitudes.** Nombres de tablas y columnas,
+  NOT NULL y longitudes del diccionario, con una prueba de conformidad contra el
+  diccionario.
+- [ ] **6. Flyway.** Migracion V1 escrita desde el diccionario.
 
 ## Paso 1: terceros
 
@@ -32,7 +39,7 @@ en cinco pasos, cada uno con `./mvnw test` completo en verde.
 * Tests: 135 antes, 146 despues. Ninguna clase perdio tests; `CounterpartyTest` es nueva
   (11).
 
-### Anotado para el paso 5 (Flyway)
+### Anotado para el paso 6 (Flyway)
 
 * La PK de `TERCEROS` ya se llama `id_tercero` por `@AttributeOverride`; las demas tablas
   siguen con `id`.
@@ -57,7 +64,7 @@ en cinco pasos, cada uno con `./mvnw test` completo en verde.
 * Tests: 146 antes, 158 despues. Ninguna clase perdio tests; `InvoiceMovementCategoryTest`
   es nueva (4).
 
-### Anotado para el paso 4
+### Anotado para el paso 5 (nombres de columna; antes paso 4)
 
 * Las columnas que ya existian en `MOVIMIENTOS` conservan su nombre (`concepto_movimiento`,
   `monto_movimiento`); el diccionario dice `concepto` y `monto`.
@@ -86,3 +93,31 @@ en cinco pasos, cada uno con `./mvnw test` completo en verde.
 * Tests: 159 antes, 169 despues. `SalesRestoreTest` y `PurchasesRestoreTest` pierden el
   test de la defensa contra movimientos vivos (ya no aplica) y ganan uno cada uno, asi que
   quedan igual (9); `InvoiceMovementsApiTest` es nueva (4).
+
+## Paso 4: comportamiento y atributos
+
+* `Role`: `ADMIN`, `MECANICO`, `CAJERO` (sin `EMPLEADO`). `AccountType`: `EFECTIVO`,
+  `BANCO`, `DIGITAL` (sin `CASH` ni `BANK`). Sin logica de permisos por rol.
+* `FinancialSettings.cardCommissionRate` obligatoria con 0.0 por defecto; una sola fila
+  por tenant (`uk_configuracion_tenant` y `DuplicateFinancialSettingsException`, 409).
+* Venta sin `customerId`: Consumidor final del tenant (`CounterpartyService.consumidorFinal`,
+  NIT 222222222222). Compra sin `supplierId`: 400.
+* Transferencia: el concepto de las dos patas es el texto del usuario, o el autogenerado
+  si no escribe ninguno; `notes` vacio.
+* `pendingBalance` 0 en la respuesta de una factura `ANULADA`; `saldoPendiente` no cambia.
+* `sumarPorCategoria` vuelve a sumar en la base (`MovementRepository.sumarMonto`, Criteria)
+  con el mismo `MovementSpecifications.activo()`.
+* Reporting: cuenta del renglon VENTA / COMPRA = la del ultimo movimiento activo.
+* `Product.taxAmount` (`iva_producto`) guarda un monto en pesos por unidad
+  (`purchaseCost * tasa de IVA`), no la tarifa del diccionario. No se cambio; sigue en
+  Pendientes de 04-DATA-MODEL.md.
+* Decisiones: [03-DECISIONS.md](../03-DECISIONS.md), entrada "Comportamiento y atributos
+  alineados con el diccionario".
+* Tests: 169 antes, 181 despues. Ninguna clase perdio tests.
+
+### Anotado para el paso 5
+
+* Las columnas `id_tercero` de VENTAS y COMPRAS todavia admiten nulos aunque el service ya
+  nunca los deja nulos.
+* Un valor de enum invalido en el cuerpo (por ejemplo `"type":"CASH"`) responde 500, no
+  400: `GlobalExceptionHandler` no trata `HttpMessageNotReadableException`. Viene de antes.

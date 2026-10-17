@@ -11,6 +11,7 @@ import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.counterparties.service.DuplicateCounterpartyDocumentException;
 import com.servibox.backend.counterparties.service.InvalidCounterpartyException;
 import com.servibox.backend.inventory.entity.Product;
+import com.servibox.backend.purchases.service.InvalidPurchaseOperationException;
 import com.servibox.backend.purchases.service.PurchasesService;
 import com.servibox.backend.sales.SalesFixture;
 import com.servibox.backend.sales.entity.Sale;
@@ -316,5 +317,94 @@ class CounterpartyTest {
                 .isInstanceOf(InvalidCounterpartyException.class)
                 .hasMessage("El tercero necesita un tipo de documento");
         assertThat(counterpartyService.findAll()).isEmpty();
+    }
+
+    // ---- Tercero obligatorio en facturas ----
+
+    /**
+     * Una venta sin cliente usa el Consumidor final del tenant: se crea una sola vez, se
+     * reutiliza en las siguientes y sale en la respuesta como customer.
+     */
+    @Test
+    void unaVentaSinClienteUsaElConsumidorFinalQueSeCreaUnaSolaVez() throws Exception {
+        TenantContext.clear();
+        Integer primero = null;
+        for (String numero : List.of("VEN-00001", "VEN-00002")) {
+            MvcResult result = mockMvc.perform(post("/api/sales")
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"invoiceNumber":"%s","paymentType":"CREDITO",
+                                     "details":[{"productId":%d,"quantity":1,"price":100000}]}
+                                    """.formatted(numero, llanta.getId())))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.customer.name").value("Consumidor final"))
+                    .andExpect(jsonPath("$.customer.role").value("CLIENTE"))
+                    .andExpect(jsonPath("$.customer.documentType").value("NIT"))
+                    .andExpect(jsonPath("$.customer.documentNumber").value("222222222222"))
+                    .andReturn();
+            Integer id = JsonPath.read(result.getResponse().getContentAsString(), "$.customer.id");
+            if (primero == null) {
+                primero = id;
+            }
+            assertThat(id).isEqualTo(primero);
+        }
+
+        Integer idConsumidor = primero;
+        fixture.usarTenant(tenantId);
+        assertThat(counterpartyService.findAll())
+                .filteredOn(t -> t.getDocumentNumber().equals("222222222222"))
+                .singleElement()
+                .satisfies(t -> assertThat(t.getId().intValue()).isEqualTo(idConsumidor));
+        assertThat(salesService.findAllSales()).allSatisfy(v -> assertThat(v.getCustomer()).isNotNull());
+    }
+
+    @Test
+    void elConsumidorFinalEsDistintoPorTenant() {
+        Counterparty deUno = vender("VEN-00001", null).getCustomer();
+        assertThat(counterpartyService.consumidorFinal().getId()).isEqualTo(deUno.getId());
+
+        Long otroTenant = fixture.crearTenant();
+        fixture.usarTenant(otroTenant);
+        Product otraLlanta = fixture.crearProducto(fixture.crearCategoriaConIva(), "LLA-001", 100000.0, 10);
+        Sale ventaDeDos = salesService.crearFactura("VEN-00001", null, LocalDate.now(), null,
+                com.servibox.backend.sales.entity.PaymentType.CREDITO, null, null,
+                List.of(new SalesService.LineaFactura(otraLlanta.getId(), 1, 100000.0)));
+
+        assertThat(ventaDeDos.getCustomer().getId()).isNotEqualTo(deUno.getId());
+        assertThat(ventaDeDos.getCustomer().getDocumentNumber()).isEqualTo("222222222222");
+        assertThat(counterpartyService.findAll()).hasSize(1);
+    }
+
+    /** No hay proveedor por defecto: una compra sin supplierId es 400 y no deja nada. */
+    @Test
+    void unaCompraSinProveedorEs400() throws Exception {
+        assertThatThrownBy(() -> comprar("FAC-00001", null))
+                .isInstanceOf(InvalidPurchaseOperationException.class)
+                .hasMessage("Una compra necesita un proveedor (supplierId)");
+        TenantContext.clear();
+
+        mockMvc.perform(post("/api/purchases")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"invoiceNumber":"FAC-00002","paymentType":"CREDITO",
+                                 "details":[{"productId":%d,"quantity":1,"price":100000}]}
+                                """.formatted(llanta.getId())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Una compra necesita un proveedor (supplierId)"));
+
+        mockMvc.perform(post("/api/purchases")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"invoiceNumber":"FAC-00003","supplierId":999999,"paymentType":"CREDITO",
+                                 "details":[{"productId":%d,"quantity":1,"price":100000}]}
+                                """.formatted(llanta.getId())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Proveedor no encontrado: 999999"));
+
+        fixture.usarTenant(tenantId);
+        assertThat(purchasesService.findAllPurchases()).isEmpty();
     }
 }

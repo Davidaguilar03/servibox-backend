@@ -83,13 +83,13 @@ public class ReportingService {
             String cliente = venta.getCustomer() != null ? venta.getCustomer().getName() : null;
             lista.add(renglon(venta.getInvoiceDate(), "VENTA", venta.getId(),
                     concepto(venta.getInvoiceNumber(), cliente), venta.getTotal(),
-                    ultimaCuenta(treasuryService.movimientosDeVenta(venta))));
+                    ultimaCuenta(treasuryService.buscarMovimientos(null, null, null, null, venta.getId(), null))));
         }
         for (Purchase compra : purchaseRepository.findByInvoiceDateBetweenAndStatusNot(desde, hasta, PurchaseStatus.ANULADA)) {
             String proveedor = compra.getSupplier() != null ? compra.getSupplier().getName() : null;
             lista.add(renglon(compra.getInvoiceDate(), "COMPRA", compra.getId(),
                     concepto(compra.getInvoiceNumber(), proveedor), compra.getTotal(),
-                    ultimaCuenta(treasuryService.movimientosDeCompra(compra))));
+                    ultimaCuenta(treasuryService.buscarMovimientos(null, null, null, null, null, compra.getId()))));
         }
         for (Movement gasto : treasuryService.buscarMovimientos(null, MovementCategory.GASTO_OPERATIVO, desde, hasta)) {
             lista.add(renglon(gasto.getDate(), "GASTO", gasto.getId(),
@@ -155,13 +155,16 @@ public class ReportingService {
     }
 
     /**
-     * La cuenta de una factura en el renglon: la de su ultimo movimiento (el contado, o el
-     * ultimo abono o pago), o null si no tiene ninguno. Es la que antes guardaba la factura
-     * en id_cuenta, que se reescribia con cada abono o pago.
+     * La cuenta de una factura en el renglon: la de su ultimo movimiento **activo** (el
+     * contado, o el ultimo abono o pago, el de mayor id), o null si no tiene ninguno. Es la
+     * que antes guardaba la factura en id_cuenta, que se reescribia con cada abono o pago.
+     * Una factura ANULADA no tiene movimientos activos, asi que nunca muestra cuenta.
      */
-    private static Account ultimaCuenta(List<Movement> movimientosDeLaFactura) {
-        return movimientosDeLaFactura.isEmpty() ? null
-                : movimientosDeLaFactura.get(movimientosDeLaFactura.size() - 1).getAccount();
+    private static Account ultimaCuenta(List<Movement> movimientosActivos) {
+        return movimientosActivos.stream()
+                .max(Comparator.comparing(Movement::getId))
+                .map(Movement::getAccount)
+                .orElse(null);
     }
 
     private static String concepto(String numero, String tercero) {

@@ -4,6 +4,8 @@ import com.servibox.backend.inventory.entity.FinancialSettings;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
 import com.servibox.backend.inventory.entity.TaxType;
+import com.servibox.backend.inventory.repository.FinancialSettingsRepository;
+import com.servibox.backend.inventory.service.DuplicateFinancialSettingsException;
 import com.servibox.backend.inventory.service.InventoryService;
 import com.servibox.backend.tenant.Tenant;
 import com.servibox.backend.tenant.TenantContext;
@@ -13,12 +15,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
 @SpringBootTest
@@ -30,6 +34,9 @@ class InventoryPricingTest {
 
     @Autowired
     private TenantRepository tenantRepository;
+
+    @Autowired
+    private FinancialSettingsRepository financialSettingsRepository;
 
     private Long tenantId;
 
@@ -156,5 +163,54 @@ class InventoryPricingTest {
 
         Product recargado = inventoryService.findProductById(product.getId()).orElseThrow();
         assertThat(recargado.getSuggestedPrice()).isCloseTo(50000.0, within(0.001));
+    }
+
+    // ---- Configuracion financiera ----
+
+    /** La comision de tarjeta es obligatoria y arranca en 0.0 donde se crea la fila. */
+    @Test
+    void laComisionDeTarjetaQuedaEnCeroPorDefecto() {
+        assertThat(inventoryService.findFinancialSettings().getCardCommissionRate()).isEqualTo(0.0);
+
+        FinancialSettings sinComision = new FinancialSettings();
+        sinComision.setExpensesRate(0.10);
+        sinComision.setDianRate(0.0);
+        sinComision.setIcaRate(0.0);
+        FinancialSettings guardada = inventoryService.saveFinancialSettings(sinComision);
+
+        assertThat(financialSettingsRepository.findByTenantId(tenantId).orElseThrow().getCardCommissionRate())
+                .isEqualTo(0.0);
+        assertThat(guardada.getCardCommissionRate()).isEqualTo(0.0);
+
+        guardada.setCardCommissionRate(null);
+        assertThat(inventoryService.saveFinancialSettings(guardada).getCardCommissionRate()).isEqualTo(0.0);
+
+        guardada.setCardCommissionRate(0.035);
+        inventoryService.saveFinancialSettings(guardada);
+        assertThat(inventoryService.findFinancialSettings().getCardCommissionRate()).isEqualTo(0.035);
+    }
+
+    /**
+     * Una sola fila por tenant: el service rechaza la segunda con un mensaje legible y la
+     * base la frena aunque se salte el service. Otro tenant si puede tener la suya.
+     */
+    @Test
+    void unTenantNoPuedeTenerDosConfiguracionesFinancieras() {
+        inventoryService.saveFinancialSettings(new FinancialSettings());
+
+        assertThatThrownBy(() -> inventoryService.saveFinancialSettings(new FinancialSettings()))
+                .isInstanceOf(DuplicateFinancialSettingsException.class)
+                .hasMessage("El tenant ya tiene una configuracion financiera; edita la existente en vez de crear otra");
+
+        assertThatThrownBy(() -> financialSettingsRepository.saveAndFlush(new FinancialSettings()))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .satisfies(e -> assertThat(e.getMessage()).containsIgnoringCase("uk_configuracion_tenant"));
+
+        Tenant otro = new Tenant();
+        otro.setName("Otro taller");
+        otro.setSlug("otro-taller-" + System.nanoTime());
+        otro.setActive(Boolean.TRUE);
+        TenantContext.setTenantId(tenantRepository.save(otro).getId());
+        assertThat(inventoryService.saveFinancialSettings(new FinancialSettings()).getId()).isNotNull();
     }
 }

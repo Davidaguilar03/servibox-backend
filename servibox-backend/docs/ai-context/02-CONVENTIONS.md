@@ -69,7 +69,7 @@ esta tabla.
 | **Gasto operativo** | Gasto puntual del taller que no viene de una factura de compra: arriendo, servicios publicos, papeleria | **Es una categoria, no una entidad**: un `Movement` `EGRESO` de categoria `GASTO_OPERATIVO`. En Autollantas aparece bajo **Egresos**, junto a las compras, pero vive en `treasury` |
 | Editar un movimiento manual | Revertir el efecto viejo y aplicar el nuevo **en la misma fila** | No es un ajuste por la diferencia ni un contra-movimiento: queda **un solo** movimiento, con el mismo id. La reversion devuelve el dinero a la cuenta **anterior**, asi que cambiar de cuenta sale bien. La categoria no se puede cambiar |
 | Eliminar un movimiento manual | Revertir su efecto y **borrar la fila** | En Autollantas la accion se llama "Eliminar". **No deja estado `ANULADA`** como una factura: un gasto o un ingreso ocasional no es un documento fiscal |
-| **Transferencia** | Dinero entre dos cuentas del mismo tenant | **Son dos movimientos** de categoria `TRANSFERENCIA`: un `EGRESO` en el origen y un `INGRESO` en el destino que apunta al `EGRESO` con `relatedMovement` (`id_movimiento_relacionado`). No hay entidad `Transfer`. El concepto del usuario va a `notes` |
+| **Transferencia** | Dinero entre dos cuentas del mismo tenant | **Son dos movimientos** de categoria `TRANSFERENCIA`: un `EGRESO` en el origen y un `INGRESO` en el destino que apunta al `EGRESO` con `relatedMovement` (`id_movimiento_relacionado`). No hay entidad `Transfer`. El concepto de las dos patas es el del usuario o, si no escribe ninguno, el autogenerado ("Transferencia a / desde"); `notes` queda vacio |
 | `originAccount` / `destinationAccount` | Los dos extremos de una transferencia, en la peticion (`originAccountId`, `destinationAccountId`) | Autollantas los llama `sourceAccount` / `destinationAccount`. Se renombro el origen para que coincida con la vista |
 | `concept` | Texto que explica el movimiento | Columna real en `MOVIMIENTOS`, cosa que **Autollantas no tiene**, ver [03-DECISIONS.md](03-DECISIONS.md) |
 | `notes` | Observaciones libres de un movimiento (`notas`) | **Opcional**. En una transferencia guarda el concepto que escribio el usuario |
@@ -77,7 +77,7 @@ esta tabla.
 | `sale` / `purchase` | Factura de un movimiento (`id_venta` / `id_compra`) | Claves foraneas reales, sin cascada. `RECAUDO_VENTA` lleva `sale`, `PAGO_COMPRA` lleva `purchase`, las demas ninguna (`ck_movimiento_factura`). En la API, `saleId` / `purchaseId`. Ya no existen `sourceType` / `sourceId`. Nunca construir un `Movement` a mano: usar los metodos de `TreasuryService` |
 | **Movimiento activo** / **inactivo** | Inactivo: enlazado a una venta o compra `ANULADA`. Activo: todos los demas | **No es una columna**: se deriva del estado de la factura (`MovementSpecifications.activo()`). Un inactivo sigue en la base, pero no sale en ningun listado ni cuenta en ninguna suma ni en el saldo. Al restaurar la factura vuelve a ser activo, con el mismo id. Invariante: `currentBalance` = `initialBalance` + movimientos activos |
 | Balance global | Suma de los `currentBalance` del tenant | Es el "Total Global" (`lblTotalGlobal`) de `Accounts.fxml` |
-| `CASH` / `BANK` | Tipo de cuenta | Las 2 cuentas por defecto de Autollantas son `Caja General` (CASH) y `Bancolombia` (BANK) |
+| `EFECTIVO` / `BANCO` / `DIGITAL` | Tipo de cuenta | Los del diccionario. Autollantas solo tenia `CASH` y `BANK`, que ya no existen. Las 2 cuentas por defecto son `Caja General` (EFECTIVO) y `Bancolombia` (BANCO) |
 
 Los campos de fecha de negocio en Autollantas se nombran `fecha_<entidad>`
 (`fecha_movimiento`, `fecha_transferencia`, `fecha_ingreso`, `fecha_gasto`) y en Java son
@@ -92,6 +92,7 @@ siempre `date`. Los de concepto se nombran `concepto_<entidad>` y en Java son si
 | `CLIENTE` / `PROVEEDOR` / `AMBOS` | Rol del tercero (`tipo_tercero`) | Un tercero que se usa en el otro rol pasa a `AMBOS`; nunca se duplica por documento |
 | `customer` / `supplier` | El tercero de una venta / de una compra | Son nombres del **campo** en `Sale` y `Purchase` (y en sus DTOs), no de una clase |
 | `documentType` / `documentNumber` | Tipo y numero de documento (`tipo_documento`, `numero_documento`) | Los dos obligatorios. El numero es unico por tenant |
+| **Consumidor final** | El cliente de una venta que no identifica a nadie | Un tercero CLIENTE con NIT `222222222222` (el de la DIAN), uno por tenant, creado la primera vez. **Toda factura tiene tercero**: una venta sin `customerId` usa este; una compra sin `supplierId` es 400, porque no hay proveedor por defecto |
 
 ### Sales
 
@@ -103,7 +104,7 @@ siempre `date`. Los de concepto se nombran `concepto_<entidad>` y en Java son si
 | `ivaAmount` (linea) | IVA generado por la linea | **Congelado al facturar.** No se recalcula nunca desde el producto: editar el IVA de un producto no puede mover el IVA de una factura ya emitida |
 | `ivaPorPagar` | IVA generado menos IVA descontable | No es el IVA de la factura: es la diferencia contra el IVA que ya se pago al comprar esos productos (`producto.taxAmount`). En Autollantas se llama `ivaDifference` / "IVA por Pagar" |
 | `subtotal` | Suma de precio por cantidad, **sin** IVA | En Autollantas no es un campo, se calcula en la UI (`calculateSubtotalSinIva`) |
-| Saldo pendiente | `total` menos la suma de los `RECAUDO_VENTA` de la factura (contado y abonos), activos o no | **No es un campo** en ServiBox, se calcula. Autollantas lo guarda en `saldo_pendiente`. Una venta de contado tiene pendiente 0 |
+| Saldo pendiente | `total` menos la suma de los `RECAUDO_VENTA` de la factura (contado y abonos), activos o no | **No es un campo** en ServiBox, se calcula. Autollantas lo guarda en `saldo_pendiente`. Una venta de contado tiene pendiente 0. En la API (`pendingBalance`) una factura `ANULADA` muestra 0, porque no se debe; el calculo interno sigue contando lo abonado, porque restaurar lo necesita |
 | `CONTADO` / `CREDITO` | Forma de pago | En Autollantas son los literales `String` `"Contado"` y `"Credito"` (con tilde); aqui enum |
 | `PAGADA` / `PENDIENTE` / `ANULADA` | Estado de la factura | Mismos nombres que Autollantas, pero enum en vez de `String` |
 

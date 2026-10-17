@@ -1,7 +1,11 @@
 package com.servibox.backend.treasury.entity;
 
-/** Igual que AccountType de Autollantas: efectivo en caja o cuenta bancaria. */
+/**
+ * Tipos de cuenta del diccionario. Autollantas solo tenia efectivo y banco (CASH y BANK);
+ * DIGITAL cubre billeteras como Nequi o Daviplata.
+ */
 public enum AccountType {
-    CASH,
-    BANK
+    EFECTIVO,
+    BANCO,
+    DIGITAL
 }

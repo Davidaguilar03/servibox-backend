@@ -13,7 +13,8 @@ import java.util.Optional;
  * PostgreSQL (ver Modulo Reporting en 01-ARCHITECTURE.md). Los listados y sumas pasan por
  * ahi para llevar siempre MovementSpecifications.activo().
  */
-public interface MovementRepository extends JpaRepository<Movement, Long>, JpaSpecificationExecutor<Movement> {
+public interface MovementRepository extends JpaRepository<Movement, Long>, JpaSpecificationExecutor<Movement>,
+        MovementRepositoryCustom {
 
     /**
      * Nunca usar el findById heredado sobre una entidad TenantAware: el @Filter de

@@ -23,6 +23,8 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -156,6 +158,37 @@ class AuthLoginIntegrationTest {
         assertThat(jwtService.extractTenantId(claims)).isEqualTo(tenantId);
         assertThat(jwtService.extractUsername(claims)).isEqualTo(USERNAME);
         assertThat(jwtService.extractRole(claims)).isEqualTo(Role.ADMIN.name());
+    }
+
+    /** Los roles del diccionario se guardan, se leen y viajan en el token. */
+    @Test
+    void losRolesMecanicoYCajeroSeGuardanSeLeenYVanEnElToken() throws Exception {
+        for (Role rol : List.of(Role.MECANICO, Role.CAJERO)) {
+            String username = rol.name().toLowerCase();
+            TenantContext.setTenantId(tenantId);
+            try {
+                User user = new User();
+                user.setUsername(username);
+                user.setPasswordHash(passwordEncoder.encode(PASSWORD));
+                user.setActive(true);
+                user.setRole(rol);
+                userRepository.save(user);
+                assertThat(userRepository.findByUsernameAndTenantId(username, tenantId).orElseThrow().getRole())
+                        .isEqualTo(rol);
+            } finally {
+                TenantContext.clear();
+            }
+
+            MvcResult result = mockMvc.perform(post("/api/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"tenantSlug":"%s","username":"%s","password":"%s"}
+                                    """.formatted(SLUG, username, PASSWORD)))
+                    .andExpect(status().isOk())
+                    .andReturn();
+            String token = JsonPath.read(result.getResponse().getContentAsString(), "$.token");
+            assertThat(jwtService.extractRole(jwtService.validateAndParse(token))).isEqualTo(rol.name());
+        }
     }
 
     @Test

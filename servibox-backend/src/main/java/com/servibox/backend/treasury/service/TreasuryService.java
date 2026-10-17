@@ -126,6 +126,17 @@ public class TreasuryService {
     public List<Movement> buscarMovimientos(Long accountId, MovementCategory categoria,
                                             LocalDate desde, LocalDate hasta,
                                             Long saleId, Long purchaseId) {
+        return movementRepository.findAll(filtroActivos(accountId, categoria, desde, hasta, saleId, purchaseId),
+                Sort.by(Sort.Order.desc("date"), Sort.Order.desc("id")));
+    }
+
+    /**
+     * El filtro de buscarMovimientos y de las sumas: siempre MovementSpecifications.activo(),
+     * mas cada filtro opcional que venga.
+     */
+    private static Specification<Movement> filtroActivos(Long accountId, MovementCategory categoria,
+                                                         LocalDate desde, LocalDate hasta,
+                                                         Long saleId, Long purchaseId) {
         Specification<Movement> filtro = MovementSpecifications.activo();
         if (saleId != null) {
             filtro = filtro.and((raiz, consulta, cb) -> cb.equal(raiz.get("sale").get("id"), saleId));
@@ -145,26 +156,23 @@ public class TreasuryService {
         if (hasta != null) {
             filtro = filtro.and((raiz, consulta, cb) -> cb.lessThanOrEqualTo(raiz.get("date"), hasta));
         }
-        return movementRepository.findAll(filtro, Sort.by(Sort.Order.desc("date"), Sort.Order.desc("id")));
+        return filtro;
     }
 
     /**
-     * Suma de los montos activos de una categoria en todo el historico del tenant. Suma en
-     * memoria sobre el mismo listado para no duplicar en JPQL la regla de movimiento activo.
+     * Suma de los montos activos de una categoria en todo el historico del tenant. La suma
+     * la hace la base, con el mismo filtro que el listado: la regla de movimiento activo
+     * sigue viviendo solo en MovementSpecifications.
      */
     @Transactional(readOnly = true)
     public double sumarPorCategoria(MovementCategory categoria) {
-        return sumar(buscarMovimientos(null, categoria, null, null));
+        return movementRepository.sumarMonto(filtroActivos(null, categoria, null, null, null, null));
     }
 
     /** Suma de los montos activos de una categoria con fecha dentro de [desde, hasta]. */
     @Transactional(readOnly = true)
     public double sumarPorCategoria(MovementCategory categoria, LocalDate desde, LocalDate hasta) {
-        return sumar(buscarMovimientos(null, categoria, desde, hasta));
-    }
-
-    private static double sumar(List<Movement> movimientos) {
-        return movimientos.stream().mapToDouble(m -> m.getAmount() != null ? m.getAmount() : 0.0).sum();
+        return movementRepository.sumarMonto(filtroActivos(null, categoria, desde, hasta, null, null));
     }
 
     // ---- Movimientos manuales: gastos operativos e ingresos ocasionales ----
@@ -287,8 +295,9 @@ public class TreasuryService {
      *
      * Son dos movimientos de categoria TRANSFERENCIA: un EGRESO en el origen y un INGRESO
      * en el destino que apunta al EGRESO con relatedMovement. No hay tabla de
-     * transferencias. El concepto que manda el usuario va a las notas de las dos patas;
-     * el concepto de cada movimiento es el de siempre ("Transferencia a / desde").
+     * transferencias. El concepto de las dos patas es el que escribe el usuario, sin
+     * espacios sobrantes; si no escribe ninguno, el autogenerado ("Transferencia a X" y
+     * "Transferencia desde Y"). Las notas quedan vacias.
      */
     @Transactional
     public Transferencia registrarTransferencia(Account cuentaOrigen, Account cuentaDestino,
@@ -306,24 +315,24 @@ public class TreasuryService {
         Account origen = recargar(cuentaOrigen);
         Account destino = recargar(cuentaDestino);
 
+        String delUsuario = concepto != null && !concepto.isBlank() ? concepto.strip() : null;
+
         Movement egreso = new Movement();
         egreso.setCategory(MovementCategory.TRANSFERENCIA);
         egreso.setType(MovementType.EGRESO);
         egreso.setAccount(origen);
-        egreso.setConcept("Transferencia a " + destino.getName());
+        egreso.setConcept(delUsuario != null ? delUsuario : "Transferencia a " + destino.getName());
         egreso.setAmount(monto);
         egreso.setDate(fecha);
-        egreso.setNotes(concepto);
         Movement egresoGuardado = aplicarMovimiento(egreso);
 
         Movement ingreso = new Movement();
         ingreso.setCategory(MovementCategory.TRANSFERENCIA);
         ingreso.setType(MovementType.INGRESO);
         ingreso.setAccount(destino);
-        ingreso.setConcept("Transferencia desde " + origen.getName());
+        ingreso.setConcept(delUsuario != null ? delUsuario : "Transferencia desde " + origen.getName());
         ingreso.setAmount(monto);
         ingreso.setDate(fecha);
-        ingreso.setNotes(concepto);
         ingreso.setRelatedMovement(egresoGuardado);
         Movement ingresoGuardado = aplicarMovimiento(ingreso);
 

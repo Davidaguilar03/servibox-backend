@@ -11,6 +11,7 @@ import java.util.List;
 
 public record PurchaseRequest(
         @NotBlank String invoiceNumber,
+        /** Obligatorio: 400 si falta o no resuelve en el tenant. */
         Long supplierId,
         LocalDate invoiceDate,
         LocalDate dueDate,

@@ -38,7 +38,11 @@ public class Sale extends TenantAwareEntity {
     @Column(name = "numero_factura_venta")
     private String invoiceNumber;
 
-    /** El cliente: un tercero CLIENTE o AMBOS. Nullable, como lo era id_cliente. */
+    /**
+     * El cliente: un tercero CLIENTE o AMBOS. Nunca nulo desde el service: una venta sin
+     * cliente identificado usa el Consumidor final del tenant. La columna todavia admite
+     * nulos; la nulabilidad se alinea en el paso 5 del refactor.
+     */
     @ManyToOne
     @JoinColumn(name = "id_tercero")
     private Counterparty customer;

@@ -238,9 +238,11 @@ tiene que venir de una variable de entorno real**, nunca el valor de respaldo.
 ### Modelo de usuario
 
 `auth.entity.User` extiende `TenantAwareEntity`: `username`, `passwordHash`, `email`,
-`active`, y `role` como enum `auth.entity.Role` (`ADMIN`, `EMPLEADO`) con
-`@Enumerated(STRING)`. Motivo del enum en vez de tabla en
-[03-DECISIONS.md](03-DECISIONS.md).
+`active`, y `role` como enum `auth.entity.Role` (`ADMIN`, `MECANICO`, `CAJERO`, los del
+diccionario) con `@Enumerated(STRING)`. Motivo del enum en vez de tabla en
+[03-DECISIONS.md](03-DECISIONS.md). El rol viaja en el JWT y como authority `ROLE_<rol>`,
+pero **todavia no hay reglas de permisos por rol**: toda ruta autenticada vale para
+cualquiera.
 
 La restriccion unica es **compuesta**, `(tenant_id, username)`, no `unique` en la columna
 sola: dos negocios distintos pueden tener cada uno su usuario `admin`.
@@ -301,8 +303,12 @@ Migrado desde el modulo `inventory` de Autollantas. Todas sus entidades extiende
   pase por el service. Al editar, la validacion excluye el propio registro: volver a
   guardar un producto sin cambiarle el codigo no es un duplicado.
 * `FinancialSettings` (`CONFIGURACION_FINANCIERA`): `expensesRate`, `dianRate`, `icaRate`,
-  `cardCommissionRate`. En Autollantas es un singleton con id fijo 1; aqui es **una fila
-  por tenant**, porque cada negocio tiene sus propios porcentajes.
+  `cardCommissionRate`, todas fracciones (`icaRate` por mil). En Autollantas es un
+  singleton con id fijo 1; aqui es **una fila por tenant**, porque cada negocio tiene sus
+  propios porcentajes: restriccion unica `uk_configuracion_tenant` sobre `tenant_id`, y
+  `InventoryService.saveFinancialSettings` rechaza una segunda con
+  `DuplicateFinancialSettingsException` (**409**). `cardCommissionRate` es obligatoria
+  (NOT NULL) y vale 0.0 por defecto; todavia no entra en ningun calculo.
 
 **Calculo de precios** (`InventoryService.recalculatePrices`, portado de Autollantas)
 
@@ -343,7 +349,8 @@ Todas sus entidades extienden `TenantAwareEntity`.
 **Entidades**
 
 * `Account` (`CUENTAS`): `name`, `initialBalance`, `currentBalance`, `type` (enum
-  `AccountType`, `CASH` o `BANK`). Restriccion unica **compuesta** `uk_cuenta_tenant_name`
+  `AccountType`: `EFECTIVO`, `BANCO` o `DIGITAL`, los del diccionario; antes `CASH` y
+  `BANK`). Restriccion unica **compuesta** `uk_cuenta_tenant_name`
   sobre `(tenant_id, nombre_cuenta)`, mismo criterio que `(tenant_id, username)` en `User`
   y `(tenant_id, codigo_producto)` en `Product`: cada taller tiene su propia "Caja
   General".
@@ -430,9 +437,10 @@ Todas sus entidades extienden `TenantAwareEntity`.
   `ResourceNotFoundException` (**404**); si es de otra categoria,
   `InvalidMovementOperationException` (**400**, "se gestiona desde su operacion").
 * `registrarTransferencia(origen, destino, concepto, monto, fecha)`: **dos movimientos de
-  categoria `TRANSFERENCIA`**, un `EGRESO` en el origen ("Transferencia a {destino}") y un
-  `INGRESO` en el destino ("Transferencia desde {origen}") cuyo `relatedMovement` es el
-  `EGRESO`. El concepto que manda el usuario va a `notes` en las dos patas. Devuelve el
+  categoria `TRANSFERENCIA`**, un `EGRESO` en el origen y un `INGRESO` en el destino cuyo
+  `relatedMovement` es el `EGRESO`. El `concept` de las dos patas es el texto del usuario
+  sin espacios sobrantes; si no manda ninguno, el autogenerado ("Transferencia a
+  {destino}" y "Transferencia desde {origen}"). `notes` queda vacio. Devuelve el
   record `Transferencia(egreso, ingreso)`. Todo en una transaccion; **el dinero se
   conserva**. Rechaza con `InvalidTransferException` (**400**) cuentas iguales o monto no
   positivo, sin mover ningun saldo ni dejar movimientos.
@@ -451,8 +459,11 @@ Todas sus entidades extienden `TenantAwareEntity`.
 * Consultas, todas sobre movimientos **activos**: `findMovementsByAccountId` (el
   extracto), `buscarMovimientos(accountId, categoria, desde, hasta, saleId, purchaseId)`
   con todos los filtros opcionales, y `sumarPorCategoria(categoria)` /
-  `sumarPorCategoria(categoria, desde, hasta)`, que usa Reporting y suman en memoria sobre
-  el mismo listado para no duplicar la regla en JPQL. `findMovementById` busca por id en
+  `sumarPorCategoria(categoria, desde, hasta)`, que usa Reporting. Las sumas las hace la
+  base: `MovementRepository.sumarMonto(Specification)` (fragmento
+  `MovementRepositoryCustomImpl`, un `SUM` por Criteria) recibe el mismo filtro que el
+  listado (`filtroActivos`), asi que la regla de movimiento activo sigue viviendo solo en
+  `MovementSpecifications`. `findMovementById` busca por id en
   el tenant, activo o no (lo usan editar y eliminar, que rechazan las categorias no
   manuales).
 * `balanceGlobal()`: suma de los `currentBalance` de todas las cuentas del tenant activo.
@@ -498,7 +509,7 @@ base pero **ningun endpoint lo expone**: todo listado pasa por el predicado de m
 activo. Si hace falta verlo, es un endpoint nuevo, no un filtro.
 
 **Semilla de desarrollo.** `DevDataInitializer` crea ademas las 2 cuentas por defecto de
-Autollantas para el tenant `demo`: `Caja General` (`CASH`) y `Bancolombia` (`BANK`), las
+Autollantas para el tenant `demo`: `Caja General` (`EFECTIVO`) y `Bancolombia` (`BANCO`), las
 dos con saldo inicial 0.
 
 ### Modulo Counterparties
@@ -644,15 +655,21 @@ y comparacion con Autollantas en [03-DECISIONS.md](03-DECISIONS.md).
 * `POST /api/sales/{id}/restore`
 
 Las respuestas van por DTO (`SaleResponse`, `SaleDetailResponse`, `MovementResponse`),
-nunca la entidad JPA. `SaleResponse` incluye `pendingBalance` calculado y ya no lleva
+nunca la entidad JPA. `SaleResponse` incluye `pendingBalance` calculado (**0 si la
+factura esta `ANULADA`**: no se debe; el `saldoPendiente` interno no cambia) y ya no lleva
 `accountId` ni `accountName`. Los cobros de una factura se consultan con `GET
 /api/treasury/movements?saleId=`.
 
-El cliente se identifica **por id** (`customerId` en `SaleRequest`, opcional). Un id que
-no resuelve en el tenant es 400 `Cliente no encontrado`; uno que resuelve a un tercero
-`PROVEEDOR` es 400 por rol. En la respuesta sale como `customer`, un
-`CounterpartyResponse` (`id`, `role`, `name`, `documentType`, `documentNumber`, `email`,
-`phone`), o `null`. Compras hace lo mismo con `supplierId` y `supplier`.
+El cliente se identifica **por id** (`customerId` en `SaleRequest`, opcional). Si no
+viene, la venta usa el **Consumidor final** del tenant
+(`CounterpartyService.consumidorFinal()`: CLIENTE, NIT `222222222222`, el de la DIAN), que
+se crea la primera vez y despues se reutiliza; cada tenant tiene el suyo. Toda venta
+tiene tercero. Un id que no resuelve en el tenant es 400 `Cliente no encontrado`; uno que
+resuelve a un tercero `PROVEEDOR` es 400 por rol. En la respuesta sale como `customer`,
+un `CounterpartyResponse` (`id`, `role`, `name`, `documentType`, `documentNumber`,
+`email`, `phone`). En compras `supplierId` es **obligatorio**: si falta, 400 `Una compra
+necesita un proveedor (supplierId)`; si no resuelve, 400 `Proveedor no encontrado`. No hay
+proveedor por defecto.
 
 **Tasa de IVA:** sale de `InventoryService.getIvaRateForProduct(Product)`, la misma que
 usan Inventory y Purchases. Regla en [02-CONVENTIONS.md](02-CONVENTIONS.md) (Calculos que
@@ -771,7 +788,8 @@ El egreso del contado al crear la compra tambien lleva la fecha de la factura.
 * `GET /api/purchases/{id}`: 404 si no existe para el tenant
 * `POST /api/purchases/{id}/payments`: cuerpo `PaymentRequest` (`accountId`, `amount`);
   responde **201** con el `MovementResponse` del `PAGO_COMPRA` creado. `PurchaseResponse`
-  ya no lleva `accountId` ni `accountName`
+  ya no lleva `accountId` ni `accountName`, y su `pendingBalance` es 0 si la compra esta
+  `ANULADA`, igual que en ventas
 * `POST /api/purchases/{id}/annul`
 * `POST /api/purchases/{id}/restore`
 
@@ -822,7 +840,7 @@ eliminan, y al eliminarse desaparecen solos.
   facturas, no de sus movimientos: una venta a credito aparece aunque no haya movido caja.
   `GASTO` e `INGRESO` salen de los movimientos `GASTO_OPERATIVO` e `INGRESO_OCASIONAL`, y
   su `sourceId` es el id del movimiento. Las transferencias no aparecen. La cuenta de un
-  renglon `VENTA` o `COMPRA` es la del **ultimo movimiento** de la factura (el contado, o
+  renglon `VENTA` o `COMPRA` es la del **ultimo movimiento activo** de la factura (el contado, o
   el ultimo abono o pago), o ninguna si no tiene movimientos: es la que antes guardaba la
   factura en `id_cuenta`, que se reescribia con cada abono o pago.
 * `buildReporteIva(desde, hasta)`: por cada linea de venta no anulada del rango, agrupa

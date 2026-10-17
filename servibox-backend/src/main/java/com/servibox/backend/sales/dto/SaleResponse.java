@@ -21,6 +21,7 @@ public record SaleResponse(
         Double subtotal,
         Double ivaPorPagar,
         Double total,
+        /** Lo que falta por cobrar. 0 en una ANULADA: una factura anulada no se debe. */
         Double pendingBalance,
         List<SaleDetailResponse> details
 ) {
@@ -38,7 +39,7 @@ public record SaleResponse(
                 sale.getSubtotal(),
                 sale.getIvaPorPagar(),
                 sale.getTotal(),
-                pendingBalance,
+                sale.getStatus() == SaleStatus.ANULADA ? 0.0 : pendingBalance,
                 details.stream().map(SaleDetailResponse::from).toList()
         );
     }

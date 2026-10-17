@@ -80,9 +80,12 @@ public class PurchasesService {
                                  List<LineaCompra> lineas) {
 
         validarNumeroFacturaUnico(invoiceNumber, null);
-        if (proveedor != null) {
-            counterpartyService.exigirRol(proveedor, CounterpartyRole.PROVEEDOR);
+        // Toda compra tiene tercero (id_tercero NOT NULL en el diccionario), y no hay
+        // proveedor por defecto: una factura de compra siempre la expide alguien.
+        if (proveedor == null) {
+            throw new InvalidPurchaseOperationException("Una compra necesita un proveedor (supplierId)");
         }
+        counterpartyService.exigirRol(proveedor, CounterpartyRole.PROVEEDOR);
 
         if (lineas == null || lineas.isEmpty()) {
             throw new InvalidPurchaseOperationException("Una factura de compra necesita al menos una linea");
