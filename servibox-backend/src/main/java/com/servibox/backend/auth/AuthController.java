@@ -46,6 +46,6 @@ public class AuthController {
             throw new InvalidCredentialsException();
         }
 
-        return new LoginResponse(jwtService.generateToken(user.get()));
+        return LoginResponse.from(jwtService.generateToken(user.get()), user.get(), tenant);
     }
 }
