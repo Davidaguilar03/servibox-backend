@@ -25,6 +25,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -53,6 +54,10 @@ class OperationalExpenseTest {
 
     @Autowired
     private TreasuryService treasuryService;
+
+    /** El "hoy" de negocio, el mismo que usan los servicios para la fecha por defecto. */
+    @Autowired
+    private Clock clock;
 
     @Autowired
     private TenantRepository tenantRepository;
@@ -168,7 +173,7 @@ class OperationalExpenseTest {
         Movement gasto = treasuryService.registrarGastoOperativo(caja, "Papeleria", 5000.0, null, null);
 
         assertThat(gasto.getNotes()).isNull();
-        assertThat(gasto.getDate()).isEqualTo(LocalDate.now());
+        assertThat(gasto.getDate()).isEqualTo(LocalDate.now(clock));
         assertThat(saldoDe(caja)).isEqualTo(95000.0);
     }
 

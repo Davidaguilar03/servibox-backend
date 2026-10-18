@@ -20,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,6 +42,8 @@ public class PurchasesService {
     private final ProductRepository productRepository;
     private final InventoryService inventoryService;
     private final TreasuryService treasuryService;
+    /** El "hoy" de negocio, ver BusinessClockConfiguration. */
+    private final Clock clock;
 
     @Transactional(readOnly = true)
     public List<Purchase> findAllPurchases() {
@@ -98,7 +101,7 @@ public class PurchasesService {
         Purchase compra = new Purchase();
         compra.setInvoiceNumber(invoiceNumber);
         compra.setSupplier(proveedor);
-        compra.setInvoiceDate(invoiceDate != null ? invoiceDate : LocalDate.now());
+        compra.setInvoiceDate(invoiceDate != null ? invoiceDate : LocalDate.now(clock));
         compra.setDueDate(dueDate);
         compra.setPaymentType(paymentType);
         compra.setPaymentMethod(paymentMethod);
@@ -175,10 +178,11 @@ public class PurchasesService {
     /**
      * Pago a una factura de compra a credito: un movimiento PAGO_COMPRA enlazado a la
      * compra. Se llama **pago**, no abono: el abono es lo que recibe el taller de un
-     * cliente. Ver 02-CONVENTIONS.md.
+     * cliente. Ver 02-CONVENTIONS.md. Sin fecha, hoy segun el Clock de negocio; una fecha
+     * posterior a hoy se rechaza.
      */
     @Transactional
-    public Movement registrarPago(Long purchaseId, Long accountId, Double monto) {
+    public Movement registrarPago(Long purchaseId, Long accountId, Double monto, LocalDate fecha) {
         Purchase compra = findPurchaseById(purchaseId)
                 .orElseThrow(() -> new IllegalArgumentException("Compra no encontrada: " + purchaseId));
 
@@ -188,6 +192,13 @@ public class PurchasesService {
         }
         if (monto == null || monto <= 0) {
             throw new InvalidPurchaseOperationException("El monto del pago debe ser mayor a cero");
+        }
+        LocalDate hoy = LocalDate.now(clock);
+        if (fecha == null) {
+            fecha = hoy;
+        } else if (fecha.isAfter(hoy)) {
+            throw new InvalidPurchaseOperationException(
+                    "La fecha del pago (" + fecha + ") no puede ser posterior a hoy (" + hoy + ")");
         }
 
         double pendiente = saldoPendiente(compra);
@@ -201,7 +212,7 @@ public class PurchasesService {
 
         // registrarEgresoDeCompra ya exige saldo suficiente.
         Movement pago = treasuryService.registrarEgresoDeCompra(
-                cuenta, conceptoPago(compra), monto, compra, LocalDate.now());
+                cuenta, conceptoPago(compra), monto, compra, fecha);
 
         if (saldoPendiente(compra) <= TOLERANCIA_PESOS) {
             compra.setStatus(PurchaseStatus.PAGADA);

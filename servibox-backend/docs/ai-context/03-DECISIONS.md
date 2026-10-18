@@ -12,6 +12,40 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-18: Zona horaria de negocio y fecha de abonos y pagos
+
+* Decision: todo "hoy" de negocio sale de un unico bean `Clock` (`businessClock`, en
+  `config.BusinessClockConfiguration`) con la zona de la propiedad
+  `servibox.business.time-zone`, por defecto `America/Bogota` y sobreescribible con la
+  variable de entorno `BUSINESS_TIME_ZONE`. Lo usan, con `LocalDate.now(clock)`: la fecha
+  por defecto de una venta y de una compra, la de un movimiento sin fecha
+  (`aplicarMovimiento`: ingresos ocasionales, gastos operativos, transferencias) y la de un
+  abono o un pago.
+  * **Auditoria sigue en UTC.** `created_at`, `updated_at` (`JpaAuditingConfiguration`) y
+    `fecha_creacion_tenant` (`Tenant.onCreate`) no usan este Clock: son marcas de tiempo,
+    no fechas de negocio. La emision y expiracion del JWT (`new Date()`) tampoco: es un
+    instante, no depende de la zona.
+  * **Fecha opcional en abonos y pagos.** `CollectionRequest` y `PaymentRequest` aceptan
+    `date` (`LocalDate`, `yyyy-MM-dd`). Si falta, hoy segun el Clock de negocio. Una fecha
+    posterior a hoy es 400 ("La fecha del abono (F) no puede ser posterior a hoy (H)", y lo
+    mismo con "pago"), con `InvalidSaleOperationException` o
+    `InvalidPurchaseOperationException`. Un texto que no es fecha es 400 por cuerpo ilegible.
+  * **Lo que se replico de Autollantas.** Nada mas: `CollectionFormController` y
+    `PaymentFormController` solo proponen la fecha de hoy en el `DatePicker` y no validan
+    la fecha (ni futura, ni anterior a la factura); el servicio la guarda tal cual. El
+    rechazo de fechas futuras es propio de ServiBox. No se agrego la validacion de "no antes
+    de la factura" porque Autollantas no la tiene.
+  * **Zona por tenant: pendiente.** Hoy la zona es una sola para toda la instalacion. Que
+    cada tenant tenga la suya exige una columna en TENANTS y una migracion V2; queda para
+    una rama posterior.
+* Alternativas consideradas: `TimeZone.setDefault` o `-Duser.timezone` en el arranque
+  (cambia tambien la auditoria y depende del despliegue); `LocalDate.now(ZoneId)` con la
+  zona leida en cada servicio (repite la lectura y no se puede fijar en pruebas).
+* Motivo: un servidor en UTC fechaba en el dia siguiente toda operacion de un taller en
+  Colombia hecha despues de las 19:00. Un Clock inyectado da la zona correcta y permite
+  probar el borde con un reloj fijo (`treasury.BusinessClockZoneTest`). Corrige la nota de
+  "Restaurar facturas": los movimientos sueltos ya no usan `LocalDate.now()` del sistema.
+
 ## 2026-10-18: Consecutivo de la factura de venta
 
 * Decision: `invoiceNumber` pasa a ser **opcional** en `SaleRequest`. Si viene, se respeta

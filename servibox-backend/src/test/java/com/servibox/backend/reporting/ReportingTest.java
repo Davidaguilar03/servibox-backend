@@ -349,8 +349,8 @@ class ReportingTest {
         Sale contado = salesService.crearFactura("FV-CON", t.cliente, dia, null, PaymentType.CONTADO, banco,
                 "Efectivo", unaLlanta);
         Sale dosCuentas = t.vender("FV-DOS", dia, t.llanta, 1, 100.0);
-        salesService.registrarAbono(dosCuentas.getId(), t.caja.getId(), 50.0);
-        salesService.registrarAbono(dosCuentas.getId(), banco.getId(), 69.0);
+        salesService.registrarAbono(dosCuentas.getId(), t.caja.getId(), 50.0, null);
+        salesService.registrarAbono(dosCuentas.getId(), banco.getId(), 69.0, null);
         Sale sinAbonos = t.vender("FV-SIN", dia, t.llanta, 1, 100.0);
         Sale anulada = salesService.crearFactura("FV-ANU", t.cliente, dia, null, PaymentType.CONTADO, t.caja,
                 "Efectivo", unaLlanta);
@@ -359,8 +359,8 @@ class ReportingTest {
         Purchase compraContado = purchasesService.crearFactura("FC-CON", t.proveedor, dia, null,
                 com.servibox.backend.purchases.entity.PaymentType.CONTADO, t.caja, "Efectivo", unaCompra);
         Purchase compraDosCuentas = t.comprar("FC-DOS", dia, t.llanta, 1, 100.0);
-        purchasesService.registrarPago(compraDosCuentas.getId(), banco.getId(), 19.0);
-        purchasesService.registrarPago(compraDosCuentas.getId(), t.caja.getId(), 100.0);
+        purchasesService.registrarPago(compraDosCuentas.getId(), banco.getId(), 19.0, null);
+        purchasesService.registrarPago(compraDosCuentas.getId(), t.caja.getId(), 100.0, null);
         Purchase compraSinPagos = t.comprar("FC-SIN", dia, t.llanta, 1, 100.0);
 
         Map<String, String> cuentaPorConcepto = new HashMap<>();

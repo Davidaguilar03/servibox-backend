@@ -167,7 +167,7 @@ class PurchasesFlowTest {
         double total = compra.getTotal(); // 119000
         fondear(500000.0);
 
-        purchasesService.registrarPago(compra.getId(), caja.getId(), total);
+        purchasesService.registrarPago(compra.getId(), caja.getId(), total, null);
         fixture.verificarInvariante();
 
         assertThat(estadoDe(compra)).isEqualTo(PurchaseStatus.PAGADA);
@@ -188,7 +188,7 @@ class PurchasesFlowTest {
         fondear(500000.0);
         double saldoAntes = saldoDe(caja);
 
-        assertThatThrownBy(() -> purchasesService.registrarPago(compra.getId(), caja.getId(), 200000.0))
+        assertThatThrownBy(() -> purchasesService.registrarPago(compra.getId(), caja.getId(), 200000.0, null))
                 .isInstanceOf(InvalidPurchaseOperationException.class)
                 .hasMessageContaining("excede el saldo pendiente");
 
@@ -201,7 +201,7 @@ class PurchasesFlowTest {
         fondear(1000000.0);
         Purchase contado = comprar("FAC-00006", PaymentType.CONTADO, caja, 1, 100000.0);
 
-        assertThatThrownBy(() -> purchasesService.registrarPago(contado.getId(), caja.getId(), 1000.0))
+        assertThatThrownBy(() -> purchasesService.registrarPago(contado.getId(), caja.getId(), 1000.0, null))
                 .isInstanceOf(InvalidPurchaseOperationException.class)
                 .hasMessageContaining("PENDIENTE");
     }
@@ -253,7 +253,7 @@ class PurchasesFlowTest {
         fondear(500000.0);
         double saldoAntesDelPago = saldoDe(caja);
 
-        purchasesService.registrarPago(compra.getId(), caja.getId(), 19000.0);
+        purchasesService.registrarPago(compra.getId(), caja.getId(), 19000.0, null);
         assertThat(saldoDe(caja)).isEqualTo(saldoAntesDelPago - 19000.0);
 
         purchasesService.anularFactura(compra.getId());
@@ -275,7 +275,7 @@ class PurchasesFlowTest {
         fondear(500000.0);
         purchasesService.anularFactura(compra.getId());
 
-        assertThatThrownBy(() -> purchasesService.registrarPago(compra.getId(), caja.getId(), 1000.0))
+        assertThatThrownBy(() -> purchasesService.registrarPago(compra.getId(), caja.getId(), 1000.0, null))
                 .isInstanceOf(InvalidPurchaseOperationException.class)
                 .hasMessage("Solo se puede pagar una compra PENDIENTE, y esta esta ANULADA");
 

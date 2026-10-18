@@ -85,7 +85,7 @@ class SalesCollectionAndAnnulmentTest {
         double total = venta.getTotal(); // 119000
         assertThat(estadoDe(venta)).isEqualTo(SaleStatus.PENDIENTE);
 
-        salesService.registrarAbono(venta.getId(), caja.getId(), total);
+        salesService.registrarAbono(venta.getId(), caja.getId(), total, null);
         fixture.verificarInvariante();
 
         assertThat(estadoDe(venta)).isEqualTo(SaleStatus.PAGADA);
@@ -107,7 +107,7 @@ class SalesCollectionAndAnnulmentTest {
     void unAbonoParcialDejaLaFacturaPendienteConSuSaldo() {
         Sale venta = facturar("VEN-00011", PaymentType.CREDITO, null, 1, 100000.0);
 
-        salesService.registrarAbono(venta.getId(), caja.getId(), 19000.0);
+        salesService.registrarAbono(venta.getId(), caja.getId(), 19000.0, null);
         fixture.verificarInvariante();
 
         assertThat(estadoDe(venta)).isEqualTo(SaleStatus.PENDIENTE);
@@ -119,7 +119,7 @@ class SalesCollectionAndAnnulmentTest {
     void unAbonoQueExcedeElSaldoPendienteEsRechazado() {
         Sale venta = facturar("VEN-00012", PaymentType.CREDITO, null, 1, 100000.0);
 
-        assertThatThrownBy(() -> salesService.registrarAbono(venta.getId(), caja.getId(), 200000.0))
+        assertThatThrownBy(() -> salesService.registrarAbono(venta.getId(), caja.getId(), 200000.0, null))
                 .isInstanceOf(InvalidSaleOperationException.class)
                 .hasMessageContaining("excede el saldo pendiente");
 
@@ -132,7 +132,7 @@ class SalesCollectionAndAnnulmentTest {
     void noSePuedeAbonarAUnaFacturaQueNoEstaPendiente() {
         Sale contado = facturar("VEN-00013", PaymentType.CONTADO, caja, 1, 100000.0);
 
-        assertThatThrownBy(() -> salesService.registrarAbono(contado.getId(), caja.getId(), 1000.0))
+        assertThatThrownBy(() -> salesService.registrarAbono(contado.getId(), caja.getId(), 1000.0, null))
                 .isInstanceOf(InvalidSaleOperationException.class)
                 .hasMessageContaining("PENDIENTE");
     }
@@ -192,7 +192,7 @@ class SalesCollectionAndAnnulmentTest {
     @Test
     void anularUnaFacturaConAbonosRevierteEsosAbonos() {
         Sale venta = facturar("VEN-00017", PaymentType.CREDITO, null, 1, 100000.0);
-        salesService.registrarAbono(venta.getId(), caja.getId(), 19000.0);
+        salesService.registrarAbono(venta.getId(), caja.getId(), 19000.0, null);
         assertThat(saldoDe(caja)).isEqualTo(19000.0);
 
         salesService.anularFactura(venta.getId());
@@ -213,7 +213,7 @@ class SalesCollectionAndAnnulmentTest {
         Sale venta = facturar("VEN-00018", PaymentType.CREDITO, null, 1, 100000.0);
         salesService.anularFactura(venta.getId());
 
-        assertThatThrownBy(() -> salesService.registrarAbono(venta.getId(), caja.getId(), 1000.0))
+        assertThatThrownBy(() -> salesService.registrarAbono(venta.getId(), caja.getId(), 1000.0, null))
                 .isInstanceOf(InvalidSaleOperationException.class)
                 .hasMessage("Solo se puede abonar a una factura PENDIENTE, y esta esta ANULADA");
 

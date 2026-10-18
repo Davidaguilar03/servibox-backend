@@ -82,7 +82,7 @@ public class PurchasesController {
     public MovementResponse registrarPago(@PathVariable Long id,
                                           @Valid @RequestBody PaymentRequest request) {
         compraDeRuta(id);
-        return MovementResponse.from(purchasesService.registrarPago(id, request.accountId(), request.amount()));
+        return MovementResponse.from(purchasesService.registrarPago(id, request.accountId(), request.amount(), request.date()));
     }
 
     @PostMapping("/{id}/annul")
