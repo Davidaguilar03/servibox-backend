@@ -12,6 +12,48 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-18: Flyway gestiona el esquema y tipos fisicos definitivos
+
+* Decision: paso 6 del refactor de normalizacion (ver
+  [sessions/2026-10-06-refactor-normalizacion.md](sessions/2026-10-06-refactor-normalizacion.md)).
+  * **Flyway.** El esquema vive en `src/main/resources/db/migration`. `V1__init_schema.sql`
+    esta escrita a mano desde [04-DATA-MODEL.md](04-DATA-MODEL.md), no exportada de
+    Hibernate, compatible con PostgreSQL 16 y con H2 en modo PostgreSQL. Hibernate usa
+    `ddl-auto=validate` en todos los perfiles: si una entidad no coincide con la migracion,
+    la app no arranca.
+  * **Tipos.** El diccionario se corrigio para que coincida con el codigo: identificadores
+    y FK `BIGINT` (`Long`); montos `NUMERIC(14,2)`; tasas y porcentajes como fraccion en
+    `NUMERIC(8,6)` (0.19 es 19 por ciento), con CHECK de 0 a 1 en los cuatro porcentajes de
+    CONFIGURACION_FINANCIERA y no en `margen_utilidad` ni `tasa_impuesto`; fechas de negocio
+    `DATE` (`LocalDate`); enums `VARCHAR` con su longitud. El dinero y las tasas siguen como
+    `Double`, mapeados con `@JdbcTypeCode(SqlTypes.NUMERIC)` y su `precision` y `scale`.
+    Los enums llevan `@JdbcTypeCode(SqlTypes.VARCHAR)`: la propiedad global
+    `hibernate.type.preferred_enum_jdbc_type` no existe en Hibernate 7.4 (se probo y en H2
+    seguia saliendo `enum`).
+  * **UTC.** `created_at` y `updated_at` los escribe un `DateTimeProvider` con
+    `LocalDateTime.now(ZoneOffset.UTC)` (`JpaAuditingConfiguration`), y
+    `fecha_creacion_tenant` igual en `Tenant.onCreate`.
+  * **Base de tests.** H2 en memoria en modo PostgreSQL con Flyway, y la URL lleva
+    `${random.uuid}`: cada contexto de Spring tiene su propia base y Flyway la migra desde
+    vacia al arrancar, igual que `create-drop` le daba un esquema limpio.
+  * **Perfiles.** Local (sin perfil o con `dev`): H2 en memoria en modo PostgreSQL. `prod`:
+    PostgreSQL con `DB_URL`, `DB_USERNAME` y `DB_PASSWORD`, sin valor por defecto.
+* Alternativas consideradas: exportar V1 desde Hibernate, descartado porque copiaria el
+  esquema de las entidades en vez del diccionario; pasar el dinero a `BigDecimal` en esta
+  rama, descartado por alcance (rama aparte); porcentajes de 0 a 100 en `NUMERIC(5,2)` como
+  decia el diccionario, descartado porque el ICA es por mil y perderia precision, y porque
+  obligaba a cambiar todos los calculos; `TIMESTAMP` en UTC para fechas de negocio,
+  descartado porque una venta de la noche en Colombia quedaria con la fecha del dia
+  siguiente; para los tests, un nombre de base fijo con `clean` y `migrate` en cada
+  contexto (`FlywayMigrationStrategy`), descartado porque los contextos cacheados comparten
+  la base y el `clean` de uno nuevo borraria los datos de otro todavia vivo, y porque
+  obliga a habilitar `clean`, que en un perfil equivocado borra la base.
+* Motivo: con una base persistente el esquema no puede regenerarse en cada arranque; las
+  migraciones versionadas dejan un historial auditable, y `validate` garantiza que codigo y
+  esquema no se separen.
+* Pendiente: V1 solo se probo en H2 en modo PostgreSQL. Docker estaba instalado pero sin
+  demonio corriendo, asi que no hay prueba con Testcontainers contra PostgreSQL 16.
+
 ## 2026-10-17: Nombres fisicos, nulabilidad y longitudes del diccionario
 
 * Decision: paso 5 del refactor de normalizacion (ver
@@ -626,7 +668,12 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
   refactor y clase por clase. No se agrego ni se quito cobertura: los tests verifican lo
   mismo, expresado con los campos nuevos.
 
-## 2026-09-07: Estado de la gestion del esquema (sin migraciones formales)
+## 2026-09-07: Estado de la gestion del esquema (sin migraciones formales) (RESUELTO el 2026-10-18)
+
+**Resuelto el 2026-10-18** por "Flyway gestiona el esquema y tipos fisicos definitivos": el
+esquema lo crean migraciones Flyway, Hibernate solo lo valida y el perfil `prod` apunta a
+PostgreSQL.
+
 
 * Constatacion, no decision: **no hay Flyway ni Liquibase** en `pom.xml`, ni ninguna
   carpeta de migraciones versionadas. Los tests corren sobre H2 en memoria con

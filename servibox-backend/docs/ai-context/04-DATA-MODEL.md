@@ -2,14 +2,14 @@
 
 Fuente: Diccionario de Datos de ServiBox (informe UPTC-EISC-SB-01) y su diagrama entidad-relacion, 14 entidades en tercera forma normal. Este archivo es la especificacion del esquema al que debe converger el codigo.
 
-**Estado.** Objetivo del refactor de normalizacion. El codigo todavia tiene el modelo anterior de 19 entidades hasta que termine ese refactor. Donde el codigo y este archivo difieran, este archivo manda, salvo lo anotado en "Decisiones de implementacion" y "Pendientes" al final.
+**Estado.** El refactor de normalizacion termino (ver `sessions/2026-10-06-refactor-normalizacion.md`): el codigo tiene las 14 entidades y el esquema lo crea la migracion Flyway `V1__init_schema.sql`, escrita desde este archivo. `schema.SchemaConformanceTest` compara la base con este archivo. Donde el codigo y este archivo difieran, este archivo manda, salvo lo anotado en "Decisiones de implementacion" y "Pendientes" al final.
 
 ## Reglas generales
 
 * Multi-tenant: base compartida y esquema compartido. La columna `id_tenant` esta en todas las tablas excepto `TENANTS` y `CATEGORIA_IMPUESTOS`. En la capa JPA el aislamiento lo da el `@Filter` de Hibernate.
 * Unicos compuestos con `id_tenant`: `(id_tenant, username)` en USUARIOS, `(id_tenant, nombre_cuenta)` en CUENTAS, `(id_tenant, numero_documento)` en TERCEROS, `(id_tenant, numero_factura_compra)` en COMPRAS, `(id_tenant, numero_factura_venta)` en VENTAS, `(id_tenant, codigo_producto)` en PRODUCTOS.
-* Motor: PostgreSQL 16. Tipos fisicos: identificadores `INTEGER`; texto `VARCHAR(n)`; montos en COP `NUMERIC(14,2)`; porcentajes `NUMERIC(5,2)`; fechas `TIMESTAMP WITHOUT TIME ZONE` (UTC); banderas `BOOLEAN`.
-* Integridad referencial: `ON DELETE RESTRICT` en las entidades maestras (cuentas, terceros, productos): nada con historial transaccional se elimina.
+* Motor: PostgreSQL 16. Tipos fisicos: identificadores y claves foraneas `BIGINT`; texto `VARCHAR(n)`; valores de enum `VARCHAR(n)` con su longitud, no tipo ENUM; montos en COP `NUMERIC(14,2)`; tasas y porcentajes como fraccion `NUMERIC(8,6)` (0.19 es 19 por ciento); fechas de negocio (`fecha_movimiento`, `fecha_compra`, `fecha_vencimiento_compra`, `fecha_venta`, `fecha_vencimiento_venta`) `DATE`; fechas de auditoria (`created_at`, `updated_at`, `fecha_creacion_tenant`) `TIMESTAMP WITHOUT TIME ZONE` en UTC; banderas `BOOLEAN`.
+* Integridad referencial: `ON DELETE RESTRICT` en todas las claves foraneas: nada con historial transaccional se elimina.
 * Normalizacion aplicada: (1) `MOVIMIENTOS` unifica gastos operativos, ingresos ocasionales, transferencias, pagos de compras y recaudos de ventas; `tipo_movimiento` da el flujo y `categoria_movimiento` el concepto. (2) `TERCEROS` unifica clientes y proveedores; `tipo_tercero` vale CLIENTE, PROVEEDOR o AMBOS.
 * Consecuencia de (1): ya no existen las tablas de abonos, pagos, transferencias, ingresos ocasionales ni gastos operativos. Tampoco `VENTAS` ni `COMPRAS` guardan la cuenta: la cuenta de un cobro o pago vive en el movimiento.
 
@@ -21,7 +21,7 @@ Modulo: Multi-tenancy y administracion.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
-| id_tenant | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador unico de la empresa o taller registrado. |
+| id_tenant | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico de la empresa o taller registrado. |
 | nombre_tenant | VARCHAR | 150 | NOT NULL | - | Razon social o denominacion comercial de la serviteca. |
 | slug_tenant | VARCHAR | 100 | NOT NULL | UK | Identificador alfanumerico unico para subdominio web y enrutamiento. |
 | activo_tenant | BOOLEAN | 1 byte | NOT NULL | - | Estado de la cuenta: true para activa, false para suspendida. |
@@ -33,8 +33,8 @@ Modulo: Multi-tenancy y administracion.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
-| id_usuario | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador secuencial del usuario. |
-| id_tenant | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). Aislamiento del usuario por taller. |
+| id_usuario | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador secuencial del usuario. |
+| id_tenant | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). Aislamiento del usuario por taller. |
 | username | VARCHAR | 50 | NOT NULL | UK | Nombre de usuario unico por taller (UK compuesta con id_tenant). |
 | password_hash | VARCHAR | 255 | NOT NULL | - | Hash criptografico de la contrasena calculado con BCrypt. |
 | email | VARCHAR | 150 | NULL | - | Direccion de correo electronico del usuario para soporte y notificaciones. |
@@ -49,12 +49,12 @@ Modulo: Multi-tenancy y administracion.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
-| id_configuracion | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador unico de la configuracion financiera. |
-| id_tenant | INTEGER (I) | 4 bytes | NOT NULL | FK, UK | FK a TENANTS(id_tenant). Relacion 1:1 estricta por taller. |
-| porcentaje_gastos | NUMERIC | 5,2 | NOT NULL | - | Porcentaje de provision estimada para gastos operativos (0.00 a 100.00). |
-| porcentaje_dian | NUMERIC | 5,2 | NOT NULL | - | Porcentaje de reserva para obligaciones fiscales de la DIAN. |
-| porcentaje_ica | NUMERIC | 5,2 | NOT NULL | - | Porcentaje de provision para el Impuesto de Industria y Comercio municipal. |
-| porcentaje_comision_tarjeta | NUMERIC | 5,2 | NOT NULL | - | Porcentaje de comision deducido por datafonos o pasarelas. |
+| id_configuracion | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico de la configuracion financiera. |
+| id_tenant | BIGINT (I) | 8 bytes | NOT NULL | FK, UK | FK a TENANTS(id_tenant). Relacion 1:1 estricta por taller. |
+| porcentaje_gastos | NUMERIC | 8,6 | NOT NULL | - | Provision estimada para gastos operativos, como fraccion de 0 a 1 (0.19 es 19 por ciento). |
+| porcentaje_dian | NUMERIC | 8,6 | NOT NULL | - | Reserva para obligaciones fiscales de la DIAN, como fraccion de 0 a 1 (0.19 es 19 por ciento). |
+| porcentaje_ica | NUMERIC | 8,6 | NOT NULL | - | Provision para el Impuesto de Industria y Comercio municipal, como fraccion de 0 a 1; el ICA es por mil (0.0082 es 8.2 por mil). |
+| porcentaje_comision_tarjeta | NUMERIC | 8,6 | NOT NULL | - | Comision deducida por datafonos o pasarelas, como fraccion de 0 a 1 (0.19 es 19 por ciento). |
 | created_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de creacion de la parametrizacion contable (UTC). |
 | updated_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de ultima modificacion de porcentajes (UTC). |
 
@@ -64,8 +64,8 @@ Modulo: Tesoreria.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
-| id_cuenta | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador unico de la cuenta de tesoreria. |
-| id_tenant | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). Aislamiento de la cuenta por taller. |
+| id_cuenta | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico de la cuenta de tesoreria. |
+| id_tenant | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). Aislamiento de la cuenta por taller. |
 | nombre_cuenta | VARCHAR | 100 | NOT NULL | UK | Nombre descriptivo de la cuenta (Caja General, Bancolombia, Nequi). Unico por taller (UK compuesta con id_tenant). |
 | balance_inicial | NUMERIC | 14,2 | NOT NULL | - | Saldo de apertura al registrar la cuenta en el sistema (en COP). |
 | saldo_actual | NUMERIC | 14,2 | NOT NULL | - | Saldo disponible en tiempo real, recalculado por movimientos de fondos. |
@@ -79,16 +79,16 @@ Modulo: Tesoreria.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
-| id_movimiento | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador unico del registro en el libro mayor de tesoreria. |
-| id_tenant | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
-| id_cuenta | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a CUENTAS(id_cuenta). Cuenta financiera afectada en la transaccion. |
-| id_movimiento_relacionado | INTEGER (I) | 4 bytes | NULL | FK | FK autoreferencial a MOVIMIENTOS(id_movimiento). Vincula la contrapartida contable en transferencias internas entre cuentas. |
-| id_compra | INTEGER (I) | 4 bytes | NULL | FK | FK a COMPRAS(id_compra). Vincula abonos y pagos a facturas de compra. |
-| id_venta | INTEGER (I) | 4 bytes | NULL | FK | FK a VENTAS(id_venta). Vincula abonos y recaudos de facturas de venta. |
+| id_movimiento | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico del registro en el libro mayor de tesoreria. |
+| id_tenant | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
+| id_cuenta | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a CUENTAS(id_cuenta). Cuenta financiera afectada en la transaccion. |
+| id_movimiento_relacionado | BIGINT (I) | 8 bytes | NULL | FK | FK autoreferencial a MOVIMIENTOS(id_movimiento). Vincula la contrapartida contable en transferencias internas entre cuentas. |
+| id_compra | BIGINT (I) | 8 bytes | NULL | FK | FK a COMPRAS(id_compra). Vincula abonos y pagos a facturas de compra. |
+| id_venta | BIGINT (I) | 8 bytes | NULL | FK | FK a VENTAS(id_venta). Vincula abonos y recaudos de facturas de venta. |
 | tipo_movimiento | VARCHAR | 20 | NOT NULL | - | Direccion contable del flujo financiero (INGRESO, EGRESO). |
 | categoria_movimiento | VARCHAR | 50 | NOT NULL | - | Categoria tecnica (GASTO_OPERATIVO, INGRESO_OCASIONAL, TRANSFERENCIA, PAGO_COMPRA, RECAUDO_VENTA). |
 | monto | NUMERIC | 14,2 | NOT NULL | - | Valor monetario de la transaccion en pesos colombianos (monto > 0). |
-| fecha_movimiento | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora efectiva de la operacion financiera. |
+| fecha_movimiento | DATE (D) | 4 bytes | NOT NULL | - | Fecha efectiva de la operacion financiera. |
 | concepto | VARCHAR | 255 | NOT NULL | - | Descripcion detallada que justifica contablemente la transaccion. |
 | notas | VARCHAR | 255 | NULL | - | Observaciones u anotaciones complementarias de auditoria. |
 | created_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de persistencia del movimiento (UTC). |
@@ -100,12 +100,12 @@ Modulo: Comercial.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
-| id_tercero | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador unico de la persona natural o juridica en el sistema. |
-| id_tenant | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). Directorio comercial aislado por taller. |
+| id_tercero | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico de la persona natural o juridica en el sistema. |
+| id_tenant | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). Directorio comercial aislado por taller. |
 | tipo_tercero | VARCHAR | 20 | NOT NULL | - | Rol comercial del actor en el taller (CLIENTE, PROVEEDOR, AMBOS). |
 | nombre_razon_social | VARCHAR | 150 | NOT NULL | - | Nombre completo del cliente o razon social del proveedor. |
 | tipo_documento | VARCHAR | 20 | NOT NULL | - | Tipo de identificacion fiscal (CC, NIT, CE, RUT, PASAPORTE). |
-| numero_documento | VARCHAR | 25 | NOT NULL | UK | Numero de documento de identidad o NIT fiscal (UK con id_tenant). |
+| numero_documento | VARCHAR | 25 | NOT NULL | UK | Numero de documento de identidad o NIT fiscal (UK compuesta con id_tenant). |
 | correo | VARCHAR | 150 | NULL | - | Direccion de correo electronico para notificaciones y facturacion. |
 | celular | VARCHAR | 25 | NULL | - | Telefono movil de contacto comercial. |
 | created_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de registro del tercero (UTC). |
@@ -117,12 +117,12 @@ Modulo: Comercial.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
-| id_compra | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador unico de la factura de adquisicion de mercancia. |
-| id_tenant | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
-| id_tercero | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TERCEROS(id_tercero). Proveedor que expide la factura. |
+| id_compra | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico de la factura de adquisicion de mercancia. |
+| id_tenant | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
+| id_tercero | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TERCEROS(id_tercero). Proveedor que expide la factura. |
 | numero_factura_compra | VARCHAR | 50 | NOT NULL | UK | Consecutivo oficial de la factura fisica o electronica del proveedor (UK compuesta con id_tenant). |
-| fecha_compra | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha de expedicion formal de la factura de compra. |
-| fecha_vencimiento_compra | TIMESTAMP (D) | 8 bytes | NULL | - | Fecha limite de pago acordada para compras a credito comercial. |
+| fecha_compra | DATE (D) | 4 bytes | NOT NULL | - | Fecha de expedicion formal de la factura de compra. |
+| fecha_vencimiento_compra | DATE (D) | 4 bytes | NULL | - | Fecha limite de pago acordada para compras a credito comercial. |
 | forma_pago_compra | VARCHAR | 20 | NOT NULL | - | Modalidad de pago comercial: CONTADO o CREDITO. |
 | medio_pago_compra | VARCHAR | 30 | NULL | - | Instrumento de desembolso: EFECTIVO, TRANSFERENCIA o CHEQUE. |
 | estado_compra | VARCHAR | 20 | NOT NULL | - | Estado de cartera del comprobante: PENDIENTE, PAGADA o ANULADA. |
@@ -138,10 +138,10 @@ Modulo: Comercial.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
-| id_detalle_compra | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador unico de la linea de item en la factura de compra. |
-| id_tenant | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
-| id_compra | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a COMPRAS(id_compra). Factura a la que pertenece el renglon. |
-| id_producto | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a PRODUCTOS(id_producto). Repuesto ingresado al inventario. |
+| id_detalle_compra | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico de la linea de item en la factura de compra. |
+| id_tenant | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
+| id_compra | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a COMPRAS(id_compra). Factura a la que pertenece el renglon. |
+| id_producto | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a PRODUCTOS(id_producto). Repuesto ingresado al inventario. |
 | cantidad_compra | INTEGER (I) | 4 bytes | NOT NULL | - | Cantidad de unidades fisicas adquiridas (valor entero > 0). |
 | precio_compra | NUMERIC | 14,2 | NOT NULL | - | Costo unitario de compra antes de impuestos en COP. |
 | iva_linea_compra | NUMERIC | 14,2 | NOT NULL | - | Monto de IVA correspondiente a la totalidad de unidades del renglon. |
@@ -154,18 +154,18 @@ Modulo: Comercial.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
-| id_venta | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador unico de la transaccion mercantil de venta. |
-| id_tenant | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
-| id_tercero | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TERCEROS(id_tercero). Cliente receptor del servicio o repuesto. |
+| id_venta | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico de la transaccion mercantil de venta. |
+| id_tenant | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
+| id_tercero | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TERCEROS(id_tercero). Cliente receptor del servicio o repuesto. |
 | numero_factura_venta | VARCHAR | 50 | NOT NULL | UK | Consecutivo de factura expedido al cliente (UK compuesta con id_tenant). |
-| fecha_venta | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de expedicion formal de la factura. |
-| fecha_vencimiento_venta | TIMESTAMP (D) | 8 bytes | NULL | - | Fecha limite para cancelacion de ventas a credito comercial. |
+| fecha_venta | DATE (D) | 4 bytes | NOT NULL | - | Fecha de expedicion formal de la factura. |
+| fecha_vencimiento_venta | DATE (D) | 4 bytes | NULL | - | Fecha limite para cancelacion de ventas a credito comercial. |
 | forma_pago_venta | VARCHAR | 20 | NOT NULL | - | Modalidad de cobro comercial: CONTADO o CREDITO. |
 | medio_pago_venta | VARCHAR | 30 | NULL | - | Instrumento financiero: EFECTIVO, TARJETA_DEBITO, TARJETA_CREDITO, TRANSFERENCIA. |
 | estado_venta | VARCHAR | 20 | NOT NULL | - | Estado operativo de la factura: PAGADA, PENDIENTE o ANULADA. |
 | subtotal_venta | NUMERIC | 14,2 | NOT NULL | - | Base gravable de la venta antes de IVA en COP. |
-| iva_por_pagar_venta | NUMERIC | 14,2 | NOT NULL | - | Monto total de IVA generado fiscalmente a declarar ante la DIAN. |
-| total_venta | NUMERIC | 14,2 | NOT NULL | - | Total final cobrado al cliente en COP (subtotal_venta + iva_por_pagar_venta). |
+| iva_por_pagar_venta | NUMERIC | 14,2 | NOT NULL | - | IVA neto a pagar a la DIAN en COP: suma de diferencia_iva_linea de las lineas, es decir IVA generado menos IVA descontable. |
+| total_venta | NUMERIC | 14,2 | NOT NULL | - | Total final cobrado al cliente en COP: subtotal_venta mas el IVA generado (suma de iva_generado_linea de las lineas). |
 | created_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de insercion para auditoria (UTC). |
 | updated_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de ultima actualizacion (UTC). |
 
@@ -175,10 +175,10 @@ Modulo: Comercial.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
-| id_detalle_venta | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador unico de la linea de item en la factura de venta. |
-| id_tenant | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
-| id_venta | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a VENTAS(id_venta). Factura que agrupa esta linea transaccional. |
-| id_producto | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a PRODUCTOS(id_producto). Repuesto o servicio facturado. |
+| id_detalle_venta | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico de la linea de item en la factura de venta. |
+| id_tenant | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
+| id_venta | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a VENTAS(id_venta). Factura que agrupa esta linea transaccional. |
+| id_producto | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a PRODUCTOS(id_producto). Repuesto o servicio facturado. |
 | cantidad_venta | INTEGER (I) | 4 bytes | NOT NULL | - | Unidades fisicas despachadas o servicios aplicados (> 0). |
 | precio_venta | NUMERIC | 14,2 | NOT NULL | - | Precio de venta unitario final cobrado al cliente en COP. |
 | iva_generado_linea | NUMERIC | 14,2 | NOT NULL | - | Impuesto al valor agregado derivado del renglon (base * tarifa). |
@@ -192,9 +192,9 @@ Modulo: Inventario.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
-| id_producto | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador unico del producto o repuesto en el catalogo. |
-| id_tenant | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
-| id_categoria_producto | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a CATEGORIA_PRODUCTOS(id_categoria_producto). |
+| id_producto | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico del producto o repuesto en el catalogo. |
+| id_tenant | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
+| id_categoria_producto | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a CATEGORIA_PRODUCTOS(id_categoria_producto). |
 | codigo_producto | VARCHAR | 50 | NOT NULL | UK | Codigo de barras o SKU del repuesto (UK compuesta con id_tenant). |
 | descripcion_producto | VARCHAR | 255 | NOT NULL | - | Nombre y especificaciones tecnicas del repuesto o servicio. |
 | costo_compra | NUMERIC | 14,2 | NOT NULL | - | Ultimo costo neto o promedio ponderado de compra en COP. |
@@ -210,13 +210,13 @@ Modulo: Inventario.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
-| id_categoria_producto | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador unico de la categoria o familia de productos. |
-| id_tenant | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
+| id_categoria_producto | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico de la categoria o familia de productos. |
+| id_tenant | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
 | nombre_categoria_producto | VARCHAR | 100 | NOT NULL | - | Denominacion de la familia (Llantas, Lubricantes, Baterias, Alineacion). |
 | color_categoria | VARCHAR | 20 | NOT NULL | - | Codigo hexadecimal (#RRGGBB) para diferenciacion en la interfaz grafica. |
 | stock_min_amarillo | INTEGER (I) | 4 bytes | NOT NULL | - | Umbral preventivo de existencias minimas para senalizacion de advertencia. |
 | stock_min_rojo | INTEGER (I) | 4 bytes | NOT NULL | - | Umbral critico de stock que exige reposicion obligatoria. |
-| margen_utilidad | NUMERIC | 5,2 | NOT NULL | - | Porcentaje de margen sugerido aplicado sobre el costo de adquisicion. |
+| margen_utilidad | NUMERIC | 8,6 | NOT NULL | - | Margen sugerido aplicado sobre el costo de adquisicion, como fraccion (0.30 es 30 por ciento). |
 | created_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de creacion de la categoria (UTC). |
 | updated_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de ultima modificacion de parametros (UTC). |
 
@@ -226,10 +226,10 @@ Modulo: Tributario.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
-| id_impuesto | INTEGER (I) | 4 bytes | NOT NULL | PK | Identificador unico del tributo o gravamen fiscal. |
-| id_tenant | INTEGER (I) | 4 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
+| id_impuesto | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico del tributo o gravamen fiscal. |
+| id_tenant | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
 | nombre_impuesto | VARCHAR | 100 | NOT NULL | - | Denominacion legal del gravamen (IVA General 19%, IVA 5%, Retefuente). |
-| tasa_impuesto | NUMERIC | 5,2 | NOT NULL | - | Porcentaje impositivo nominal a aplicar sobre la base gravable. |
+| tasa_impuesto | NUMERIC | 8,6 | NOT NULL | - | Tasa impositiva nominal a aplicar sobre la base gravable, como fraccion (0.19 es 19 por ciento). |
 | descripcion_impuesto | VARCHAR | 255 | NULL | - | Fundamentacion normativa segun el Estatuto Tributario colombiano. |
 | aplica_transaccion | BOOLEAN | 1 byte | NOT NULL | - | Indica si el tributo se liquida de forma automatica en ventas. |
 | es_iva | BOOLEAN | 1 byte | NOT NULL | - | Bandera que indica si el gravamen constituye IVA para efectos del balance fiscal. |
@@ -242,8 +242,8 @@ Modulo: Tributario.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
-| id_categoria_producto | INTEGER (I) | 4 bytes | NOT NULL | PK, FK | FK a CATEGORIA_PRODUCTOS(id_categoria_producto). Componente 1 de PK compuesta. |
-| id_impuesto | INTEGER (I) | 4 bytes | NOT NULL | PK, FK | FK a TIPOS_IMPUESTO(id_impuesto). Componente 2 de PK compuesta. |
+| id_categoria_producto | BIGINT (I) | 8 bytes | NOT NULL | PK, FK | FK a CATEGORIA_PRODUCTOS(id_categoria_producto). Componente 1 de PK compuesta. |
+| id_impuesto | BIGINT (I) | 8 bytes | NOT NULL | PK, FK | FK a TIPOS_IMPUESTO(id_impuesto). Componente 2 de PK compuesta. |
 
 ## Claves foraneas
 
@@ -283,16 +283,18 @@ Decididas durante el refactor. Cada una se anota tambien en `03-DECISIONS.md`.
 * **Transferencia.** Son dos movimientos con categoria TRANSFERENCIA: un EGRESO en la cuenta origen y un INGRESO en la cuenta destino. El INGRESO apunta al EGRESO con `id_movimiento_relacionado`. El `concepto` de las dos patas es el texto que escribe el usuario, sin espacios sobrantes; si no escribe ninguno, el autogenerado ("Transferencia a X" en el EGRESO y "Transferencia desde Y" en el INGRESO). `notas` queda vacio.
 * **Enlace del movimiento con su factura.** Restriccion CHECK `ck_movimiento_factura` en MOVIMIENTOS: RECAUDO_VENTA lleva `id_venta` y no `id_compra`, PAGO_COMPRA lleva `id_compra` y no `id_venta`, y las demas categorias no llevan ninguna de las dos. El diccionario no la lista; el service valida lo mismo antes de escribir.
 * **Montos y cantidades positivos.** Restricciones CHECK `ck_movimiento_monto` (`monto > 0` en MOVIMIENTOS; el signo lo da `tipo_movimiento`), `ck_detalle_compra_cantidad` (`cantidad_compra > 0`) y `ck_detalle_venta_cantidad` (`cantidad_venta > 0`). Son las reglas que el diccionario escribe en la descripcion de esas columnas.
+* **Porcentajes de la configuracion entre 0 y 1.** Restricciones CHECK `ck_configuracion_porcentaje_gastos`, `ck_configuracion_porcentaje_dian`, `ck_configuracion_porcentaje_ica` y `ck_configuracion_porcentaje_comision_tarjeta` (`BETWEEN 0 AND 1`) en CONFIGURACION_FINANCIERA. `margen_utilidad` y `tasa_impuesto` no llevan CHECK.
+* **Tipos fisicos.** Corregidos en este archivo para que coincidan con el codigo, no al reves: identificadores `BIGINT` (el codigo usa `Long`; el diccionario original decia INTEGER); tasas y porcentajes como fraccion en `NUMERIC(8,6)` (el original pedia porcentajes de 0 a 100 en `NUMERIC(5,2)`, que pierde precision en el ICA, que es por mil); fechas de negocio `DATE` (el original decia TIMESTAMP en UTC, que llevaria al dia siguiente una venta de la noche en hora de Colombia); enums `VARCHAR` con su longitud. Las fechas de auditoria siguen en TIMESTAMP y se escriben en UTC.
 * **Categorias manuales.** GASTO_OPERATIVO (EGRESO) e INGRESO_OCASIONAL (INGRESO) son los unicos movimientos que el usuario crea, edita y elimina directamente. Los de categoria TRANSFERENCIA, PAGO_COMPRA y RECAUDO_VENTA se gestionan desde su operacion.
 * **Terceros.** Una persona o empresa existe una sola vez por tenant, identificada por `numero_documento`. Si ya existe como CLIENTE y se usa como proveedor (o al reves), pasa a AMBOS. Una venta exige un tercero CLIENTE o AMBOS; una compra, PROVEEDOR o AMBOS.
 * **Tercero obligatorio en facturas.** Toda factura tiene `id_tercero`. Una venta que no identifica al cliente usa el tercero "Consumidor final" del tenant (CLIENTE, NIT 222222222222, el numero que usa la DIAN para consumidor final), que se crea la primera vez y despues se reutiliza; cada tenant tiene el suyo. Una compra exige siempre su proveedor: no hay proveedor por defecto.
 * **Roles y tipos de cuenta.** `rol` toma ADMIN, MECANICO o CAJERO, y `tipo_cuenta` EFECTIVO, BANCO o DIGITAL, como en el diccionario. Los roles todavia no tienen reglas de permisos: solo viajan en el token.
-* **Comision de tarjeta.** `porcentaje_comision_tarjeta` es obligatoria y vale 0 si el taller no la configura. Se guarda como fraccion, igual que los demas porcentajes de CONFIGURACION_FINANCIERA (ver Pendientes); todavia no entra en ningun calculo. Una sola fila por tenant, con la restriccion unica `uk_configuracion_tenant`.
+* **Comision de tarjeta.** `porcentaje_comision_tarjeta` es obligatoria y vale 0 si el taller no la configura. Se guarda como fraccion, igual que los demas porcentajes de CONFIGURACION_FINANCIERA (ver Tipos fisicos); todavia no entra en ningun calculo. Una sola fila por tenant, con la restriccion unica `uk_configuracion_tenant`.
 * **Anular y restaurar facturas.** Anular una venta o compra no borra sus movimientos: solo revierte el saldo de cada cuenta y deja la factura en ANULADA. Un movimiento enlazado por `id_venta` o `id_compra` a una factura ANULADA es inactivo: no sale en extractos de cuenta, no cuenta en sumas y no se reporta. Esa condicion se deriva del estado de la factura, no se guarda en una columna. Restaurar reactiva esos movimientos y vuelve a aplicar los saldos; en compras exige saldo suficiente por cada egreso, igual que al crear o pagar. El estado resultante se deriva: contado PAGADA, credito segun el saldo pendiente con la tolerancia de un peso. El saldo pendiente se calcula con **todos** los movimientos de la factura, tambien los inactivos, porque restaurar lo necesita para derivar el estado; la API muestra 0 para una factura ANULADA, que no se debe. Invariante: `saldo_actual` es `balance_inicial` mas la suma de los movimientos activos de la cuenta. Los movimientos manuales (GASTO_OPERATIVO e INGRESO_OCASIONAL) no tienen factura y se siguen eliminando de verdad.
 
 ## Pendientes
 
-Decisiones que se toman en los pasos 5 y 6 del refactor (ver `sessions/2026-10-06-refactor-normalizacion.md`), cuando haya que resolver el esquema fisico:
+Lo que sigue abierto despues del refactor (ver `sessions/2026-10-06-refactor-normalizacion.md`, Pendientes):
 
-* Tipos fisicos frente a los del codigo: identificadores (INTEGER contra Long), montos (NUMERIC contra Double), porcentajes (5,2 contra fracciones), fechas (TIMESTAMP en UTC contra LocalDate).
 * `medio_pago_compra` y `medio_pago_venta` son texto libre en el codigo, mientras el diccionario lista valores permitidos (EFECTIVO, TRANSFERENCIA, CHEQUE en compras; EFECTIVO, TARJETA_DEBITO, TARJETA_CREDITO, TRANSFERENCIA en ventas). Todavia no se validan.
+* El dinero es `Double` en el codigo y `NUMERIC(14,2)` en la base (mapeado con `@JdbcTypeCode(SqlTypes.NUMERIC)`): la base redondea a dos decimales al guardar, pero los calculos en memoria son en coma flotante. La migracion a `BigDecimal` queda pendiente, en una rama aparte.

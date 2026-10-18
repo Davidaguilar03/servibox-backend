@@ -13,6 +13,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDate;
 
@@ -55,6 +57,7 @@ public class Sale extends TenantAwareEntity {
     private LocalDate dueDate;
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "forma_pago_venta", length = 20, nullable = false)
     private PaymentType paymentType;
 
@@ -62,18 +65,22 @@ public class Sale extends TenantAwareEntity {
     private String paymentMethod;
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "estado_venta", length = 20, nullable = false)
     private SaleStatus status;
 
     /** Suma de precio por cantidad de las lineas, sin IVA. */
-    @Column(name = "subtotal_venta", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "subtotal_venta", precision = 14, scale = 2, nullable = false)
     private Double subtotal;
 
     /** IVA generado por la venta menos el IVA descontable de los productos vendidos. */
-    @Column(name = "iva_por_pagar_venta", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "iva_por_pagar_venta", precision = 14, scale = 2, nullable = false)
     private Double ivaPorPagar;
 
     /** subtotal mas el IVA generado. Es lo que paga el cliente. */
-    @Column(name = "total_venta", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "total_venta", precision = 14, scale = 2, nullable = false)
     private Double total;
 }

@@ -8,6 +8,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * Parametros del calculo de precio sugerido. En Autollantas es un singleton con id 1;
@@ -27,20 +29,24 @@ import lombok.EqualsAndHashCode;
 )
 public class FinancialSettings extends TenantAwareEntity {
 
-    @Column(name = "porcentaje_gastos", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "porcentaje_gastos", precision = 8, scale = 6, nullable = false)
     private Double expensesRate;
 
-    @Column(name = "porcentaje_dian", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "porcentaje_dian", precision = 8, scale = 6, nullable = false)
     private Double dianRate;
 
     /** Fraccion por mil, no porcentaje normal: 0.0082 es 8.2 por mil. */
-    @Column(name = "porcentaje_ica", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "porcentaje_ica", precision = 8, scale = 6, nullable = false)
     private Double icaRate;
 
     /**
      * Comision del datafono sobre los pagos con tarjeta, como fraccion. Obligatoria: 0.0
      * si el negocio no la configura. Todavia no entra en ningun calculo.
      */
-    @Column(name = "porcentaje_comision_tarjeta", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "porcentaje_comision_tarjeta", precision = 8, scale = 6, nullable = false)
     private Double cardCommissionRate = 0.0;
 }

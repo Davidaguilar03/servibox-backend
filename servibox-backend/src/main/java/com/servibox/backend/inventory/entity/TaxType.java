@@ -7,6 +7,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Data
@@ -18,7 +20,8 @@ public class TaxType extends TenantAwareEntity {
     @Column(name = "nombre_impuesto", length = 100, nullable = false)
     private String name;
 
-    @Column(name = "tasa_impuesto", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "tasa_impuesto", precision = 8, scale = 6, nullable = false)
     private Double rate;
 
     @Column(name = "descripcion_impuesto", length = 255)

@@ -29,10 +29,12 @@ import java.util.TreeSet;
 import static org.assertj.core.api.Assertions.fail;
 
 /**
- * El esquema real de la base de pruebas (el que genera Hibernate desde las entidades) tiene
- * que coincidir con docs/ai-context/04-DATA-MODEL.md: las 14 tablas y ninguna otra, sus
- * columnas exactas, nulabilidad, longitud de los VARCHAR, claves primarias, claves foraneas
- * y restricciones unicas. Se lee el esquema por DatabaseMetaData, sin distinguir mayusculas.
+ * El esquema real de la base de pruebas (el que crea Flyway con db/migration y Hibernate
+ * valida) tiene que coincidir con docs/ai-context/04-DATA-MODEL.md: las 14 tablas y ninguna
+ * otra (flyway_schema_history no cuenta), sus columnas exactas, tipos, nulabilidad, longitud
+ * de los VARCHAR, precision y escala de los NUMERIC, claves primarias, claves foraneas con
+ * ON DELETE RESTRICT y restricciones unicas. Se lee el esquema por DatabaseMetaData, sin
+ * distinguir mayusculas.
  *
  * Reglas del parseo del diccionario: una columna con UK es unica por si sola, salvo que su
  * descripcion diga que la UK va "con id_tenant" (el diccionario lo escribe "UK compuesta
@@ -40,13 +42,13 @@ import static org.assertj.core.api.Assertions.fail;
  * columna). PK en dos columnas de la misma tabla es clave compuesta. Las FK salen de la
  * seccion "Claves foraneas".
  *
- * Los tipos se comparan por familia. El diccionario usa INTEGER, VARCHAR, NUMERIC,
- * TIMESTAMP y BOOLEAN; del lado de la base las variantes de nombre o de precision de esas
- * mismas familias valen igual (CHARACTER VARYING es VARCHAR; NUMERIC(14,2) y NUMERIC(5,2)
- * son NUMERIC). BIGINT, DOUBLE, DATE y ENUM se tratan como tipos distintos, porque son las
- * diferencias fisicas que resuelve el paso 6, y cada una tiene que estar en
- * DESVIACIONES_CONOCIDAS. La prueba falla por una desviacion que no esta en la lista y
- * tambien por una entrada de la lista que ya no ocurre, para que el paso 6 la vacie.
+ * Los tipos se comparan por familia. El diccionario usa BIGINT, INTEGER, VARCHAR, NUMERIC,
+ * DATE, TIMESTAMP y BOOLEAN; del lado de la base las variantes de nombre de esas mismas
+ * familias valen igual (CHARACTER VARYING es VARCHAR, INT8 es BIGINT, BOOL es BOOLEAN), y
+ * la precision y escala de NUMERIC se comparan aparte. DOUBLE y ENUM no estan en el
+ * diccionario y salen como diferencia. Una diferencia de tipo aceptada a proposito iria en
+ * DESVIACIONES_CONOCIDAS; desde el paso 6 la lista esta vacia. La prueba falla por una
+ * desviacion que no esta en la lista y tambien por una entrada de la lista que ya no ocurre.
  *
  * Cuando falla, lista todas las diferencias juntas.
  */
@@ -56,86 +58,19 @@ class SchemaConformanceTest {
 
     private static final Path DICCIONARIO = Path.of("docs", "ai-context", "04-DATA-MODEL.md");
 
-    private static final String BIGINT = "identificador BIGINT (Long en Java) contra INTEGER; el paso 6 decide el tipo";
-    private static final String DOUBLE = "Double en Java, DOUBLE en la base, contra NUMERIC; el paso 6 lo pasa a NUMERIC";
-    private static final String DATE = "fecha de negocio LocalDate (DATE) contra TIMESTAMP; el paso 6 decide";
-    private static final String ENUM = "@Enumerated(STRING) sale como ENUM en H2; en PostgreSQL es VARCHAR con su length";
+    /** Tabla de control de Flyway: no es del modelo de datos. */
+    private static final String HISTORIAL_FLYWAY = "FLYWAY_SCHEMA_HISTORY";
 
-    /** tabla.columna -> desviacion de tipo conocida. Ver el comentario de la clase. */
+    /** tabla.columna -> desviacion de tipo aceptada. Vacia desde el paso 6 (Flyway). */
     private static final Map<String, Desviacion> DESVIACIONES_CONOCIDAS = new LinkedHashMap<>();
-
-    static {
-        ids("TENANTS", "id_tenant");
-        ids("USUARIOS", "id_usuario", "id_tenant");
-        ids("CONFIGURACION_FINANCIERA", "id_configuracion", "id_tenant");
-        ids("CUENTAS", "id_cuenta", "id_tenant");
-        ids("MOVIMIENTOS", "id_movimiento", "id_tenant", "id_cuenta", "id_movimiento_relacionado", "id_compra", "id_venta");
-        ids("TERCEROS", "id_tercero", "id_tenant");
-        ids("COMPRAS", "id_compra", "id_tenant", "id_tercero");
-        ids("DETALLE_COMPRAS", "id_detalle_compra", "id_tenant", "id_compra", "id_producto");
-        ids("VENTAS", "id_venta", "id_tenant", "id_tercero");
-        ids("DETALLE_VENTAS", "id_detalle_venta", "id_tenant", "id_venta", "id_producto");
-        ids("PRODUCTOS", "id_producto", "id_tenant", "id_categoria_producto");
-        ids("CATEGORIA_PRODUCTOS", "id_categoria_producto", "id_tenant");
-        ids("TIPOS_IMPUESTO", "id_impuesto", "id_tenant");
-        ids("CATEGORIA_IMPUESTOS", "id_categoria_producto", "id_impuesto");
-
-        dobles("CONFIGURACION_FINANCIERA", "porcentaje_gastos", "porcentaje_dian", "porcentaje_ica",
-                "porcentaje_comision_tarjeta");
-        dobles("CUENTAS", "balance_inicial", "saldo_actual");
-        dobles("MOVIMIENTOS", "monto");
-        dobles("COMPRAS", "subtotal_compra", "iva_total_compra", "total_compra");
-        dobles("DETALLE_COMPRAS", "precio_compra", "iva_linea_compra");
-        dobles("VENTAS", "subtotal_venta", "iva_por_pagar_venta", "total_venta");
-        dobles("DETALLE_VENTAS", "precio_venta", "iva_generado_linea", "diferencia_iva_linea");
-        dobles("PRODUCTOS", "costo_compra", "iva_producto", "precio_sugerido");
-        dobles("CATEGORIA_PRODUCTOS", "margen_utilidad");
-        dobles("TIPOS_IMPUESTO", "tasa_impuesto");
-
-        fechas("MOVIMIENTOS", "fecha_movimiento");
-        fechas("COMPRAS", "fecha_compra", "fecha_vencimiento_compra");
-        fechas("VENTAS", "fecha_venta", "fecha_vencimiento_venta");
-
-        enums("USUARIOS", "rol");
-        enums("CUENTAS", "tipo_cuenta");
-        enums("MOVIMIENTOS", "tipo_movimiento", "categoria_movimiento");
-        enums("TERCEROS", "tipo_tercero", "tipo_documento");
-        enums("COMPRAS", "forma_pago_compra", "estado_compra");
-        enums("VENTAS", "forma_pago_venta", "estado_venta");
-    }
 
     record Desviacion(String tipoReal, String motivo) {
     }
 
-    private static void ids(String tabla, String... columnas) {
-        conocida(tabla, "BIGINT", BIGINT, columnas);
-    }
-
-    private static void dobles(String tabla, String... columnas) {
-        conocida(tabla, "DOUBLE", DOUBLE, columnas);
-    }
-
-    private static void fechas(String tabla, String... columnas) {
-        conocida(tabla, "DATE", DATE, columnas);
-    }
-
-    private static void enums(String tabla, String... columnas) {
-        conocida(tabla, "ENUM", ENUM, columnas);
-    }
-
-    private static void conocida(String tabla, String tipoReal, String motivo, String... columnas) {
-        for (String columna : columnas) {
-            Desviacion previa = DESVIACIONES_CONOCIDAS.put(clave(tabla, columna), new Desviacion(tipoReal, motivo));
-            if (previa != null) {
-                throw new IllegalStateException("Desviacion repetida: " + tabla + "." + columna);
-            }
-        }
-    }
-
     // ---- Diccionario ----
 
-    record ColumnaDiccionario(String nombre, String tipo, Integer longitud, boolean nula, boolean pk,
-                              boolean uk, boolean ukConTenant) {
+    record ColumnaDiccionario(String nombre, String tipo, Integer longitud, Integer escala, boolean nula,
+                              boolean pk, boolean uk, boolean ukConTenant) {
     }
 
     record Fk(String columna, String tablaReferenciada) implements Comparable<Fk> {
@@ -179,8 +114,17 @@ class SchemaConformanceTest {
                 String tipo = mayus(celdas[2]).replaceAll("\\s*\\(.*\\)", "");
                 String clave = mayus(celdas[5]);
                 String descripcion = celdas[6].toLowerCase(Locale.ROOT);
-                Integer longitud = tipo.equals("VARCHAR") ? Integer.valueOf(celdas[3].trim()) : null;
-                tablas.get(tabla).put(nombre, new ColumnaDiccionario(nombre, tipo, longitud,
+                // VARCHAR: longitud. NUMERIC: "precision,escala". Los demas tipos, en bytes: no cuenta.
+                Integer longitud = null;
+                Integer escala = null;
+                if (tipo.equals("VARCHAR")) {
+                    longitud = Integer.valueOf(celdas[3].trim());
+                } else if (tipo.equals("NUMERIC")) {
+                    String[] precisionEscala = celdas[3].trim().split(",");
+                    longitud = Integer.valueOf(precisionEscala[0].trim());
+                    escala = Integer.valueOf(precisionEscala[1].trim());
+                }
+                tablas.get(tabla).put(nombre, new ColumnaDiccionario(nombre, tipo, longitud, escala,
                         mayus(celdas[4]).equals("NULL"), clave.contains("PK"), clave.contains("UK"),
                         descripcion.contains("con id_tenant")));
             } else if (seccion.equals("Claves foraneas")) {
@@ -215,6 +159,7 @@ class SchemaConformanceTest {
                     tablasReales.add(mayus(rs.getString("TABLE_NAME")));
                 }
             }
+            tablasReales.remove(HISTORIAL_FLYWAY);
             for (String sobra : diferencia(tablasReales, tablas.keySet())) {
                 diferencias.add("Tabla que no esta en el diccionario: " + sobra);
             }
@@ -237,7 +182,8 @@ class SchemaConformanceTest {
         }
 
         System.out.println("SchemaConformanceTest: " + tablas.size() + " tablas comparadas; "
-                + desviacionesVistas.size() + " desviaciones de tipo conocidas vigentes:");
+                + desviacionesVistas.size() + " desviaciones de tipo conocidas vigentes"
+                + (desviacionesVistas.isEmpty() ? " (lista vacia)" : ":"));
         desviacionesVistas.forEach((columna, detalle) -> System.out.println("  " + columna + ": " + detalle));
 
         if (!diferencias.isEmpty()) {
@@ -256,7 +202,8 @@ class SchemaConformanceTest {
         try (ResultSet rs = meta.getColumns(null, esquema, nombreReal, "%")) {
             while (rs.next()) {
                 reales.put(mayus(rs.getString("COLUMN_NAME")), new String[]{
-                        mayus(rs.getString("TYPE_NAME")), rs.getString("COLUMN_SIZE"), rs.getString("IS_NULLABLE")});
+                        mayus(rs.getString("TYPE_NAME")), rs.getString("COLUMN_SIZE"), rs.getString("IS_NULLABLE"),
+                        rs.getString("DECIMAL_DIGITS")});
             }
         }
         for (String sobra : diferencia(reales.keySet(), esperadas.keySet())) {
@@ -294,6 +241,13 @@ class SchemaConformanceTest {
                     && !String.valueOf(esperada.longitud()).equals(real[1])) {
                 diferencias.add(donde + ": longitud " + real[1] + " y el diccionario dice " + esperada.longitud());
             }
+
+            if (esperada.escala() != null && tipoReal.equals("NUMERIC")
+                    && (!String.valueOf(esperada.longitud()).equals(real[1])
+                    || !String.valueOf(esperada.escala()).equals(real[3]))) {
+                diferencias.add(donde + ": NUMERIC(" + real[1] + "," + real[3] + ") y el diccionario dice NUMERIC("
+                        + esperada.longitud() + "," + esperada.escala() + ")");
+            }
         }
 
         // Clave primaria.
@@ -309,12 +263,18 @@ class SchemaConformanceTest {
             diferencias.add(tabla + ": clave primaria " + pkReal + " y el diccionario dice " + pkEsperada);
         }
 
-        // Claves foraneas.
+        // Claves foraneas, todas con ON DELETE RESTRICT.
         Set<Fk> fkEsperadas = fks.getOrDefault(tabla, Set.of());
         Set<Fk> fkReales = new TreeSet<>();
         try (ResultSet rs = meta.getImportedKeys(null, esquema, nombreReal)) {
             while (rs.next()) {
-                fkReales.add(new Fk(mayus(rs.getString("FKCOLUMN_NAME")), mayus(rs.getString("PKTABLE_NAME"))));
+                Fk fk = new Fk(mayus(rs.getString("FKCOLUMN_NAME")), mayus(rs.getString("PKTABLE_NAME")));
+                fkReales.add(fk);
+                short reglaBorrado = rs.getShort("DELETE_RULE");
+                if (reglaBorrado != DatabaseMetaData.importedKeyRestrict) {
+                    diferencias.add(tabla + ": la FK " + fk + " no es ON DELETE RESTRICT (DELETE_RULE "
+                            + reglaBorrado + ")");
+                }
             }
         }
         for (Fk sobra : diferencia(fkReales, fkEsperadas)) {
@@ -354,7 +314,7 @@ class SchemaConformanceTest {
 
     /**
      * Tipo de la base llevado al vocabulario del diccionario. Ver el comentario de la clase:
-     * BIGINT, DOUBLE, DATE y ENUM quedan con su nombre para que salgan como desviaciones.
+     * DOUBLE y ENUM quedan con su nombre para que salgan como diferencias.
      */
     private static String familia(String tipo) {
         if (tipo.startsWith("ENUM")) {
@@ -362,11 +322,12 @@ class SchemaConformanceTest {
         }
         return switch (tipo) {
             case "INTEGER", "INT", "INT4", "SMALLINT" -> "INTEGER";
+            case "BIGINT", "INT8", "BIGSERIAL" -> "BIGINT";
             case "CHARACTER VARYING", "VARCHAR" -> "VARCHAR";
             case "NUMERIC", "DECIMAL" -> "NUMERIC";
             case "DOUBLE PRECISION", "DOUBLE", "FLOAT", "FLOAT8", "REAL" -> "DOUBLE";
             case "TIMESTAMP", "TIMESTAMP WITHOUT TIME ZONE" -> "TIMESTAMP";
-            case "BIGINT", "INT8" -> "BIGINT";
+            case "BOOLEAN", "BOOL" -> "BOOLEAN";
             default -> tipo;
         };
     }

@@ -22,6 +22,22 @@
 * Tests: nombre en espanol que describe el comportamiento
   (`anularNoRevierteElCostoDelProducto`).
 
+## Cambios de esquema
+
+* Todo cambio de tablas, columnas, tipos o restricciones es una **migracion nueva**
+  `src/main/resources/db/migration/V<n>__<descripcion>.sql`, con `<n>` el siguiente numero.
+  Nunca se edita una migracion ya aplicada: Flyway guarda su checksum y una base que ya la
+  corrio no arranca.
+* En el mismo cambio: la entidad (Hibernate valida con `ddl-auto=validate`) y
+  [04-DATA-MODEL.md](04-DATA-MODEL.md), que es la especificacion. SQL compatible con
+  PostgreSQL 16 y con H2 en modo PostgreSQL, sin comillas en los identificadores, FK con
+  nombre y `ON DELETE RESTRICT`.
+* Correr `./mvnw test`: `schema.SchemaConformanceTest` compara el resultado con el
+  diccionario.
+* Dinero en `NUMERIC(14,2)` y tasas como fraccion en `NUMERIC(8,6)`: un campo `Double`
+  nuevo de ese tipo lleva `@JdbcTypeCode(SqlTypes.NUMERIC)` con su `precision` y `scale`; un
+  enum nuevo, `@Enumerated(EnumType.STRING)` con `@JdbcTypeCode(SqlTypes.VARCHAR)`.
+
 ## Estilo de codigo
 
 * Lombok para getters, setters y constructores (`@RequiredArgsConstructor` para inyeccion).

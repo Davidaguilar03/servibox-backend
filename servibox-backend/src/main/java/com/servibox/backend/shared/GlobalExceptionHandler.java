@@ -22,6 +22,7 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.exc.InvalidFormatException;
@@ -159,6 +160,25 @@ public class GlobalExceptionHandler {
         }
         return construir(HttpStatus.BAD_REQUEST,
                 "El cuerpo de la peticion no es un JSON valido o un campo tiene un valor del tipo equivocado");
+    }
+
+    /**
+     * Parametro de query o de ruta con un valor que no cabe en su tipo, por ejemplo
+     * ?category=X en GET /api/treasury/movements. Es un error del cliente: 400 con el nombre
+     * del parametro y, si es un enum, los valores permitidos.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> manejarParametroInvalido(MethodArgumentTypeMismatchException ex) {
+        Class<?> tipo = ex.getRequiredType();
+        if (tipo != null && tipo.isEnum()) {
+            String permitidos = Arrays.stream(tipo.getEnumConstants())
+                    .map(String::valueOf)
+                    .collect(Collectors.joining(", "));
+            return construir(HttpStatus.BAD_REQUEST, "Valor invalido '" + ex.getValue()
+                    + "' en el parametro " + ex.getName() + ". Valores permitidos: " + permitidos);
+        }
+        return construir(HttpStatus.BAD_REQUEST, "Valor invalido '" + ex.getValue()
+                + "' en el parametro " + ex.getName());
     }
 
     /** Recurso pedido por la ruta que no existe para el tenant activo. */

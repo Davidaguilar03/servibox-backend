@@ -12,6 +12,8 @@ import jakarta.persistence.Table;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -36,7 +38,8 @@ public class ProductCategory extends TenantAwareEntity {
     private Integer redStockMin;
 
     /** Fraccion, no porcentaje: 0.30 es 30 por ciento. */
-    @Column(name = "margen_utilidad", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "margen_utilidad", precision = 8, scale = 6, nullable = false)
     private Double targetMargin;
 
     /**

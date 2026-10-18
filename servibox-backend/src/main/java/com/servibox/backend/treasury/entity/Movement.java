@@ -16,6 +16,8 @@ import jakarta.persistence.Table;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDate;
 
@@ -56,18 +58,21 @@ public class Movement extends TenantAwareEntity {
 
     /** Solo INGRESO o EGRESO: es lo que da el signo sobre el saldo. */
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "tipo_movimiento", length = 20, nullable = false)
     private MovementType type;
 
     /** De donde viene el movimiento. TRANSFERENCIA es una categoria, no un tipo. */
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "categoria_movimiento", length = 50, nullable = false)
     private MovementCategory category;
 
     @Column(name = "concepto", length = 255, nullable = false)
     private String concept;
 
-    @Column(name = "monto", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "monto", precision = 14, scale = 2, nullable = false)
     private Double amount;
 
     /** Fecha de negocio, no de auditoria. createdAt de la clase base es otra cosa. */
