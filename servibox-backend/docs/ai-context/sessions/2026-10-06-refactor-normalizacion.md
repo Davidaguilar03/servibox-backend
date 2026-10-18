@@ -220,7 +220,6 @@ vacia la lista; la prueba falla si una entrada deja de ocurrir.
 
 ## Pendientes despues del refactor
 
-* Endpoint de terceros: no hay alta ni consulta de terceros por la API.
 * Dinero como `Double` en el codigo (con `NUMERIC(14,2)` en la base): migrar a `BigDecimal`
   en una rama aparte.
 * Validar los valores de `medio_pago_compra` y `medio_pago_venta` contra los del
