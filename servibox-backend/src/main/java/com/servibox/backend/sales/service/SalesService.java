@@ -17,13 +17,17 @@ import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
 import com.servibox.backend.treasury.service.TreasuryService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigInteger;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -35,6 +39,10 @@ public class SalesService {
      * factura eternamente PENDIENTE por 0,4 pesos.
      */
     private static final double TOLERANCIA_PESOS = 1.0;
+
+    /** Consecutivo generado: FV- y al menos 4 digitos. Ver 03-DECISIONS.md. */
+    private static final String PREFIJO_FACTURA = "FV-";
+    private static final Pattern FORMATO_FACTURA = Pattern.compile("FV-\\d+");
 
     private final SaleRepository saleRepository;
     private final SaleDetailRepository saleDetailRepository;
@@ -62,6 +70,23 @@ public class SalesService {
         return saleDetailRepository.findBySaleId(saleId);
     }
 
+    /**
+     * El numero que recibiria ahora una venta sin invoiceNumber: el mayor FV-<digitos> del
+     * tenant, anuladas incluidas, mas uno. No reserva nada. Los numeros con otro formato se
+     * ignoran. El filtro exacto y el maximo van aqui y no en SQL porque una expresion regular
+     * en la consulta no es portable entre H2 y PostgreSQL; la consulta solo trae la columna.
+     */
+    @Transactional(readOnly = true)
+    public String siguienteNumeroFactura() {
+        BigInteger mayor = saleRepository
+                .findInvoiceNumbersByTenantIdAndPrefix(TenantContext.getTenantId(), PREFIJO_FACTURA).stream()
+                .filter(numero -> FORMATO_FACTURA.matcher(numero).matches())
+                .map(numero -> new BigInteger(numero.substring(PREFIJO_FACTURA.length())))
+                .max(Comparator.naturalOrder())
+                .orElse(BigInteger.ZERO);
+        return String.format("%s%04d", PREFIJO_FACTURA, mayor.add(BigInteger.ONE));
+    }
+
     /** Una linea pedida: que producto, cuantas unidades y a que precio unitario sin IVA. */
     public record LineaFactura(Long productId, Integer quantity, Double price) {
     }
@@ -82,6 +107,9 @@ public class SalesService {
                              String paymentMethod,
                              List<LineaFactura> lineas) {
 
+        if (invoiceNumber == null || invoiceNumber.isBlank()) {
+            invoiceNumber = siguienteNumeroFactura();
+        }
         validarNumeroFacturaUnico(invoiceNumber, null);
         // Toda venta tiene tercero (id_tercero NOT NULL en el diccionario): si no se
         // identifica al cliente, es el Consumidor final del tenant.
@@ -111,7 +139,18 @@ public class SalesService {
         venta.setSubtotal(0.0);
         venta.setIvaPorPagar(0.0);
         venta.setTotal(0.0);
-        Sale guardada = saleRepository.save(venta);
+        Sale guardada;
+        try {
+            guardada = saleRepository.save(venta);
+        } catch (DataIntegrityViolationException ex) {
+            // Dos ventas simultaneas con el mismo numero pasan las dos la validacion de
+            // arriba; la segunda choca aqui con la restriccion. Sin reintento: 409.
+            if (String.valueOf(ex.getMostSpecificCause().getMessage()).toLowerCase()
+                    .contains("uk_venta_tenant_invoice_number")) {
+                throw new DuplicateInvoiceNumberException(venta.getInvoiceNumber());
+            }
+            throw ex;
+        }
 
         double subtotal = 0.0;
         double ivaGenerado = 0.0;

@@ -16,6 +16,11 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
 
     Optional<Sale> findByInvoiceNumberIgnoreCaseAndTenantId(String invoiceNumber, Long tenantId);
 
+    /** Solo los numeros, no las ventas, de todas las facturas del tenant (anuladas incluidas). */
+    @Query("SELECT s.invoiceNumber FROM Sale s WHERE s.tenantId = :tenantId "
+            + "AND s.invoiceNumber LIKE CONCAT(:prefijo, '%')")
+    List<String> findInvoiceNumbersByTenantIdAndPrefix(Long tenantId, String prefijo);
+
     /** Total facturado en todo el historico, sin las facturas en el estado excluido (ANULADA). */
     @Query("SELECT COALESCE(SUM(s.total), 0) FROM Sale s WHERE s.status <> :excluido")
     double sumTotalByStatusNot(SaleStatus excluido);

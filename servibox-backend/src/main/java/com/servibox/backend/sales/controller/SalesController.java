@@ -3,6 +3,7 @@ package com.servibox.backend.sales.controller;
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.sales.dto.CollectionRequest;
+import com.servibox.backend.sales.dto.NextInvoiceNumberResponse;
 import com.servibox.backend.sales.dto.SaleRequest;
 import com.servibox.backend.sales.dto.SaleResponse;
 import com.servibox.backend.sales.entity.PaymentType;
@@ -37,6 +38,12 @@ public class SalesController {
     @GetMapping
     public List<SaleResponse> listarFacturas() {
         return salesService.findAllSales().stream().map(this::responder).toList();
+    }
+
+    /** El numero que asignaria ahora un POST sin invoiceNumber. No lo reserva. */
+    @GetMapping("/next-invoice-number")
+    public NextInvoiceNumberResponse siguienteNumeroFactura() {
+        return new NextInvoiceNumberResponse(salesService.siguienteNumeroFactura());
     }
 
     @GetMapping("/{id}")
