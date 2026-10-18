@@ -208,7 +208,7 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | `IllegalStateException` (tipicamente el `@PrePersist` sin tenant activo) | 400 | mensaje de la excepcion |
 | `IllegalArgumentException` (id del cuerpo que no resuelve, rango de fechas invalido) | 400 | mensaje de la excepcion |
 | `InvalidTransferException`, `InvalidSaleOperationException`, `InvalidPurchaseOperationException` | 400 | mensaje de la excepcion |
-| `DuplicateProductCodeException`, `DuplicateAccountNameException`, `DuplicateInvoiceNumberException`, `DuplicatePurchaseInvoiceNumberException` | 409 | mensaje de la excepcion |
+| `DuplicateProductCodeException`, `DuplicateAccountNameException`, `DuplicateInvoiceNumberException`, `DuplicatePurchaseInvoiceNumberException`, `DuplicateCounterpartyDocumentException` | 409 | mensaje de la excepcion |
 | `InsufficientStockException`, `InsufficientBalanceException` | 409 | mensaje de la excepcion |
 | `InvalidCredentialsException` y `AuthenticationException` | 401 | "Credenciales invalidas" |
 | `MethodArgumentNotValidException` (fallo de `@Valid`) | 400 | "Peticion invalida" |
@@ -530,7 +530,8 @@ dos con saldo inicial 0.
 
 Terceros: la persona o empresa con la que el taller comercia. Unifica el cliente de una
 venta y el proveedor de una compra (paso 1 del refactor de normalizacion, ver
-[04-DATA-MODEL.md](04-DATA-MODEL.md), TERCEROS). No tiene controller propio todavia.
+[04-DATA-MODEL.md](04-DATA-MODEL.md), TERCEROS). Expone solo alta y listado
+(`CounterpartiesController`, ver Endpoints mas abajo).
 
 **Entidad** `Counterparty` (`TERCEROS`):
 
@@ -559,6 +560,25 @@ venta y el proveedor de una compra (paso 1 del refactor de normalizacion, ver
   `PROVEEDOR` o `AMBOS`. Si no, `InvalidCounterpartyException` (**400**). Lo llaman
   `crearFactura` de ventas y de compras cuando reciben un tercero.
 * `findById` usa `findByIdAndTenantId`; `findByDocumentNumber`, `findByDocumentNumberAndTenantId`.
+* `listar(rol)`: por nombre ascendente, con el `tenantId` explicito en la consulta
+  (`findByTenantIdOrderByNameAsc`, `findByTenantIdAndRoleInOrderByNameAsc`). Con un rol
+  devuelve ese rol mas `AMBOS`; `AMBOS` como filtro es 400. Si el listado incluye clientes
+  (sin filtro o `CLIENTE`) llama antes a `consumidorFinal()`, asi que el Consumidor final
+  siempre sale en la lista de clientes, aunque el tenant no haya facturado.
+
+**Endpoints**
+
+* `GET /api/counterparties?role=CLIENTE|PROVEEDOR`: lista de `CounterpartyResponse`. Un
+  `role` que no es del enum es 400 (`MethodArgumentTypeMismatchException`).
+* `POST /api/counterparties` con `CounterpartyRequest` (`role`, `name`, `documentType` y
+  `documentNumber` obligatorios; `email` y `phone` opcionales; longitudes de la entidad con
+  `@Size`). `role` es `CLIENTE` o `PROVEEDOR`; `AMBOS` es 400. Documento nuevo: **201**.
+  Documento que ya existe con el mismo rol o con `AMBOS`: **409** "Ya existe un tercero con
+  el documento N como ROL". Documento que existe con el otro rol: pasa a `AMBOS` por
+  `obtenerOCrear` y responde **200** con el tercero existente (nombre y tipo de documento no
+  cambian; correo y celular solo completan los vacios).
+* No hay `PUT` ni `DELETE`. Ver [03-DECISIONS.md](03-DECISIONS.md), entrada "Endpoints de
+  terceros: alta y listado".
 
 ### Modulo Sales
 

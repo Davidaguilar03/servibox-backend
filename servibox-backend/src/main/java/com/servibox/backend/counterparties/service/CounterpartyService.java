@@ -32,6 +32,30 @@ public class CounterpartyService {
         return counterpartyRepository.findAll();
     }
 
+    /**
+     * Listado de GET /api/counterparties, por nombre. Con un rol: los de ese rol y los AMBOS.
+     * Si el listado incluye clientes, asegura antes el Consumidor final, para que se pueda
+     * elegir aunque el tenant no haya facturado todavia sin cliente.
+     */
+    @Transactional
+    public List<Counterparty> listar(CounterpartyRole rol) {
+        if (rol == CounterpartyRole.AMBOS) {
+            throw new IllegalArgumentException("El filtro role es CLIENTE o PROVEEDOR");
+        }
+        Long tenantId = TenantContext.getTenantId();
+        if (tenantId == null) {
+            return List.of();
+        }
+        if (rol != CounterpartyRole.PROVEEDOR) {
+            consumidorFinal();
+        }
+        if (rol == null) {
+            return counterpartyRepository.findByTenantIdOrderByNameAsc(tenantId);
+        }
+        return counterpartyRepository.findByTenantIdAndRoleInOrderByNameAsc(tenantId,
+                List.of(rol, CounterpartyRole.AMBOS));
+    }
+
     @Transactional(readOnly = true)
     public Optional<Counterparty> findById(Long id) {
         Long tenantId = TenantContext.getTenantId();

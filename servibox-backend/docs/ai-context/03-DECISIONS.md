@@ -12,6 +12,30 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-18: Endpoints de terceros: alta y listado
+
+* Decision: `GET` y `POST /api/counterparties`, sin `PUT` ni `DELETE` por ahora. Reusan
+  `CounterpartyService` y el `CounterpartyResponse` que ya viaja en ventas y compras.
+  * **Listado.** `?role=CLIENTE` devuelve CLIENTE y AMBOS; `?role=PROVEEDOR`, PROVEEDOR y
+    AMBOS; sin parametro, todos. Orden por nombre. `role=AMBOS` es 400: el filtro es un rol
+    de operacion, no un valor del enum.
+  * **Consumidor final en la lista de clientes.** El listado que incluye clientes asegura
+    antes el Consumidor final del tenant (`consumidorFinal()`), asi que un GET puede crear
+    esa unica fila la primera vez. Sin eso no apareceria hasta la primera venta sin cliente.
+  * **Duplicado y promocion.** El alta es por documento dentro del tenant. Si no existe:
+    201. Si existe con el mismo rol o con AMBOS: 409 con el rol actual en el mensaje. Si
+    existe con el otro rol: se usa la promocion de `obtenerOCrear` (pasa a AMBOS) y la
+    respuesta es 200 con el tercero existente; el nombre y el tipo de documento que
+    llegaron se ignoran y el correo y el celular solo completan los vacios, como en las
+    facturas.
+* Alternativas consideradas: usar `crear()`, que da 409 para cualquier documento repetido y
+  no promueve; usar `obtenerOCrear` tal cual, que con el mismo rol devuelve el existente sin
+  avisar. Ninguna de las dos daba la regla pedida sola: el controlador rechaza el mismo rol
+  y delega el resto en `obtenerOCrear`.
+* Motivo: el formulario de alta necesita saber si dio de alta algo (201), si reutilizo un
+  tercero existente (200) o si el usuario repitio uno (409). La promocion ya existia para
+  las facturas; duplicarla en otro metodo abriria dos reglas para lo mismo.
+
 ## 2026-10-18: Flyway gestiona el esquema y tipos fisicos definitivos
 
 * Decision: paso 6 del refactor de normalizacion (ver
@@ -292,7 +316,8 @@ Formato de cada entrada:
   `supplierId` es obligatorio; un id que no resuelve en el tenant sigue siendo 400. Las
   respuestas cambian de `customerId` + `customerName` a un objeto `customer` (y `supplier`)
   con los datos del tercero. No hay endpoints de terceros: tampoco los habia de clientes ni
-  de proveedores.
+  de proveedores. **SUPERADO en esa parte el 2026-10-18** por "Endpoints de terceros: alta y
+  listado".
 * Nombres de columna: los propios del diccionario. La PK usa `id_tercero` con
   `@AttributeOverride`; el tenant se queda en `tenant_id` porque el `@Filter` de
   `TenantAwareEntity` lleva la columna escrita en su condicion SQL. Las dos se alinean
