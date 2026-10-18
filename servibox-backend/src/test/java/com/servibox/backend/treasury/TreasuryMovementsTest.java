@@ -21,6 +21,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -37,6 +38,10 @@ class TreasuryMovementsTest {
 
     @Autowired
     private TreasuryService treasuryService;
+
+    /** El "hoy" de negocio, el mismo que usan los servicios para la fecha por defecto. */
+    @Autowired
+    private Clock clock;
 
     @Autowired
     private MovementRepository movementRepository;
@@ -105,7 +110,7 @@ class TreasuryMovementsTest {
         assertThat(movimiento.getType()).isEqualTo(MovementType.INGRESO);
         assertThat(movimiento.getCategory()).isEqualTo(MovementCategory.INGRESO_OCASIONAL);
         assertThat(movimiento.getConcept()).isEqualTo("Venta de chatarra");
-        assertThat(movimiento.getDate()).isEqualTo(LocalDate.now());
+        assertThat(movimiento.getDate()).isEqualTo(LocalDate.now(clock));
 
         assertThat(treasuryService.findMovementsByAccountId(cuentaA.getId()))
                 .extracting(Movement::getConcept)

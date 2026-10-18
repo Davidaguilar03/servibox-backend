@@ -127,7 +127,7 @@ class InvoiceMovementCategoryTest {
     void lasVentasYSusAbonosGeneranMovimientosRecaudoVenta() {
         Sale contado = vender("VEN-00001", com.servibox.backend.sales.entity.PaymentType.CONTADO, caja);
         Sale credito = vender("VEN-00002", com.servibox.backend.sales.entity.PaymentType.CREDITO, null);
-        salesService.registrarAbono(credito.getId(), caja.getId(), 19000.0);
+        salesService.registrarAbono(credito.getId(), caja.getId(), 19000.0, null);
 
         assertThat(deCategoria(MovementCategory.RECAUDO_VENTA))
                 .hasSize(2)
@@ -141,7 +141,7 @@ class InvoiceMovementCategoryTest {
     void lasComprasYSusPagosGeneranMovimientosPagoCompra() {
         Purchase contado = comprar("FAC-00001", com.servibox.backend.purchases.entity.PaymentType.CONTADO, caja);
         Purchase credito = comprar("FAC-00002", com.servibox.backend.purchases.entity.PaymentType.CREDITO, null);
-        purchasesService.registrarPago(credito.getId(), caja.getId(), 19000.0);
+        purchasesService.registrarPago(credito.getId(), caja.getId(), 19000.0, null);
 
         assertThat(deCategoria(MovementCategory.PAGO_COMPRA))
                 .hasSize(2)
@@ -328,8 +328,8 @@ class InvoiceMovementCategoryTest {
     void laSumaPorCategoriaExcluyeAnuladasYRespetaElRango() {
         Sale vigente = vender("VEN-00020", com.servibox.backend.sales.entity.PaymentType.CREDITO, null);
         Sale anulada = vender("VEN-00021", com.servibox.backend.sales.entity.PaymentType.CREDITO, null);
-        salesService.registrarAbono(vigente.getId(), caja.getId(), 10000.0);
-        salesService.registrarAbono(anulada.getId(), caja.getId(), 7000.0);
+        salesService.registrarAbono(vigente.getId(), caja.getId(), 10000.0, null);
+        salesService.registrarAbono(anulada.getId(), caja.getId(), 7000.0, null);
         treasuryService.registrarIngresoDeVenta(caja, "Abono viejo", 3000.0, vigente, LocalDate.now().minusDays(40));
         assertThat(treasuryService.sumarPorCategoria(MovementCategory.RECAUDO_VENTA)).isEqualTo(20000.0);
 

@@ -124,7 +124,7 @@ class SalesRestoreTest {
     }
 
     private void abonar(Sale venta, Account cuenta, double monto) {
-        salesService.registrarAbono(venta.getId(), cuenta.getId(), monto);
+        salesService.registrarAbono(venta.getId(), cuenta.getId(), monto, null);
         fixture.verificarInvariante();
     }
 

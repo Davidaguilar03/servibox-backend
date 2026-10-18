@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigInteger;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -50,6 +51,8 @@ public class SalesService {
     private final ProductRepository productRepository;
     private final InventoryService inventoryService;
     private final TreasuryService treasuryService;
+    /** El "hoy" de negocio, ver BusinessClockConfiguration. */
+    private final Clock clock;
 
     @Transactional(readOnly = true)
     public List<Sale> findAllSales() {
@@ -130,7 +133,7 @@ public class SalesService {
         Sale venta = new Sale();
         venta.setInvoiceNumber(invoiceNumber);
         venta.setCustomer(cliente);
-        venta.setInvoiceDate(invoiceDate != null ? invoiceDate : LocalDate.now());
+        venta.setInvoiceDate(invoiceDate != null ? invoiceDate : LocalDate.now(clock));
         venta.setDueDate(dueDate);
         venta.setPaymentType(paymentType);
         venta.setPaymentMethod(paymentMethod);
@@ -207,10 +210,11 @@ public class SalesService {
     /**
      * Abono a una factura a credito: un movimiento RECAUDO_VENTA enlazado a la venta. Si
      * con este abono la factura queda cubierta, pasa a PAGADA. Se llama abono, no pago ni
-     * cobro, ver 02-CONVENTIONS.md.
+     * cobro, ver 02-CONVENTIONS.md. Sin fecha, hoy segun el Clock de negocio; una fecha
+     * posterior a hoy se rechaza.
      */
     @Transactional
-    public Movement registrarAbono(Long saleId, Long accountId, Double monto) {
+    public Movement registrarAbono(Long saleId, Long accountId, Double monto, LocalDate fecha) {
         Sale venta = findSaleById(saleId)
                 .orElseThrow(() -> new IllegalArgumentException("Factura no encontrada: " + saleId));
 
@@ -220,6 +224,13 @@ public class SalesService {
         }
         if (monto == null || monto <= 0) {
             throw new InvalidSaleOperationException("El monto del abono debe ser mayor a cero");
+        }
+        LocalDate hoy = LocalDate.now(clock);
+        if (fecha == null) {
+            fecha = hoy;
+        } else if (fecha.isAfter(hoy)) {
+            throw new InvalidSaleOperationException(
+                    "La fecha del abono (" + fecha + ") no puede ser posterior a hoy (" + hoy + ")");
         }
 
         double pendiente = saldoPendiente(venta);
@@ -232,7 +243,7 @@ public class SalesService {
                 .orElseThrow(() -> new IllegalArgumentException("Cuenta no encontrada: " + accountId));
 
         Movement abono = treasuryService.registrarIngresoDeVenta(
-                cuenta, conceptoAbono(venta), monto, venta, LocalDate.now());
+                cuenta, conceptoAbono(venta), monto, venta, fecha);
 
         if (saldoPendiente(venta) <= TOLERANCIA_PESOS) {
             venta.setStatus(SaleStatus.PAGADA);

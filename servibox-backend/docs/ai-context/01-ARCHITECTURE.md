@@ -244,7 +244,12 @@ Propiedades en `application.properties`:
 ```properties
 servibox.jwt.secret=${JWT_SECRET:dev-secret-cambiar-en-produccion-minimo-32-caracteres}
 servibox.jwt.expiration-ms=${JWT_EXPIRATION_MS:86400000}
+servibox.business.time-zone=${BUSINESS_TIME_ZONE:America/Bogota}
 ```
+
+`servibox.business.time-zone` es la zona de negocio: `config.BusinessClockConfiguration`
+expone con ella el bean `Clock` (`businessClock`) del que sale todo "hoy" de negocio. Ver
+[03-DECISIONS.md](03-DECISIONS.md), "Zona horaria de negocio y fecha de abonos y pagos".
 
 El valor por defecto del secret es solo para desarrollo local. **En produccion `JWT_SECRET`
 tiene que venir de una variable de entorno real**, nunca el valor de respaldo.
@@ -691,7 +696,8 @@ y comparacion con Autollantas en [03-DECISIONS.md](03-DECISIONS.md).
 * `GET /api/sales`
 * `GET /api/sales/{id}`: 404 si no existe para el tenant
 * `POST /api/sales/{id}/collections` (abono): cuerpo `CollectionRequest` (`accountId`,
-  `amount`); responde **201** con el `MovementResponse` del `RECAUDO_VENTA` creado
+  `amount`, `date` opcional en `yyyy-MM-dd`: si falta es hoy en la zona de negocio, si es
+  posterior a hoy es **400**); responde **201** con el `MovementResponse` del `RECAUDO_VENTA` creado
 * `POST /api/sales/{id}/annul`
 * `POST /api/sales/{id}/restore`
 
@@ -827,8 +833,8 @@ El egreso del contado al crear la compra tambien lleva la fecha de la factura.
 * `POST /api/purchases`
 * `GET /api/purchases`
 * `GET /api/purchases/{id}`: 404 si no existe para el tenant
-* `POST /api/purchases/{id}/payments`: cuerpo `PaymentRequest` (`accountId`, `amount`);
-  responde **201** con el `MovementResponse` del `PAGO_COMPRA` creado. `PurchaseResponse`
+* `POST /api/purchases/{id}/payments`: cuerpo `PaymentRequest` (`accountId`, `amount`,
+  `date` opcional con las mismas reglas que el abono); responde **201** con el `MovementResponse` del `PAGO_COMPRA` creado. `PurchaseResponse`
   ya no lleva `accountId` ni `accountName`, y su `pendingBalance` es 0 si la compra esta
   `ANULADA`, igual que en ventas
 * `POST /api/purchases/{id}/annul`

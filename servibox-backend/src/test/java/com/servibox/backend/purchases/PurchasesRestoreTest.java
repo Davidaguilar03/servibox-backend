@@ -124,7 +124,7 @@ class PurchasesRestoreTest {
     }
 
     private void pagar(Purchase compra, Account cuenta, double monto) {
-        purchasesService.registrarPago(compra.getId(), cuenta.getId(), monto);
+        purchasesService.registrarPago(compra.getId(), cuenta.getId(), monto, null);
         fixture.verificarInvariante();
     }
 

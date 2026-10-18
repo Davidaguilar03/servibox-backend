@@ -91,7 +91,7 @@ public class SalesController {
     public MovementResponse registrarAbono(@PathVariable Long id,
                                            @Valid @RequestBody CollectionRequest request) {
         facturaDeRuta(id);
-        return MovementResponse.from(salesService.registrarAbono(id, request.accountId(), request.amount()));
+        return MovementResponse.from(salesService.registrarAbono(id, request.accountId(), request.amount(), request.date()));
     }
 
     @PostMapping("/{id}/annul")

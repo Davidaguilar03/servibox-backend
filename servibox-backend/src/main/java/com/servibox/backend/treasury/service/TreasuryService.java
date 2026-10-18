@@ -18,6 +18,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
@@ -30,6 +31,8 @@ public class TreasuryService {
 
     private final AccountRepository accountRepository;
     private final MovementRepository movementRepository;
+    /** El "hoy" de negocio, ver BusinessClockConfiguration. */
+    private final Clock clock;
 
     /** Las dos patas de una transferencia: el EGRESO del origen y el INGRESO del destino. */
     public record Transferencia(Movement egreso, Movement ingreso) {
@@ -478,7 +481,7 @@ public class TreasuryService {
     private Movement aplicarMovimiento(Movement movimiento) {
         validarCoherencia(movimiento);
         if (movimiento.getDate() == null) {
-            movimiento.setDate(LocalDate.now());
+            movimiento.setDate(LocalDate.now(clock));
         }
         Movement guardado = movementRepository.save(movimiento);
         aplicarEfecto(guardado);
