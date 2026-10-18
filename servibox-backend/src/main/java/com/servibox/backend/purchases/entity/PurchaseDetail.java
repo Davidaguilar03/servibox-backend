@@ -11,6 +11,8 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /** Una linea de la factura de compra. */
 @Entity
@@ -32,7 +34,8 @@ public class PurchaseDetail extends TenantAwareEntity {
     private Integer quantity;
 
     /** Costo de compra unitario, sin IVA. */
-    @Column(name = "precio_compra", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "precio_compra", precision = 14, scale = 2, nullable = false)
     private Double price;
 
     /**
@@ -40,6 +43,7 @@ public class PurchaseDetail extends TenantAwareEntity {
      * en `impuesto_compra` el IVA **por unidad**; aqui es el de la linea completa, para que
      * sea el mismo criterio que en ventas. Ver 03-DECISIONS.md.
      */
-    @Column(name = "iva_linea_compra", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "iva_linea_compra", precision = 14, scale = 2, nullable = false)
     private Double ivaAmount;
 }

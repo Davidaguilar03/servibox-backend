@@ -11,6 +11,8 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /** Una linea de la factura. */
 @Entity
@@ -32,7 +34,8 @@ public class SaleDetail extends TenantAwareEntity {
     private Integer quantity;
 
     /** Precio unitario sin IVA al que se vendio. */
-    @Column(name = "precio_venta", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "precio_venta", precision = 14, scale = 2, nullable = false)
     private Double price;
 
     /**
@@ -41,7 +44,8 @@ public class SaleDetail extends TenantAwareEntity {
      * producto no puede mover el IVA de una factura ya emitida, porque esa factura ya se
      * entrego y se declaro. Es el mismo campo iva_generado_linea de Autollantas.
      */
-    @Column(name = "iva_generado_linea", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "iva_generado_linea", precision = 14, scale = 2, nullable = false)
     private Double ivaAmount;
 
     /**
@@ -50,6 +54,7 @@ public class SaleDetail extends TenantAwareEntity {
      * descontable se deduce como ivaAmount - ivaDifference. Lo usa el Reporte de IVA para
      * repartir el descontable por categoria. Es el diferencia_iva_linea de Autollantas.
      */
-    @Column(name = "diferencia_iva_linea", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "diferencia_iva_linea", precision = 14, scale = 2, nullable = false)
     private Double ivaDifference;
 }

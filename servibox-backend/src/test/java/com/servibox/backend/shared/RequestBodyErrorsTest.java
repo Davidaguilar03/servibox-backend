@@ -26,13 +26,14 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Un cuerpo ilegible o un valor de enum que no existe es un error del cliente: 400 con un
- * mensaje legible, no 500. Un caso por cada enum que enumera el diccionario.
+ * Un cuerpo ilegible o un valor de enum que no existe (en el cuerpo o en un parametro de
+ * query) es un error del cliente: 400 con un mensaje legible, no 500. Un caso por cada enum que enumera el diccionario.
  *
  * Tipo de cuenta y categoria de movimiento se prueban en sus endpoints reales. Rol, tipo de
  * tercero y tipo de documento no los recibe ningun endpoint todavia (no hay alta de
@@ -170,6 +171,17 @@ class RequestBodyErrorsTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value(
                         "Valor invalido 'DNI' en el campo documentType. Valores permitidos: CC, NIT, CE, RUT, PASAPORTE"));
+    }
+
+    /** Lo mismo vale para un enum en un parametro de query, no solo en el cuerpo. */
+    @Test
+    void unaCategoriaInvalidaEnElQueryEs400() throws Exception {
+        mockMvc.perform(get("/api/treasury/movements")
+                        .header("Authorization", "Bearer " + token)
+                        .param("category", "X"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Valor invalido 'X' en el parametro category. Valores"
+                        + " permitidos: GASTO_OPERATIVO, INGRESO_OCASIONAL, TRANSFERENCIA, PAGO_COMPRA, RECAUDO_VENTA"));
     }
 
     /** Los valores validos pasan: el 400 es por el valor, no por el endpoint de prueba. */

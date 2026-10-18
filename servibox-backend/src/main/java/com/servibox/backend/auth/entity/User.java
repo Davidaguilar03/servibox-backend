@@ -10,6 +10,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * El username es unico dentro de un tenant, no globalmente: dos negocios distintos pueden
@@ -42,6 +44,7 @@ public class User extends TenantAwareEntity {
     private boolean active = true;
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "rol", length = 30, nullable = false)
     private Role role;
 }

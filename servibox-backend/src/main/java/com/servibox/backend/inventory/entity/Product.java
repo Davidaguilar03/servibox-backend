@@ -10,6 +10,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * El codigo es unico dentro de un tenant, no globalmente: dos talleres distintos pueden
@@ -36,17 +38,20 @@ public class Product extends TenantAwareEntity {
     private String description;
 
     /** Costo sin IVA. */
-    @Column(name = "costo_compra", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "costo_compra", precision = 14, scale = 2, nullable = false)
     private Double purchaseCost;
 
     /** Nivel de stock. Se llama quantity, NO stock, igual que en Autollantas. */
     @Column(name = "cantidad", nullable = false)
     private Integer quantity;
 
-    @Column(name = "iva_producto", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "iva_producto", precision = 14, scale = 2, nullable = false)
     private Double taxAmount;
 
-    @Column(name = "precio_sugerido", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "precio_sugerido", precision = 14, scale = 2, nullable = false)
     private Double suggestedPrice;
 
     @ManyToOne

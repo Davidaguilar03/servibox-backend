@@ -10,6 +10,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * Cuenta de tesoreria. El nombre es unico dentro de un tenant, no globalmente: dos
@@ -33,14 +35,17 @@ public class Account extends TenantAwareEntity {
     private String name;
 
     /** Saldo con el que arranca la cuenta. No se mueve despues de creada. */
-    @Column(name = "balance_inicial", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "balance_inicial", precision = 14, scale = 2, nullable = false)
     private Double initialBalance;
 
     /** Saldo vivo. Solo lo mueve TreasuryService, a traves de los movimientos de la cuenta. */
-    @Column(name = "saldo_actual", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "saldo_actual", precision = 14, scale = 2, nullable = false)
     private Double currentBalance;
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "tipo_cuenta", length = 30, nullable = false)
     private AccountType type;
 }

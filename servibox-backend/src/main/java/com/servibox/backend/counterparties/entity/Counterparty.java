@@ -10,6 +10,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * Tercero: persona o empresa con la que el taller comercia. Unifica el cliente de una
@@ -33,6 +35,7 @@ import lombok.EqualsAndHashCode;
 public class Counterparty extends TenantAwareEntity {
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "tipo_tercero", length = 20, nullable = false)
     private CounterpartyRole role;
 
@@ -40,6 +43,7 @@ public class Counterparty extends TenantAwareEntity {
     private String name;
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "tipo_documento", length = 20, nullable = false)
     private DocumentType documentType;
 

@@ -10,6 +10,7 @@ import jakarta.persistence.Table;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 @Entity
 @Data
@@ -30,13 +31,14 @@ public class Tenant {
     @Column(name = "activo_tenant", nullable = false)
     private Boolean active = Boolean.TRUE;
 
+    /** En UTC, igual que created_at y updated_at de las entidades de negocio. */
     @Column(name = "fecha_creacion_tenant", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @PrePersist
     void onCreate() {
         if (createdAt == null) {
-            createdAt = LocalDateTime.now();
+            createdAt = LocalDateTime.now(ZoneOffset.UTC);
         }
     }
 }

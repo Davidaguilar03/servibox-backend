@@ -13,6 +13,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDate;
 
@@ -56,6 +58,7 @@ public class Purchase extends TenantAwareEntity {
     private LocalDate dueDate;
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "forma_pago_compra", length = 20, nullable = false)
     private PaymentType paymentType;
 
@@ -63,17 +66,21 @@ public class Purchase extends TenantAwareEntity {
     private String paymentMethod;
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "estado_compra", length = 20, nullable = false)
     private PurchaseStatus status;
 
     /** Suma de precio de compra por cantidad, sin IVA. */
-    @Column(name = "subtotal_compra", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "subtotal_compra", precision = 14, scale = 2, nullable = false)
     private Double subtotal;
 
     /** IVA de la compra. Es IVA descontable: se recupera contra el IVA de las ventas. */
-    @Column(name = "iva_total_compra", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "iva_total_compra", precision = 14, scale = 2, nullable = false)
     private Double ivaTotal;
 
-    @Column(name = "total_compra", nullable = false)
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "total_compra", precision = 14, scale = 2, nullable = false)
     private Double total;
 }

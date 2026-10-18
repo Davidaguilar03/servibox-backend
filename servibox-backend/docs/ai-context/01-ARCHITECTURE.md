@@ -6,7 +6,8 @@
 * Spring Boot 4.1.1: `webmvc`, `data-jpa`, `security`, `validation`.
 * Hibernate ORM 7.4.5 (el que trae Spring Boot).
 * JWT con `jjwt` 0.12.6 (`api`, `impl`, `jackson`).
-* H2 para local y tests; driver de PostgreSQL ya declarado para produccion, ver Base de
+* Flyway (`spring-boot-starter-flyway` y `flyway-database-postgresql`) para el esquema.
+* H2 en modo PostgreSQL para local y tests; PostgreSQL 16 en el perfil `prod`. Ver Base de
   datos al final de este archivo.
 
 ## Integracion Spring Boot
@@ -212,6 +213,7 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | `InvalidCredentialsException` y `AuthenticationException` | 401 | "Credenciales invalidas" |
 | `MethodArgumentNotValidException` (fallo de `@Valid`) | 400 | "Peticion invalida" |
 | `HttpMessageNotReadableException` (JSON mal formado o valor del tipo equivocado) | 400 | Si el valor es de un enum: "Valor invalido 'X' en el campo f. Valores permitidos: ..."; si no, un mensaje generico |
+| `MethodArgumentTypeMismatchException` (parametro de query o de ruta del tipo equivocado, por ejemplo `?category=X`) | 400 | "Valor invalido 'X' en el parametro p", mas "Valores permitidos: ..." si es un enum |
 | `ResourceNotFoundException` | 404 | mensaje de la excepcion |
 | `NoResourceFoundException` | 404 | "Recurso no encontrado" |
 | `Exception` (ultimo recurso) | 500 | "Error interno del servidor" |
@@ -892,19 +894,44 @@ DTOs: `KpisResponse`, `MovementSummaryResponse`, `IvaReportResponse` con su list
   `id_tenant` con FK a `TENANTS` en todas las tablas salvo `TENANTS` y
   `CATEGORIA_IMPUESTOS`. Ver Estrategia multi-tenant.
 * Nulabilidad y longitudes de VARCHAR: las del diccionario, declaradas en cada `@Column`
-  (tambien en las columnas de enum, por PostgreSQL). CHECK en las entidades:
-  `ck_movimiento_factura`, `ck_movimiento_monto`, `ck_detalle_compra_cantidad` y
-  `ck_detalle_venta_cantidad`.
-* **El esquema se verifica contra el diccionario.** `schema.SchemaConformanceTest` levanta
-  el contexto, parsea las 14 tablas de 04-DATA-MODEL.md y las compara por
-  `DatabaseMetaData` con el esquema de la base de pruebas: tablas, columnas, nulabilidad,
-  longitudes, PK, FK, unicas y tipos por familia. Las diferencias de tipo que resuelve el
-  paso 6 (BIGINT, DOUBLE, DATE, ENUM) estan en una lista explicita en la prueba, que falla
-  tambien si una entrada deja de ocurrir. Cambiar una entidad sin cambiar el diccionario,
-  o al reves, rompe esa prueba.
-* Tests: H2 en memoria con `ddl-auto=create-drop` (`src/test/resources/application-test.properties`).
-* Local: `application.properties` no declara datasource ni `ddl-auto`; manda la
-  autoconfiguracion de Spring Boot sobre la H2 embebida.
-* Sin Flyway ni Liquibase todavia: el esquema lo genera Hibernate desde las entidades.
-  Pendiente antes de produccion con PostgreSQL, ver *Estado de la gestion del esquema* en
-  [03-DECISIONS.md](03-DECISIONS.md).
+  (tambien en las columnas de enum). CHECK: `ck_movimiento_factura`, `ck_movimiento_monto`,
+  `ck_detalle_compra_cantidad`, `ck_detalle_venta_cantidad` y los cuatro
+  `ck_configuracion_porcentaje_*` (0 a 1); estan en la migracion, y los de las entidades
+  tambien en su `@Table(check = ...)` como documentacion.
+* Tipos: ids `BIGINT` (`Long`); montos `NUMERIC(14,2)` y tasas como fraccion `NUMERIC(8,6)`,
+  los dos `Double` en Java con `@JdbcTypeCode(SqlTypes.NUMERIC)`, `precision` y `scale`;
+  fechas de negocio `DATE` (`LocalDate`); auditoria `TIMESTAMP` en UTC (el
+  `DateTimeProvider` de `JpaAuditingConfiguration` y `Tenant.onCreate`); enums `VARCHAR`
+  con `@JdbcTypeCode(SqlTypes.VARCHAR)`, para que Hibernate no use el `ENUM` nativo de H2.
+
+### Gestion del esquema con Flyway
+
+* **El esquema lo mandan las migraciones**, en `src/main/resources/db/migration`
+  (`V1__init_schema.sql`, escrita a mano desde 04-DATA-MODEL.md). Flyway las aplica al
+  arrancar, y Hibernate tiene `spring.jpa.hibernate.ddl-auto=validate` en todos los
+  perfiles: no crea ni altera tablas, y si una entidad no coincide con el esquema la app no
+  arranca. Como agregar un cambio, en [02-CONVENTIONS.md](02-CONVENTIONS.md).
+* **Perfiles.**
+  * Local, sin perfil o con `dev` (`application.properties`): H2 en memoria en modo
+    PostgreSQL (`jdbc:h2:mem:servibox;MODE=PostgreSQL`). Los datos se pierden al apagar,
+    como antes; con `dev`, `DevDataInitializer` siembra el tenant `demo`. Arranque:
+    `./mvnw spring-boot:run -Dspring-boot.run.profiles=dev`.
+  * `prod` (`application-prod.properties`): PostgreSQL. Variables de entorno `DB_URL` (por
+    ejemplo `jdbc:postgresql://host:5432/servibox`), `DB_USERNAME` y `DB_PASSWORD`, sin
+    valor por defecto: si falta alguna, la app no arranca. Ademas `JWT_SECRET`, ver
+    Configuracion de la capa de seguridad.
+  * `test` (`src/test/resources/application-test.properties`): H2 en memoria en modo
+    PostgreSQL con una base distinta por contexto de Spring (`${random.uuid}` en la URL),
+    migrada por Flyway desde vacia, asi que cada contexto arranca con el esquema limpio.
+* **Como se prueba.**
+  * `schema.SchemaConformanceTest` parsea las 14 tablas de 04-DATA-MODEL.md y las compara
+    por `DatabaseMetaData` con el esquema que dejo Flyway (sin `flyway_schema_history`):
+    tablas, columnas, tipos por familia, nulabilidad, longitud de VARCHAR, precision y
+    escala de NUMERIC, PK, FK con `ON DELETE RESTRICT` y unicas. No acepta desviaciones de
+    tipo (la lista esta vacia). Cambiar la migracion sin cambiar el diccionario, o al
+    reves, rompe esa prueba.
+  * `schema.FlywayMigrationTest`: las migraciones aplican limpias sobre una base vacia,
+    Hibernate valida el esquema del contexto, y la relacion a `Tenant` de
+    `TenantAwareEntity` no lee TENANTS al cargar una entidad.
+  * Pendiente: no hay prueba contra PostgreSQL real (Testcontainers); V1 solo se probo en
+    H2 en modo PostgreSQL.
