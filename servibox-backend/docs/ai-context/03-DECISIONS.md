@@ -12,6 +12,39 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-18: Consecutivo de la factura de venta
+
+* Decision: `invoiceNumber` pasa a ser **opcional** en `SaleRequest`. Si viene, se respeta
+  tal cual y un repetido sigue siendo 409. Si falta o viene en blanco, `SalesService`
+  asigna el siguiente consecutivo del tenant con el formato `FV-` mas al menos 4 digitos
+  (`FV-0001`, ..., `FV-9999`, `FV-10000`).
+  * **Calculo.** El mayor numero entre las ventas del tenant que cumplen exactamente
+    `FV-<digitos>`, **anuladas incluidas**, mas uno. Un numero con otro formato (`A-15`,
+    `FV-12A`, `fv-0050`) se ignora. Sin ventas con el formato se empieza en `FV-0001`. Las
+    anuladas cuentan porque una venta solo se anula, nunca se borra: su numero sigue en la
+    tabla y la restriccion unica no deja reutilizarlo.
+  * **Donde.** La consulta (`SaleRepository.findInvoiceNumbersByTenantIdAndPrefix`) trae
+    solo la columna de numero de las ventas del tenant que empiezan por `FV-`; el filtro
+    exacto y el maximo van en el servicio, con `BigInteger`. Hacerlo todo en SQL exige una
+    expresion regular y un `CAST` del sufijo, y la sintaxis de expresiones regulares no es
+    la misma en H2 y en PostgreSQL. Con la proyeccion no se cargan ventas completas.
+  * **`GET /api/sales/next-invoice-number`** devuelve el mismo valor que asignaria un POST
+    en ese momento. **No reserva** el numero ni escribe nada: dos pantallas abiertas a la vez
+    ven el mismo numero, y el que guarde segundo recibe otro si no lo envia, o 409 si envia
+    el que vio.
+  * **Concurrencia.** Sin reintentos automaticos. Si dos ventas simultaneas calculan el mismo
+    numero, la segunda choca con `uk_venta_tenant_invoice_number` y la violacion se traduce
+    a la misma 409 de `DuplicateInvoiceNumberException`, en vez de un 500.
+  * **Compras no cambian**: su numero es el de la factura del proveedor y sigue siendo
+    obligatorio.
+* Alternativas consideradas: una tabla o columna de contador por tenant (exige una
+  migracion V2 y bloquear la fila); reservar el numero en el GET (deja huecos cuando la
+  venta no se guarda); contar las ventas en vez de tomar el maximo (se rompe con numeros
+  manuales o de otro formato); reintentar ante el duplicado.
+* Motivo: es lo minimo que da un consecutivo sin tocar el esquema. Con un solo taller por
+  tenant, dos ventas en el mismo instante son raras, y una 409 clara es preferible a un
+  reintento que oculta el choque.
+
 ## 2026-10-18: El login devuelve la identidad del usuario y del tenant
 
 * Decision: `POST /api/auth/login` responde

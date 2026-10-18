@@ -616,9 +616,12 @@ dos**: una factura descuenta inventario y mueve tesoreria.
 
 `SalesService.crearFactura` hace todo esto en **una sola transaccion**:
 
-1. Valida que el `invoiceNumber` no exista ya en el tenant y lanza
-   `DuplicateInvoiceNumberException` (**409**) si existe. La restriccion de base queda como
-   red de seguridad.
+1. Si `invoiceNumber` falta o viene en blanco, asigna `siguienteNumeroFactura()`: el
+   mayor `FV-<digitos>` del tenant, anuladas incluidas, mas uno, con al menos 4 digitos
+   (`FV-0001`). Valida que el numero no exista ya en el tenant y lanza
+   `DuplicateInvoiceNumberException` (**409**) si existe. Si dos ventas simultaneas pasan
+   esa validacion, la segunda choca con `uk_venta_tenant_invoice_number` al insertar y
+   tambien se traduce a la misma 409, sin reintento.
 2. Por cada linea: resuelve el producto, comprueba que haya stock suficiente
    (`InsufficientStockException`, **409**, si no alcanza) y **descuenta**
    `Product.quantity`.
@@ -682,7 +685,9 @@ y comparacion con Autollantas en [03-DECISIONS.md](03-DECISIONS.md).
 
 **Endpoints** (todos requieren JWT)
 
-* `POST /api/sales` (emitir factura)
+* `POST /api/sales` (emitir factura). `invoiceNumber` es opcional, ver el paso 1 del flujo
+* `GET /api/sales/next-invoice-number`: `{"invoiceNumber": "FV-0232"}`, el numero que
+  asignaria ahora un POST sin numero. No lo reserva ni escribe nada
 * `GET /api/sales`
 * `GET /api/sales/{id}`: 404 si no existe para el tenant
 * `POST /api/sales/{id}/collections` (abono): cuerpo `CollectionRequest` (`accountId`,

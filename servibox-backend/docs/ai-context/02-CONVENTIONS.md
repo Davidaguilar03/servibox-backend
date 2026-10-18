@@ -126,7 +126,7 @@ siempre `date`. Los de concepto se nombran `concepto_<entidad>` y en Java son si
 | Termino | Significado | Cuidado |
 |-|-|-|
 | **Abono** | Pago parcial de una factura a credito | **Se dice abono, NO pago y NO cobro.** Es explicito en la documentacion de Autollantas: ventana "Registrar Abono", boton "Confirmar Abono", campo "Valor Abonado". **No es una entidad**: un abono es un `Movement` `RECAUDO_VENTA` con `sale`. Ya no hay `Collection` ni tabla `RECAUDOS`; solo la ruta `/collections` y el DTO de entrada `CollectionRequest` conservan el nombre |
-| `invoiceNumber` | Numero de factura (`numero_factura_venta`) | Unico por tenant, y aqui **si** con restriccion de base, a diferencia de Autollantas. Ver [03-DECISIONS.md](03-DECISIONS.md) |
+| `invoiceNumber` | Numero de factura (`numero_factura_venta`) | Unico por tenant, y aqui **si** con restriccion de base, a diferencia de Autollantas. En ventas es opcional en la API: si falta, el consecutivo `FV-0001`, `FV-0002`... del tenant. Ver [03-DECISIONS.md](03-DECISIONS.md) |
 | `invoiceDate` | Fecha de la factura | En Autollantas el campo se llama `saleDate` (`fecha_venta`); aqui `invoiceDate`, que es como lo llama el formulario. La columna sigue siendo `fecha_venta` |
 | `ivaAmount` (linea) | IVA generado por la linea | **Congelado al facturar.** No se recalcula nunca desde el producto: editar el IVA de un producto no puede mover el IVA de una factura ya emitida |
 | `ivaPorPagar` | IVA generado menos IVA descontable | No es el IVA de la factura: es la diferencia contra el IVA que ya se pago al comprar esos productos (`producto.taxAmount`). En Autollantas se llama `ivaDifference` / "IVA por Pagar" |

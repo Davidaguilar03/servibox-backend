@@ -2,7 +2,6 @@ package com.servibox.backend.sales.dto;
 
 import com.servibox.backend.sales.entity.PaymentType;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 
@@ -10,7 +9,8 @@ import java.time.LocalDate;
 import java.util.List;
 
 public record SaleRequest(
-        @NotBlank String invoiceNumber,
+        /** Opcional: si falta o viene en blanco, el siguiente consecutivo FV- del tenant. */
+        String invoiceNumber,
         Long customerId,
         LocalDate invoiceDate,
         LocalDate dueDate,
