@@ -157,6 +157,8 @@ firmado dentro del token.
    Distinguirlos le confirmaria a un atacante que usuarios existen en que tenant.
 4. Si cuadra, **`auth.JwtService.generateToken(user)`** emite un JWT firmado con HMAC SHA
    con los claims `sub` (username), `tenantId` y `role`, y expiracion segun configuracion.
+   La respuesta es `LoginResponse`: `{"token", "user": {"username", "role"}, "tenant":
+   {"name", "slug"}}`, armada con el usuario y el tenant que el login ya verifico.
 5. En cada request posterior el cliente manda `Authorization: Bearer <token>`.
 6. **`auth.JwtAuthenticationFilter`** (registrado antes de
    `UsernamePasswordAuthenticationFilter`) valida firma y expiracion. Con el token bueno:

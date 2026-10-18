@@ -12,6 +12,23 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-18: El login devuelve la identidad del usuario y del tenant
+
+* Decision: `POST /api/auth/login` responde
+  `{"token": "...", "user": {"username", "role"}, "tenant": {"name", "slug"}}`. Se agrego
+  `user` y `tenant` sin quitar nada: `token` sigue en el mismo sitio, asi que un cliente que
+  solo leia `$.token` no cambia. Los datos salen del `User` y el `Tenant` que el login ya
+  cargo y verifico, sin consultas extra. No viajan `id`, `tenantId`, `email` ni
+  `passwordHash`. `User` no tiene nombre para mostrar, asi que no se invento uno: el
+  frontend muestra el `username`. Claims del JWT, expiracion y el 401 generico no cambian.
+* Alternativas consideradas: un endpoint `GET /api/auth/me` que devuelva lo mismo a partir
+  del token; que el frontend decodifique el JWT.
+* Motivo: el frontend necesita la identidad justo despues del login para pintar la sesion,
+  y el login ya tiene los dos objetos en memoria; `/me` seria una ruta y una consulta mas
+  para el mismo dato. Decodificar el JWT no da el nombre del tenant, que no es un claim, y
+  ataria el frontend al formato del token. Si mas adelante hace falta refrescar la
+  identidad sin volver a hacer login (por ejemplo al recargar la pagina), ahi entra `/me`.
+
 ## 2026-10-18: Endpoints de terceros: alta y listado
 
 * Decision: `GET` y `POST /api/counterparties`, sin `PUT` ni `DELETE` por ahora. Reusan

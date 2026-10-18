@@ -148,7 +148,71 @@ class AuthLoginIntegrationTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.error").value("Credenciales invalidas"))
-                .andExpect(jsonPath("$.status").value(401));
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.token").doesNotExist())
+                .andExpect(jsonPath("$.user").doesNotExist())
+                .andExpect(jsonPath("$.tenant").doesNotExist());
+    }
+
+    /** Ademas del token, el login dice quien entro y a que taller, sin datos sensibles. */
+    @Test
+    void loginDevuelveLaIdentidadDelUsuarioYDelTenant() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(PASSWORD)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isNotEmpty())
+                .andExpect(jsonPath("$.user.username").value(USERNAME))
+                .andExpect(jsonPath("$.user.role").value("ADMIN"))
+                .andExpect(jsonPath("$.user.passwordHash").doesNotExist())
+                .andExpect(jsonPath("$.tenant.name").value("Taller de Prueba"))
+                .andExpect(jsonPath("$.tenant.slug").value(SLUG))
+                .andExpect(jsonPath("$.tenant.id").doesNotExist())
+                .andReturn();
+        String token = JsonPath.read(result.getResponse().getContentAsString(), "$.token");
+
+        mockMvc.perform(get(RUTA_PROTEGIDA).header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+    }
+
+    /** Mismo username en otro taller: la respuesta trae el nombre y el slug de SU tenant. */
+    @Test
+    void elLoginDeUnUsuarioDeOtroTenantDevuelveSuPropioTenant() throws Exception {
+        Tenant otro = new Tenant();
+        otro.setName("Otro Taller");
+        otro.setSlug("otro-taller");
+        otro.setActive(Boolean.TRUE);
+        Long otroId = tenantRepository.save(otro).getId();
+        TenantContext.setTenantId(otroId);
+        try {
+            User user = new User();
+            user.setUsername(USERNAME);
+            user.setPasswordHash(passwordEncoder.encode("otra-clave"));
+            user.setActive(true);
+            user.setRole(Role.CAJERO);
+            userRepository.save(user);
+        } finally {
+            TenantContext.clear();
+        }
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"tenantSlug":"otro-taller","username":"%s","password":"otra-clave"}
+                                """.formatted(USERNAME)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.username").value(USERNAME))
+                .andExpect(jsonPath("$.user.role").value("CAJERO"))
+                .andExpect(jsonPath("$.tenant.name").value("Otro Taller"))
+                .andExpect(jsonPath("$.tenant.slug").value("otro-taller"));
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(PASSWORD)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.role").value("ADMIN"))
+                .andExpect(jsonPath("$.tenant.name").value("Taller de Prueba"))
+                .andExpect(jsonPath("$.tenant.slug").value(SLUG));
     }
 
     @Test
