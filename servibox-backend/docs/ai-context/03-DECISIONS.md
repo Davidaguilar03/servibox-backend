@@ -12,6 +12,53 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-18: Exportacion de reportes en PDF y Excel
+
+* Decision: los reportes se generan en el servidor, con el mismo flujo que Autollantas (el
+  usuario elige tipo, periodo y formato, y descarga el archivo), en
+  `GET /api/reporting/export`. Primera rama: **Estado de resultados** y **Movimientos de
+  cuentas**, en PDF y en Excel.
+  * **Librerias.** PDF con OpenPDF 3 (`com.github.librepdf:openpdf`, paquete
+    `org.openpdf`), LGPL-2.1 / MPL-2.0. Excel con Apache POI (`poi-ooxml`), Apache-2.0.
+    PDFBox solo en pruebas, para leer el texto de los PDF. El iText 7 de Autollantas es
+    AGPL-3.0: en un backend en red obligaria a publicar el codigo de todo el servicio, asi
+    que no se reutiliza. De OpenPDF se excluye `brotli4j`: solo lo usa la compresion
+    Brotli, apagada por defecto, y trae un binario nativo que depende del sistema donde se
+    compila. El `log4j-api` de POI no choca con Logback: Spring Boot ya trae
+    `log4j-to-slf4j`, que lo manda a SLF4J. Sin `autoSizeColumn`: necesita fuentes del
+    sistema y falla en un contenedor sin ellas; los anchos son fijos.
+  * **Estado de resultados = `/kpis`.** Las cinco filas (ventas, compras con signo menos,
+    utilidad bruta, gastos con signo menos, utilidad neta) salen de
+    `ReportingService.getPeriodKpis` del mismo rango; no hay formula propia, asi que el
+    archivo cuadra con el panel y con la vista previa. Los ingresos ocasionales no entran,
+    igual que en `/kpis`. Es distinto del Estado de Resultados de Autollantas a proposito:
+    su panel suma las facturas anuladas, y su archivo mezcla lo cobrado de las ventas a
+    credito (total menos saldo pendiente actual) con lo facturado de las compras y suma
+    los ingresos ocasionales; panel y archivo no cuadraban entre si.
+  * **Movimientos de cuentas.** Fecha, cuenta, tipo, concepto, origen y monto con signo, de
+    los movimientos activos del rango (misma regla que `GET /api/treasury/movements`), en
+    orden ascendente. Totales de ingresos, egresos y neto; con una cuenta, ademas saldo
+    inicial y final. El origen no tiene codigos: `VENTA <numero>`, `COMPRA <numero>`,
+    `GASTO OPERATIVO`, `INGRESO OCASIONAL`, `TRANSFERENCIA`. Gastos, ingresos ocasionales y
+    transferencias no tienen consecutivo en el modelo (los `G-`, `IO-` y `T-` del diseno no
+    existen) y no se inventan.
+  * **Limites.** Rango de a lo sumo 366 dias y a lo sumo 20000 movimientos
+    (`servibox.reporting.max-export-rows`); pasarse es 400 pidiendo acotar el rango. El
+    archivo se arma en memoria, y con esos topes cabe sin problema.
+  * **Encabezado.** Solo el nombre del tenant: NIT, telefono y logo no existen en el modelo
+    y no se agregan.
+  * **Queda fuera** de esta rama: ventas, compras, cartera por cobrar y por pagar, flujo de
+    caja, IVA en archivo, inventario valorizado, productos vendidos, reporte diario,
+    utilidad por linea (no hay costo congelado por linea), NIT y logo, comision de tarjeta.
+* Alternativas consideradas: seguir solo con JSON y exportar en el navegador (cada cliente
+  repetiria el formato y no habria PDF paginado); reutilizar el `ReportService` de
+  Autollantas (iText es AGPL y su estado de resultados no cuadra con el panel); PDFBox para
+  generar (no tiene tablas ni paginacion: habria que maquetar a mano).
+* Motivo: el taller usa los archivos igual que en Autollantas, para imprimir y para el
+  contador. Generarlos en el servidor da un solo formato para todos los clientes, y
+  separar el calculo (`ReportExportService`) del formato (los generadores) permite probar
+  las cifras sin abrir archivos.
+
 ## 2026-10-18: Zona horaria de negocio y fecha de abonos y pagos
 
 * Decision: todo "hoy" de negocio sale de un unico bean `Clock` (`businessClock`, en
@@ -464,6 +511,10 @@ Formato de cada entrada:
   restaurar, foto identica) y por los tests de aislamiento.
 
 ## 2026-09-22: Reporting expone JSON, sin generacion de PDF ni Excel
+
+> **SUPERADO el 2026-10-18** por "Exportacion de reportes en PDF y Excel": los reportes
+> si se generan en el servidor. Los endpoints JSON se conservan. La entrada se conserva por
+> el razonamiento.
 
 * Decision: el modulo Reporting **no genera PDF ni Excel**. Expone los datos ya calculados
   como JSON en tres endpoints: `GET /api/reporting/kpis` (global, o del periodo con

@@ -64,6 +64,13 @@ Todos los DTOs son `record` en el paquete `dto` del modulo: `XxxRequest` de entr
 entidad JPA: arrastraria `tenantId` y relaciones EAGER. Los valores calculados que no son
 columna (por ejemplo `pendingBalance`) se exponen en el `Response`.
 
+Un endpoint que devuelve un archivo (por ahora solo `GET /api/reporting/export`) responde
+`ResponseEntity<byte[]>` con su `Content-Type` y `Content-Disposition: attachment` con un
+nombre de archivo en ASCII, y **no declara `produces`**: el cliente manda
+`Accept: application/json` y con `produces` la respuesta seria un 406. Sus errores siguen
+siendo el JSON `{"error", "status"}` de siempre. En un Excel, los montos van como celdas
+numericas con formato, nunca como texto.
+
 ## Terminologia de negocio
 
 Nombres que vienen de Autollantas y se mantienen por consistencia entre los dos proyectos.
