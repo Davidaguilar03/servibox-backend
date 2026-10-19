@@ -907,17 +907,57 @@ eliminan, y al eliminarse desaparecen solos.
 Rangos: `desde` y `hasta` son obligatorios en periodo, movimientos e IVA; si falta uno, o
 `desde` es posterior a `hasta`, el service lanza `IllegalArgumentException` (**400**).
 
-**Endpoints** (todos requieren JWT, todos `GET`, todos JSON)
+**`ReportExportService`** y los generadores de archivo (paquete `reporting/export`)
+
+* `ReportExportService` calcula un `ReportModel` (titulos, columnas, filas, totales y la
+  fila de resultado) y no genera archivos. `PdfReportGenerator` (OpenPDF) y
+  `ExcelReportGenerator` (Apache POI, `XSSFWorkbook`) solo le dan formato al modelo, asi
+  que las cifras se prueban sin leer archivos.
+* `estadoDeResultados(desde, hasta)`: llama a `getPeriodKpis` del mismo rango; las cinco
+  filas son `totalSales`, `-totalPurchases`, `grossProfit`, `-operatingExpenses` y
+  `netProfit`. No hay formula propia: el archivo cuadra con `/kpis` y con el panel.
+* `movimientos(desde, hasta, accountId)`: `TreasuryService.listarParaReporte`, una sola
+  consulta Criteria que proyecta fecha, cuenta, tipo, categoria, concepto, monto y los
+  numeros de factura de venta y compra (join a `CUENTAS`, `VENTAS` y `COMPRAS`), con el
+  mismo filtro de movimiento activo que `GET /api/treasury/movements`, en orden de fecha y
+  de id ascendente. No carga entidades, asi que no dispara las relaciones EAGER de
+  `Movement`: 3 sentencias SQL por peticion sin cuenta y 8 con cuenta, sin importar cuantos
+  movimientos haya (`ReportExportQueriesTest`). Origen: `VENTA <numero>`, `COMPRA <numero>`,
+  `GASTO OPERATIVO`, `INGRESO OCASIONAL` o `TRANSFERENCIA`. Con `accountId`, saldo inicial
+  y final con `TreasuryService.saldoAl(cuenta, fecha)`: balance inicial mas los movimientos
+  activos con fecha hasta ese dia (ingresos suman, egresos restan), la misma invariante de
+  `saldo_actual` aplicada a una fecha.
+* Limites: rango de a lo sumo 366 dias (contando los dos extremos), ademas de
+  `validarRango`; a lo sumo `servibox.reporting.max-export-rows` movimientos (20000 por
+  defecto, `REPORTING_MAX_EXPORT_ROWS`). Pasarse es **400**.
+* Formato: PDF A4 vertical, margenes de 36 pt, Helvetica estandar; encabezado con el nombre
+  del tenant, el titulo, el periodo y una linea roja de marca; encabezado de tabla que se
+  repite en cada pagina; pie "Generado el dd/MM/yyyy HH:mm · tenant · Pag. N de M" con la
+  hora del reloj de negocio, estampado en una segunda pasada. Excel: una hoja, encabezado
+  en filas combinadas, titulos de la tabla inmovilizados, filtro en movimientos, montos como
+  celdas numericas `#,##0`, anchos fijos (sin `autoSizeColumn`, que falla sin fuentes del
+  sistema) y sin pie.
+
+**Endpoints** (todos requieren JWT, todos `GET`; JSON salvo `/export`)
 
 * `/api/reporting/kpis`: sin parametros, KPIs globales. Con `desde` y `hasta` (ISO,
   `2026-09-01`), KPIs del periodo. Una sola ruta porque la respuesta es el mismo DTO;
   `desde` / `hasta` vuelven null en el global.
 * `/api/reporting/movements?desde=...&hasta=...`
 * `/api/reporting/iva?desde=...&hasta=...`
+* `/api/reporting/export?type=ESTADO_RESULTADOS|MOVIMIENTOS&format=PDF|XLSX&desde=...&hasta=...[&accountId=...]`:
+  el archivo como `ResponseEntity<byte[]>` con `Content-Type` `application/pdf` o
+  `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` y
+  `Content-Disposition: attachment` con nombre ASCII
+  (`estado-resultados_2026-09-01_2026-09-30.pdf`, `movimientos-cuentas_2026-09-01_2026-09-30.xlsx`).
+  Sin `produces`, para que un `Accept: application/json` no de 406. `accountId` solo vale
+  con `MOVIMIENTOS` (con `ESTADO_RESULTADOS` es 400); una cuenta inexistente o de otro
+  tenant es 400 "Cuenta no encontrada". Un periodo sin movimientos es 200 con un archivo
+  que dice "Sin movimientos en el periodo".
 
 DTOs: `KpisResponse`, `MovementSummaryResponse`, `IvaReportResponse` con su lista de
-`IvaCategoryResponse`. **No hay PDF ni Excel**, decision deliberada en
-[03-DECISIONS.md](03-DECISIONS.md).
+`IvaCategoryResponse`. Archivos: ver [03-DECISIONS.md](03-DECISIONS.md), "Exportacion de
+reportes en PDF y Excel".
 
 ## Base de datos
 

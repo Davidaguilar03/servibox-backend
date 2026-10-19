@@ -145,7 +145,8 @@ public class ReportingService {
                 categorias.stream().mapToDouble(IvaCategoryResponse::ivaNeto).sum());
     }
 
-    private void validarRango(LocalDate desde, LocalDate hasta) {
+    /** Paquete: tambien la usa ReportExportService. */
+    void validarRango(LocalDate desde, LocalDate hasta) {
         if (desde == null || hasta == null) {
             throw new IllegalArgumentException("El rango necesita fecha desde y fecha hasta");
         }

@@ -11,6 +11,7 @@ import com.servibox.backend.treasury.entity.MovementCategory;
 import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.repository.AccountRepository;
 import com.servibox.backend.treasury.repository.MovementRepository;
+import com.servibox.backend.treasury.repository.MovementRepositoryCustom;
 import com.servibox.backend.treasury.repository.MovementSpecifications;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
@@ -131,6 +132,35 @@ public class TreasuryService {
                                             Long saleId, Long purchaseId) {
         return movementRepository.findAll(filtroActivos(accountId, categoria, desde, hasta, saleId, purchaseId),
                 Sort.by(Sort.Order.desc("date"), Sort.Order.desc("id")));
+    }
+
+    /**
+     * Movimientos activos del rango para el reporte de movimientos, del mas antiguo al mas
+     * reciente, en una sola consulta sin cargar entidades. Mismo filtro que
+     * buscarMovimientos, asi que los de una factura ANULADA no salen. A lo sumo `maximo`.
+     */
+    @Transactional(readOnly = true)
+    public List<MovementRepositoryCustom.FilaReporte> listarParaReporte(Long accountId, LocalDate desde,
+                                                                        LocalDate hasta, int maximo) {
+        return movementRepository.listarParaReporte(
+                filtroActivos(accountId, null, desde, hasta, null, null), maximo);
+    }
+
+    /**
+     * Saldo de una cuenta al cierre de un dia: balance inicial mas los movimientos activos
+     * con fecha hasta ese dia, los ingresos sumando y los egresos restando. Es la invariante
+     * de saldo_actual aplicada a una fecha: con una fecha posterior al ultimo movimiento da
+     * exactamente currentBalance.
+     */
+    @Transactional(readOnly = true)
+    public double saldoAl(Account cuenta, LocalDate fecha) {
+        Specification<Movement> hastaElDia = filtroActivos(cuenta.getId(), null, null, fecha, null, null);
+        double ingresos = movementRepository.sumarMonto(hastaElDia.and(
+                (raiz, consulta, cb) -> cb.equal(raiz.get("type"), MovementType.INGRESO)));
+        double egresos = movementRepository.sumarMonto(hastaElDia.and(
+                (raiz, consulta, cb) -> cb.equal(raiz.get("type"), MovementType.EGRESO)));
+        double inicial = cuenta.getInitialBalance() != null ? cuenta.getInitialBalance() : 0.0;
+        return inicial + ingresos - egresos;
     }
 
     /**
