@@ -12,6 +12,49 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-21: Edicion de productos y categorias, impuestos y configuracion financiera por API
+
+* Decision: `PUT /api/inventory/products/{id}`, `PUT /api/inventory/categories/{id}`,
+  `GET /api/inventory/tax-types` y `GET` / `PUT /api/inventory/financial-settings`.
+  * **Stock solo por ventas y compras.** El PUT de producto no tiene `quantity`; si llega se
+    ignora. Autollantas si dejaba editar el stock en el formulario; aqui el stock es el
+    resultado de las facturas y editarlo a mano descuadra el inventario contra ellas.
+  * **Codigo bloqueado con facturas.** Las lineas de venta y de compra referencian el
+    producto por `id_producto` y guardan precio e IVA, pero no copia del codigo ni de la
+    descripcion: cambiar el codigo de un producto facturado reescribiria las facturas
+    emitidas. Con lineas (anuladas incluidas) es **409**. La descripcion si se edita
+    siempre. Autollantas dejaba cambiar el codigo siempre.
+  * **Costo manual y sincronizacion desde compras.** Editar el costo rehace `taxAmount` y
+    `suggestedPrice` (se guardan en la base) con las formulas de siempre. La siguiente
+    compra del producto vuelve a pisar el costo con su precio (decision del 2026-09-08):
+    gana el ultimo que escribe. Ninguno de los dos toca las lineas ya emitidas.
+  * **Recalculo al editar categoria o configuracion.** Igual que los tabs de Margenes y
+    Deducibles de Autollantas, que recalculan todos los productos afectados. Aqui con una
+    lectura de la configuracion y una consulta de productos, no una por producto. Las
+    lineas de venta y compra emitidas no cambian: tienen su precio e IVA congelados.
+  * **Configuracion por defecto en ceros.** Sin fila, `GET` devuelve la instancia en ceros
+    de `findFinancialSettings` (la misma que usa el calculo de precios), no 404. El PUT
+    crea o actualiza por `saveFinancialSettings`. Rangos: 0 a 1 en las cuatro tasas, los
+    CHECK de la base; Autollantas no valida rangos (solo que sea numero).
+  * **Impuestos solo lectura.** `GET /tax-types` existe para elegir impuestos al editar una
+    categoria. Crear y editar impuestos queda fuera.
+  * **Nombre de categoria y taxTypeIds.** El PUT rechaza un nombre repetido (409) y un
+    impuesto que no es del tenant (400). El POST existente no valida ninguno de los dos
+    (acepta nombres repetidos e ignora ids ajenos) y no se cambio, para no alterar un
+    endpoint existente; Autollantas tampoco validaba el nombre.
+  * **Umbrales y margen.** Las mismas validaciones que el POST: obligatorios y numericos.
+    Ni el POST, ni la base, ni Autollantas (que solo sube los negativos a 0) definen un
+    rango, asi que no se invento uno.
+  * **Fuera:** DELETE de productos y categorias (las FK `ON DELETE RESTRICT` y las facturas
+    lo complican, y no se pidio), alta y edicion de impuestos, y validar rangos de umbrales
+    y margen o el nombre de categoria en el POST.
+* Alternativas consideradas: dejar editar el stock (descuadra contra las facturas); copiar
+  codigo y descripcion en las lineas para liberar el codigo (cambio de esquema);
+  derivar los precios al leer (cambio de esquema y de todas las lecturas); responder 404
+  sin configuracion (el frontend tendria que repetir los ceros por defecto).
+* Motivo: editar desde el frontend con las mismas reglas de calculo que ya usan el POST,
+  las compras y los reportes, sin tocar el esquema ni las facturas emitidas.
+
 ## 2026-10-21: Datos de demostracion en el perfil dev
 
 * Decision: `DevDataInitializer`, despues de la siembra base, crea datos de demostracion

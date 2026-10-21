@@ -356,8 +356,27 @@ la categoria y rehace el precio sugerido de todos sus productos.
 **Endpoints** (todos requieren JWT)
 
 * `GET` y `POST` `/api/inventory/categories`
+* `PUT /api/inventory/categories/{id}`: mismo cuerpo que el POST (`CategoryRequest`).
+  Reemplaza todos los campos y el conjunto de impuestos, y rehace los precios de los
+  productos de la categoria. Nombre repetido en el tenant (sin contar la propia) **409**;
+  `taxTypeId` que no es del tenant **400**; categoria de otro tenant **404**.
 * `GET` y `POST` `/api/inventory/products`
 * `GET /api/inventory/products/{id}`
+* `PUT /api/inventory/products/{id}`: `code`, `description`, `purchaseCost`, `categoryId`
+  (`ProductUpdateRequest`). `quantity` no se edita: si llega se ignora. Codigo repetido
+  **409**; cambiar el codigo de un producto con lineas de venta o de compra **409**
+  (`ProductCodeLockedException`); categoria de otro tenant **400**; producto de otro tenant
+  **404**. Responde con `ProductResponse` y los precios recalculados.
+* `GET /api/inventory/tax-types`: impuestos del tenant por nombre (`TaxTypeResponse`). Solo
+  lectura.
+* `GET` y `PUT` `/api/inventory/financial-settings` (`FinancialSettingsResponse`): sin fila
+  guardada el GET devuelve todo en cero con 200. El PUT crea o actualiza la unica fila del
+  tenant por `saveFinancialSettings` (nunca 409), con las tasas entre 0 y 1 (los CHECK
+  `ck_configuracion_*`; fuera de rango **400**), y rehace los precios de todos los
+  productos del tenant.
+
+Los recalculos masivos (`InventoryService.recalcularPrecios`) leen la configuracion una
+vez y los productos en una consulta; Hibernate escribe un UPDATE por producto cambiado.
 
 Las respuestas van siempre por DTO (`CategoryResponse`, `ProductResponse`,
 `TaxTypeResponse`), nunca la entidad JPA: exponerla arrastraria `tenantId` y las

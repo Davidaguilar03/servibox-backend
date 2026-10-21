@@ -3,8 +3,10 @@ package com.servibox.backend.shared;
 import com.servibox.backend.auth.InvalidCredentialsException;
 import com.servibox.backend.counterparties.service.DuplicateCounterpartyDocumentException;
 import com.servibox.backend.counterparties.service.InvalidCounterpartyException;
+import com.servibox.backend.inventory.service.DuplicateCategoryNameException;
 import com.servibox.backend.inventory.service.DuplicateFinancialSettingsException;
 import com.servibox.backend.inventory.service.DuplicateProductCodeException;
+import com.servibox.backend.inventory.service.ProductCodeLockedException;
 import com.servibox.backend.purchases.service.DuplicatePurchaseInvoiceNumberException;
 import com.servibox.backend.purchases.service.InsufficientBalanceException;
 import com.servibox.backend.purchases.service.InvalidPurchaseOperationException;
@@ -48,6 +50,18 @@ public class GlobalExceptionHandler {
     /** Choque con una restriccion de unicidad, por ejemplo dos productos con el mismo codigo. */
     @ExceptionHandler(DuplicateProductCodeException.class)
     public ResponseEntity<ErrorResponse> manejarDuplicado(DuplicateProductCodeException ex) {
+        return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** Cambiar el codigo de un producto que ya tiene facturas. */
+    @ExceptionHandler(ProductCodeLockedException.class)
+    public ResponseEntity<ErrorResponse> manejarCodigoBloqueado(ProductCodeLockedException ex) {
+        return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** Renombrar una categoria con el nombre de otra del mismo tenant. */
+    @ExceptionHandler(DuplicateCategoryNameException.class)
+    public ResponseEntity<ErrorResponse> manejarCategoriaDuplicada(DuplicateCategoryNameException ex) {
         return construir(HttpStatus.CONFLICT, ex.getMessage());
     }
 

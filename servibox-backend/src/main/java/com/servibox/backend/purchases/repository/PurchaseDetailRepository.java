@@ -8,4 +8,7 @@ import java.util.List;
 public interface PurchaseDetailRepository extends JpaRepository<PurchaseDetail, Long> {
 
     List<PurchaseDetail> findByPurchaseId(Long purchaseId);
+
+    /** Si el producto ya salio en alguna factura de compra, anuladas incluidas. */
+    boolean existsByProductId(Long productId);
 }

@@ -8,13 +8,19 @@ import com.servibox.backend.inventory.repository.FinancialSettingsRepository;
 import com.servibox.backend.inventory.repository.ProductCategoryRepository;
 import com.servibox.backend.inventory.repository.ProductRepository;
 import com.servibox.backend.inventory.repository.TaxTypeRepository;
+import com.servibox.backend.purchases.repository.PurchaseDetailRepository;
+import com.servibox.backend.sales.repository.SaleDetailRepository;
 import com.servibox.backend.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -24,6 +30,8 @@ public class InventoryService {
     private final ProductCategoryRepository productCategoryRepository;
     private final TaxTypeRepository taxTypeRepository;
     private final FinancialSettingsRepository financialSettingsRepository;
+    private final SaleDetailRepository saleDetailRepository;
+    private final PurchaseDetailRepository purchaseDetailRepository;
 
     @Transactional(readOnly = true)
     public List<Product> findAllProducts() {
@@ -133,6 +141,18 @@ public class InventoryService {
         if (product.getPurchaseCost() == null) {
             return;
         }
+        aplicarPrecios(product, findFinancialSettings());
+        productRepository.save(product);
+    }
+
+    /**
+     * La formula de recalculatePrices sin leer FinancialSettings ni guardar: para recalcular
+     * muchos productos con una sola lectura de la configuracion.
+     */
+    private void aplicarPrecios(Product product, FinancialSettings fs) {
+        if (product.getPurchaseCost() == null) {
+            return;
+        }
         double purchaseCost = product.getPurchaseCost();
 
         product.setTaxAmount(purchaseCost * getIvaRateForProduct(product));
@@ -141,7 +161,6 @@ public class InventoryService {
                 ? product.getCategory().getTargetMargin()
                 : 0.0;
 
-        FinancialSettings fs = findFinancialSettings();
         double gastosRate = fs.getExpensesRate() != null ? fs.getExpensesRate() : 0.0;
         double dianRate = fs.getDianRate() != null ? fs.getDianRate() : 0.0;
         double icaRate = fs.getIcaRate() != null ? fs.getIcaRate() : 0.0;
@@ -162,8 +181,129 @@ public class InventoryService {
             suggestedPrice = purchaseCost * k / divisor;
         }
         product.setSuggestedPrice(suggestedPrice);
+    }
 
-        productRepository.save(product);
+    /**
+     * Rehace los precios de una lista de productos con una sola lectura de la configuracion:
+     * los productos ya vienen cargados, asi que no hay una consulta por producto. Los
+     * UPDATE los escribe Hibernate al cerrar la transaccion, uno por producto cambiado.
+     */
+    private void recalcularPrecios(List<Product> productos, FinancialSettings fs) {
+        productos.forEach(p -> aplicarPrecios(p, fs));
+        productRepository.saveAll(productos);
+    }
+
+    /**
+     * PUT /api/inventory/products/{id}. Codigo, descripcion, costo y categoria; el stock no
+     * se toca, solo lo mueven ventas y compras. El codigo no cambia si el producto ya tiene
+     * lineas de venta o de compra: las lineas no guardan copia del codigo, y cambiarlo
+     * reescribiria las facturas emitidas. Precios recalculados con saveProduct.
+     *
+     * Las validaciones van antes de modificar la entidad: una consulta con el producto ya
+     * modificado haria que Hibernate escribiera el codigo repetido antes de rechazarlo.
+     */
+    @Transactional
+    public Product actualizarProducto(Long id, String code, String description, Double purchaseCost,
+                                      ProductCategory category) {
+        Product product = findProductById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Producto no encontrado: " + id));
+
+        if (!product.getCode().equals(code)) {
+            if (saleDetailRepository.existsByProductId(id) || purchaseDetailRepository.existsByProductId(id)) {
+                throw new ProductCodeLockedException(product.getCode());
+            }
+            productRepository.findByCodeAndTenantId(code, TenantContext.getTenantId())
+                    .filter(existente -> !existente.getId().equals(id))
+                    .ifPresent(existente -> {
+                        throw new DuplicateProductCodeException(code);
+                    });
+        }
+
+        product.setCode(code);
+        product.setDescription(description);
+        product.setPurchaseCost(purchaseCost);
+        product.setCategory(category);
+        return saveProduct(product);
+    }
+
+    /**
+     * PUT /api/inventory/categories/{id}. Reemplaza todos los campos y el conjunto de
+     * impuestos, y rehace los precios de los productos de la categoria (taxAmount y
+     * suggestedPrice se guardan en la base). Las lineas de venta y compra emitidas guardan
+     * su propio precio e IVA, asi que no cambian.
+     *
+     * A diferencia del POST, rechaza un nombre repetido en el tenant (sin contar la propia
+     * categoria) y un taxTypeId que no sea del tenant.
+     */
+    @Transactional
+    public ProductCategory actualizarCategoria(Long id, String name, String color, Integer yellowStockMin,
+                                               Integer redStockMin, Double targetMargin, List<Long> taxTypeIds) {
+        ProductCategory category = findCategoryById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Categoria no encontrada: " + id));
+
+        String nombre = name.trim().toUpperCase();
+        boolean repetido = productCategoryRepository.findByNameAndTenantId(nombre, TenantContext.getTenantId())
+                .stream()
+                .anyMatch(otra -> !otra.getId().equals(id));
+        if (repetido) {
+            throw new DuplicateCategoryNameException(nombre);
+        }
+
+        Set<TaxType> impuestos = new HashSet<>();
+        if (taxTypeIds != null && !taxTypeIds.isEmpty()) {
+            Map<Long, TaxType> delTenant = new HashMap<>();
+            findAllTaxTypes().forEach(t -> delTenant.put(t.getId(), t));
+            for (Long taxTypeId : taxTypeIds) {
+                TaxType impuesto = delTenant.get(taxTypeId);
+                if (impuesto == null) {
+                    throw new IllegalArgumentException("Impuesto no encontrado: " + taxTypeId);
+                }
+                impuestos.add(impuesto);
+            }
+        }
+
+        category.setName(nombre);
+        category.setColor(color);
+        category.setYellowStockMin(yellowStockMin);
+        category.setRedStockMin(redStockMin);
+        category.setTargetMargin(targetMargin);
+        category.setTaxTypes(impuestos);
+        ProductCategory guardada = saveCategory(category);
+
+        recalcularPrecios(productRepository.findByCategoryId(id), findFinancialSettings());
+        return guardada;
+    }
+
+    /** Impuestos del tenant activo, por nombre. Solo lectura. */
+    @Transactional(readOnly = true)
+    public List<TaxType> listarImpuestos() {
+        Long tenantId = TenantContext.getTenantId();
+        if (tenantId == null) {
+            return List.of();
+        }
+        return taxTypeRepository.findByTenantIdOrderByNameAsc(tenantId);
+    }
+
+    /**
+     * PUT /api/inventory/financial-settings: crea la configuracion del tenant o actualiza la
+     * que ya tiene, por saveFinancialSettings, y rehace los precios de todos los productos
+     * del tenant con los nuevos porcentajes.
+     */
+    @Transactional
+    public FinancialSettings guardarConfiguracionFinanciera(Double expensesRate, Double dianRate, Double icaRate,
+                                                            Double cardCommissionRate) {
+        FinancialSettings settings = financialSettingsRepository.findByTenantId(TenantContext.getTenantId())
+                .orElseGet(FinancialSettings::new);
+        settings.setExpensesRate(expensesRate);
+        settings.setDianRate(dianRate);
+        settings.setIcaRate(icaRate);
+        // El 0.0 por defecto va aqui y no solo en saveFinancialSettings: su consulta de
+        // unicidad haria que Hibernate escribiera antes la fila ya modificada con null.
+        settings.setCardCommissionRate(cardCommissionRate != null ? cardCommissionRate : 0.0);
+        FinancialSettings guardada = saveFinancialSettings(settings);
+
+        recalcularPrecios(productRepository.findAll(), guardada);
+        return guardada;
     }
 
     /**

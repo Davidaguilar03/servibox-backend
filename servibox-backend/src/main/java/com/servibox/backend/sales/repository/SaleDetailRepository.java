@@ -11,6 +11,9 @@ public interface SaleDetailRepository extends JpaRepository<SaleDetail, Long> {
 
     List<SaleDetail> findBySaleId(Long saleId);
 
+    /** Si el producto ya salio en alguna factura de venta, anuladas incluidas. */
+    boolean existsByProductId(Long productId);
+
     /** Lineas de las facturas del rango, sin las del estado excluido. Para el Reporte de IVA. */
     List<SaleDetail> findBySale_InvoiceDateBetweenAndSale_StatusNot(LocalDate desde, LocalDate hasta,
                                                                     SaleStatus excluido);
