@@ -12,6 +12,26 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-21: Datos de demostracion en el perfil dev
+
+* Decision: `DevDataInitializer`, despues de la siembra base, crea datos de demostracion
+  (categoria, tres productos, terceros, ventas, una compra y movimientos repartidos entre
+  el mes anterior y el actual) **llamando a los services**, no a la API por HTTP. Solo en
+  `dev` (`@Profile("dev")`) y con `servibox.dev.demo-data`, true por defecto en
+  `application-dev.properties`. Idempotente: si el tenant `demo` ya tiene productos no
+  siembra. Las fechas salen del `Clock` de negocio, no de la zona de la maquina. Un fallo
+  deja un aviso en el log con el paso que fallo y el arranque sigue. Las compras no tienen
+  consecutivo en el modelo (solo las ventas), asi que la compra lleva el numero del
+  proveedor `PROV-1001`. Cifras en [02-CONVENTIONS.md](02-CONVENTIONS.md), "Datos de
+  demostracion en dev".
+* Alternativas consideradas: un script SQL de semilla (se salta stock, IVA congelado,
+  saldos y consecutivo, y se descuadra con cada cambio de reglas); sembrar por HTTP con un
+  cliente al arrancar (necesita login y servidor levantado, y no aporta reglas que los
+  services no apliquen ya); fechas fijas (Reportes del mes en curso quedaria vacio).
+* Motivo: por los services los datos cumplen las mismas reglas que la API (stock, IVA,
+  saldos, consecutivo, anulacion), y si una regla cambia la siembra la sigue sin tocarla.
+  Con el reloj de negocio siempre hay datos en el mes actual y en el anterior.
+
 ## 2026-10-18: Exportacion de reportes en PDF y Excel
 
 * Decision: los reportes se generan en el servidor, con el mismo flujo que Autollantas (el

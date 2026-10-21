@@ -226,3 +226,31 @@ escribir `getTaxTypes().stream()...` en cualquier modulo nuevo, usar ese metodo.
 
 `minSalePrice` **no es terminologia vigente.** Existio en Autollantas y ya no; no
 introducirlo en ServiBox.
+
+## Datos de demostracion en dev
+
+Con el perfil `dev` (`./mvnw spring-boot:run -Dspring-boot.run.profiles=dev`),
+`DevDataInitializer` hace la siembra base (tenant `demo`, usuario `admin`, IVA, 8 categorias
+y 2 cuentas; credenciales en [01-ARCHITECTURE.md](01-ARCHITECTURE.md)) y despues los datos
+de demostracion, para probar el frontend y Reportes sin cargar nada a mano:
+
+* Categoria `REPUESTOS DEMO` (amarillo 10, rojo 3, margen 0.30, IVA 19) con tres productos:
+  aceite (costo 30000, stock final 50, normal), filtro (15000, stock 10, bajo) y bateria
+  (250000, stock 3, critico).
+* Un ingreso ocasional de 2000000 en cada cuenta; dos clientes y un proveedor.
+* Mes anterior: compra de contado `PROV-1001` (357000), venta de contado `FV-0001`
+  (696150), venta a credito `FV-0002` (52360) y transferencia de Caja a Bancolombia
+  (500000).
+* Mes actual: abono de 20000 a `FV-0002` (queda PENDIENTE con 32360), gasto operativo de
+  450000, ventas de contado `FV-0003` (160650) y `FV-0005` (107100) y `FV-0004` (428400)
+  ANULADA.
+* Resultado: `/kpis` del mes anterior ventas 748510, compras 357000, utilidad neta 391510;
+  del mes actual ventas 267750, gastos 450000, utilidad neta -182250. Caja General 1946250,
+  Bancolombia 2230650.
+
+Las fechas salen del reloj de negocio (`servibox.business.time-zone`). Se desactiva con
+`servibox.dev.demo-data=false` (variable `DEV_DEMO_DATA`, en `application-dev.properties`);
+la siembra base sigue. La base H2 es en memoria y se reinicia en cada arranque, asi que
+cada arranque vuelve a sembrar lo mismo. Si el tenant `demo` ya tiene productos no se
+siembra nada, y si un paso falla queda un aviso en el log y la app arranca igual.
+`config.DevDemoDataTest` comprueba estas cifras.
