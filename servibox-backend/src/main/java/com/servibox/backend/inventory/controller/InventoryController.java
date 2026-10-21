@@ -2,8 +2,12 @@ package com.servibox.backend.inventory.controller;
 
 import com.servibox.backend.inventory.dto.CategoryRequest;
 import com.servibox.backend.inventory.dto.CategoryResponse;
+import com.servibox.backend.inventory.dto.FinancialSettingsRequest;
+import com.servibox.backend.inventory.dto.FinancialSettingsResponse;
 import com.servibox.backend.inventory.dto.ProductRequest;
 import com.servibox.backend.inventory.dto.ProductResponse;
+import com.servibox.backend.inventory.dto.ProductUpdateRequest;
+import com.servibox.backend.inventory.dto.TaxTypeResponse;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
 import com.servibox.backend.inventory.entity.TaxType;
@@ -15,6 +19,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -49,6 +54,32 @@ public class InventoryController {
         return CategoryResponse.from(inventoryService.saveCategory(category));
     }
 
+    @PutMapping("/categories/{id}")
+    public CategoryResponse editarCategoria(@PathVariable Long id, @Valid @RequestBody CategoryRequest request) {
+        inventoryService.findCategoryById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Categoria no encontrada: " + id));
+        return CategoryResponse.from(inventoryService.actualizarCategoria(id, request.name(), request.color(),
+                request.yellowStockMin(), request.redStockMin(), request.targetMargin(), request.taxTypeIds()));
+    }
+
+    @GetMapping("/tax-types")
+    public List<TaxTypeResponse> listarImpuestos() {
+        return inventoryService.listarImpuestos().stream().map(TaxTypeResponse::from).toList();
+    }
+
+    /** Sin configuracion guardada devuelve la de findFinancialSettings: todo en cero. */
+    @GetMapping("/financial-settings")
+    public FinancialSettingsResponse obtenerConfiguracionFinanciera() {
+        return FinancialSettingsResponse.from(inventoryService.findFinancialSettings());
+    }
+
+    @PutMapping("/financial-settings")
+    public FinancialSettingsResponse guardarConfiguracionFinanciera(
+            @Valid @RequestBody FinancialSettingsRequest request) {
+        return FinancialSettingsResponse.from(inventoryService.guardarConfiguracionFinanciera(
+                request.expensesRate(), request.dianRate(), request.icaRate(), request.cardCommissionRate()));
+    }
+
     @GetMapping("/products")
     public List<ProductResponse> listarProductos() {
         return inventoryService.findAllProducts().stream().map(ProductResponse::from).toList();
@@ -75,6 +106,16 @@ public class InventoryController {
         product.setCategory(category);
 
         return ProductResponse.from(inventoryService.saveProduct(product));
+    }
+
+    @PutMapping("/products/{id}")
+    public ProductResponse editarProducto(@PathVariable Long id, @Valid @RequestBody ProductUpdateRequest request) {
+        inventoryService.findProductById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado: " + id));
+        ProductCategory category = inventoryService.findCategoryById(request.categoryId())
+                .orElseThrow(() -> new IllegalArgumentException("Categoria no encontrada: " + request.categoryId()));
+        return ProductResponse.from(inventoryService.actualizarProducto(id, request.code(), request.description(),
+                request.purchaseCost(), category));
     }
 
     private Set<TaxType> resolverImpuestos(List<Long> ids) {
