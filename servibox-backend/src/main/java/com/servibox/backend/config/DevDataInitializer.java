@@ -126,13 +126,7 @@ public class DevDataInitializer implements CommandLineRunner {
     }
 
     private TaxType sembrarIva() {
-        TaxType iva = new TaxType();
-        iva.setName("IVA");
-        iva.setRate(0.19);
-        iva.setDescription("Impuesto al Valor Agregado");
-        iva.setAppliesToTransaction(Boolean.TRUE);
-        iva.setIsVat(Boolean.TRUE);
-        return inventoryService.saveTaxType(iva);
+        return inventoryService.crearIvaPorDefecto();
     }
 
     private void sembrarCuentas() {

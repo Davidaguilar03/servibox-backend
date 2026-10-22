@@ -74,6 +74,50 @@ class FlywayMigrationTest {
         }
     }
 
+    /** V2 sobre una base en V1 con un tenant y un usuario: las columnas nuevas quedan en null. */
+    @Test
+    void v2AplicaSobreV1ConDatosYDejaLasColumnasNuevasEnNull() throws SQLException {
+        String url = "jdbc:h2:mem:flyway-v1-" + UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1";
+        Flyway soloV1 = Flyway.configure()
+                .dataSource(url, "sa", "")
+                .locations(flyway.getConfiguration().getLocations())
+                .target("1")
+                .load();
+        assertThat(soloV1.migrate().migrationsExecuted).isEqualTo(1);
+
+        try (Connection conexion = DriverManager.getConnection(url, "sa", "")) {
+            conexion.createStatement().executeUpdate("INSERT INTO tenants (nombre_tenant, slug_tenant, activo_tenant, "
+                    + "fecha_creacion_tenant) VALUES ('Taller V1', 'taller-v1', TRUE, CURRENT_TIMESTAMP)");
+            conexion.createStatement().executeUpdate("INSERT INTO usuarios (id_tenant, username, password_hash, "
+                    + "activo, rol, created_at, updated_at) SELECT id_tenant, 'admin', 'hash', TRUE, 'ADMIN', "
+                    + "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM tenants");
+        }
+
+        MigrateResult resultado = Flyway.configure()
+                .dataSource(url, "sa", "")
+                .locations(flyway.getConfiguration().getLocations())
+                .load()
+                .migrate();
+
+        assertThat(resultado.success).isTrue();
+        assertThat(resultado.targetSchemaVersion).isEqualTo("2");
+        try (Connection conexion = DriverManager.getConnection(url, "sa", "");
+             ResultSet tenant = conexion.createStatement().executeQuery(
+                     "SELECT slug_tenant, nit_tenant, telefono_tenant FROM tenants")) {
+            assertThat(tenant.next()).isTrue();
+            assertThat(tenant.getString("slug_tenant")).isEqualTo("taller-v1");
+            assertThat(tenant.getString("nit_tenant")).isNull();
+            assertThat(tenant.getString("telefono_tenant")).isNull();
+            assertThat(tenant.next()).isFalse();
+
+            ResultSet usuario = conexion.createStatement().executeQuery(
+                    "SELECT username, nombre_completo FROM usuarios");
+            assertThat(usuario.next()).isTrue();
+            assertThat(usuario.getString("username")).isEqualTo("admin");
+            assertThat(usuario.getString("nombre_completo")).isNull();
+        }
+    }
+
     @Test
     void laBaseDelContextoQuedaMigradaYHibernateValidaElEsquema() {
         MigrationInfo[] aplicadas = flyway.info().applied();

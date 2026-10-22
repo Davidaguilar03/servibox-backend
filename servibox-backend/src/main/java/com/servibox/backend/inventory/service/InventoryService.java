@@ -82,6 +82,18 @@ public class InventoryService {
         return taxTypeRepository.save(taxType);
     }
 
+    /** El IVA (0.19, isVat) con el que arranca un tenant: siembra dev y registro publico. */
+    @Transactional
+    public TaxType crearIvaPorDefecto() {
+        TaxType iva = new TaxType();
+        iva.setName("IVA");
+        iva.setRate(0.19);
+        iva.setDescription("Impuesto al Valor Agregado");
+        iva.setAppliesToTransaction(Boolean.TRUE);
+        iva.setIsVat(Boolean.TRUE);
+        return saveTaxType(iva);
+    }
+
     @Transactional
     public ProductCategory saveCategory(ProductCategory category) {
         if (category.getName() != null) {

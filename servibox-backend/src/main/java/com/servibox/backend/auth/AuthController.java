@@ -2,16 +2,19 @@ package com.servibox.backend.auth;
 
 import com.servibox.backend.auth.dto.LoginRequest;
 import com.servibox.backend.auth.dto.LoginResponse;
+import com.servibox.backend.auth.dto.RegisterRequest;
 import com.servibox.backend.auth.entity.User;
 import com.servibox.backend.auth.repository.UserRepository;
 import com.servibox.backend.tenant.Tenant;
 import com.servibox.backend.tenant.TenantRepository;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Optional;
@@ -25,6 +28,7 @@ public class AuthController {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final TenantRegistrationService tenantRegistrationService;
 
     /**
      * Tenant inexistente o inactivo, usuario inexistente o inactivo y contrasena
@@ -47,5 +51,15 @@ public class AuthController {
         }
 
         return LoginResponse.from(jwtService.generateToken(user.get()), user.get(), tenant);
+    }
+
+    /**
+     * Registro publico de una serviteca. Sin @Valid: las reglas y sus mensajes estan en
+     * TenantRegistrationService. Responde la misma sesion que el login.
+     */
+    @PostMapping("/register")
+    @ResponseStatus(HttpStatus.CREATED)
+    public LoginResponse register(@RequestBody RegisterRequest request) {
+        return tenantRegistrationService.registrar(request);
     }
 }

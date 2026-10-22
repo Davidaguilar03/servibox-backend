@@ -1,6 +1,9 @@
 package com.servibox.backend.shared;
 
+import com.servibox.backend.auth.DuplicateTenantSlugException;
 import com.servibox.backend.auth.InvalidCredentialsException;
+import com.servibox.backend.auth.InvalidRegistrationException;
+import com.servibox.backend.auth.RegistrationDisabledException;
 import com.servibox.backend.counterparties.service.DuplicateCounterpartyDocumentException;
 import com.servibox.backend.counterparties.service.InvalidCounterpartyException;
 import com.servibox.backend.inventory.service.DuplicateCategoryNameException;
@@ -141,6 +144,24 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> manejarArgumentoInvalido(IllegalArgumentException ex) {
         return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** Dato del registro publico que no cumple su regla. */
+    @ExceptionHandler(InvalidRegistrationException.class)
+    public ResponseEntity<ErrorResponse> manejarRegistroInvalido(InvalidRegistrationException ex) {
+        return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** Registro con un slug que ya tiene otra serviteca. */
+    @ExceptionHandler(DuplicateTenantSlugException.class)
+    public ResponseEntity<ErrorResponse> manejarSlugDuplicado(DuplicateTenantSlugException ex) {
+        return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** servibox.registration.enabled=false. */
+    @ExceptionHandler(RegistrationDisabledException.class)
+    public ResponseEntity<ErrorResponse> manejarRegistroDeshabilitado(RegistrationDisabledException ex) {
+        return construir(HttpStatus.FORBIDDEN, ex.getMessage());
     }
 
     @ExceptionHandler({InvalidCredentialsException.class, AuthenticationException.class})
