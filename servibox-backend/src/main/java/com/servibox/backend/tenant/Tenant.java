@@ -28,6 +28,13 @@ public class Tenant {
     @Column(name = "slug_tenant", length = 100, nullable = false, unique = true)
     private String slug;
 
+    /** Desde V2. Null en los tenants anteriores al registro publico. */
+    @Column(name = "nit_tenant", length = 25)
+    private String nit;
+
+    @Column(name = "telefono_tenant", length = 25)
+    private String phone;
+
     @Column(name = "activo_tenant", nullable = false)
     private Boolean active = Boolean.TRUE;
 

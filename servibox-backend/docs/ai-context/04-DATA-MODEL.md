@@ -24,6 +24,8 @@ Modulo: Multi-tenancy y administracion.
 | id_tenant | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico de la empresa o taller registrado. |
 | nombre_tenant | VARCHAR | 150 | NOT NULL | - | Razon social o denominacion comercial de la serviteca. |
 | slug_tenant | VARCHAR | 100 | NOT NULL | UK | Identificador alfanumerico unico para subdominio web y enrutamiento. |
+| nit_tenant | VARCHAR | 25 | NULL | - | NIT de la serviteca, digitos con guion y digito de verificacion opcionales (900123456-7). Lo pide el registro publico; null en los tenants anteriores (V2). |
+| telefono_tenant | VARCHAR | 25 | NULL | - | Telefono de contacto de la serviteca: digitos, espacios, +, - y parentesis. Lo pide el registro publico; null en los tenants anteriores (V2). |
 | activo_tenant | BOOLEAN | 1 byte | NOT NULL | - | Estado de la cuenta: true para activa, false para suspendida. |
 | fecha_creacion_tenant | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de registro de la suscripcion (UTC). |
 
@@ -38,6 +40,7 @@ Modulo: Multi-tenancy y administracion.
 | username | VARCHAR | 50 | NOT NULL | UK | Nombre de usuario unico por taller (UK compuesta con id_tenant). |
 | password_hash | VARCHAR | 255 | NOT NULL | - | Hash criptografico de la contrasena calculado con BCrypt. |
 | email | VARCHAR | 150 | NULL | - | Direccion de correo electronico del usuario para soporte y notificaciones. |
+| nombre_completo | VARCHAR | 150 | NULL | - | Nombre para mostrar del usuario. Lo pide el registro publico para el administrador; null en los usuarios anteriores (V2). |
 | activo | BOOLEAN | 1 byte | NOT NULL | - | Indica si la cuenta esta habilitada para autenticacion e inicio de sesion. |
 | rol | VARCHAR | 30 | NOT NULL | - | Rol RBAC asignado para autorizacion de funciones (ADMIN, MECANICO, CAJERO). |
 | created_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de registro del usuario (UTC). |

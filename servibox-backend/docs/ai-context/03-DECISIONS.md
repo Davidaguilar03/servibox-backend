@@ -12,6 +12,67 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-22: Registro publico de servitecas y primera migracion V2
+
+* Decision: `POST /api/auth/register`, publico, crea una serviteca (tenant) con su
+  administrador y responde **201 con la misma forma que el login**: `token` (mismo
+  `JwtService`, mismos claims), `user` (`username`, `role`, `fullName`) y `tenant` (`name`,
+  `slug`). El login suma `user.fullName` (null en usuarios sin nombre) sin quitar nada.
+  * **Cuerpo.** `businessName`, `nit`, `phone`, `slug`, `adminFullName`, `adminEmail`,
+    `adminUsername`, `password`, `acceptTerms`.
+  * **Reglas (400, mensaje por regla, sin tildes).** `acceptTerms` tiene que ser true;
+    `businessName` y `adminFullName` obligatorios y de hasta 150; `nit` obligatorio, hasta
+    25, digitos con un guion y un digito de verificacion opcionales (`900123456-7`); `phone`
+    obligatorio, hasta 25, solo digitos, espacios, `+`, `-` y parentesis; `slug` de 3 a 30
+    con minusculas, numeros y guiones (una mayuscula es 400, no se convierte), sin guion al
+    inicio ni al final y fuera de la lista reservada; `adminEmail` con formato
+    `algo@dominio.tld` y hasta 150; `adminUsername` de 3 a 50 con letras, numeros, punto,
+    guion y guion bajo; `password` de 8 a 72 (72 es el limite de BCrypt, que tambien se
+    mide en bytes UTF-8 para que una contrasena con tildes no se trunque).
+  * **Slugs reservados.** `api`, `admin`, `www`, `app`, `login`, `registro`, `register`,
+    `servibox`, `soporte`, `static`, `assets`, `health`, los segmentos de la API (`auth`,
+    `inventory`, `treasury`, `counterparties`, `sales`, `purchases`, `reporting`) y `demo`,
+    el slug de la siembra dev. La lista vive en `TenantRegistrationService`.
+  * **Validacion en el servicio, no con `@Valid`.** `MethodArgumentNotValidException`
+    responde el "Peticion invalida" generico para todo `@Valid`, y el formulario necesita
+    saber que campo fallo. Cambiar el comportamiento global de `@Valid` afectaria a todos
+    los endpoints; validar en el servicio da el mensaje por regla solo aqui.
+  * **Slug repetido: 409** "Ya existe una serviteca con el identificador X". Se compara sin
+    distinguir mayusculas (`existsBySlugIgnoreCase`) y se guarda en minusculas. Dos registros
+    simultaneos con el mismo slug pasan los dos esa consulta; el segundo choca con
+    `uk_tenant_slug` y la violacion se traduce a la misma 409, como el numero de factura de
+    venta.
+  * **Aprovisionamiento en una transaccion.** Tenant activo con NIT, telefono y nombre;
+    usuario ADMIN con nombre completo, correo y contrasena codificada con el
+    `PasswordEncoder` del login; IVA 0.19 marcado como IVA; categorias LLANTAS, LUBRICANTES
+    y BATERIAS (nombre en mayusculas como lo guarda `saveCategory`, amarillo 10, rojo 3,
+    margen 0, con el IVA); cuenta Caja General EFECTIVO en 0; y el tercero Consumidor final.
+    Todo por los services existentes, con `TenantContext` y el filtro de Hibernate apuntando
+    al tenant nuevo, como hace `DevDataInitializer`. El IVA sale de
+    `InventoryService.crearIvaPorDefecto`, que ahora usan los dos. Cualquier fallo deshace
+    todo. No se crea configuracion financiera: el GET da ceros.
+  * **Consumidor final al registrar.** Antes se creaba perezosamente en el primer listado de
+    clientes o la primera venta sin cliente. Crearlo en el registro deja el tenant completo
+    desde el inicio y evita que la primera escritura ocurra dentro de un GET; el camino
+    perezoso sigue para los tenants anteriores.
+  * **Migracion V2** (`V2__tenant_nit_phone_user_full_name.sql`), la primera despues de V1:
+    `nit_tenant VARCHAR(25)` y `telefono_tenant VARCHAR(25)` en TENANTS y
+    `nombre_completo VARCHAR(150)` en USUARIOS, todas NULL. Los tenants y usuarios
+    anteriores (incluidos los de la siembra dev) quedan en null. V1 no se toca.
+  * **Interruptor.** `servibox.registration.enabled=${REGISTRATION_ENABLED:true}`. En false
+    el endpoint responde 403 "El registro de nuevas servitecas esta deshabilitado" y no
+    crea nada.
+* Alternativas consideradas: registrar sin devolver sesion (obliga al frontend a un login
+  inmediato con la misma contrasena); `@Valid` con mensajes por anotacion (exige cambiar el
+  manejador global); aprovisionar en transacciones separadas como la siembra dev (un fallo
+  dejaria un tenant sin catalogos); convertir el slug a minusculas en vez de rechazarlo
+  (el usuario no veria el identificador que de verdad quedo).
+* Motivo: es lo minimo para que un taller nuevo pueda entrar y operar sin intervencion, sin
+  cambiar el comportamiento de ningun otro endpoint.
+* Pendientes: verificacion de correo, captcha, limite de intentos (el endpoint es publico y
+  hoy no tiene ninguna proteccion contra abuso) y recuperacion de contrasena. El NIT y el
+  telefono del tenant ya existen, pero los reportes y las exportaciones todavia no los usan.
+
 ## 2026-10-21: Edicion de productos y categorias, impuestos y configuracion financiera por API
 
 * Decision: `PUT /api/inventory/products/{id}`, `PUT /api/inventory/categories/{id}`,

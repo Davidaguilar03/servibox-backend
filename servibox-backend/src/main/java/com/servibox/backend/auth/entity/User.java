@@ -40,6 +40,10 @@ public class User extends TenantAwareEntity {
     @Column(name = "email", length = 150)
     private String email;
 
+    /** Desde V2. Null en los usuarios anteriores al registro publico. */
+    @Column(name = "nombre_completo", length = 150)
+    private String fullName;
+
     @Column(name = "activo", nullable = false)
     private boolean active = true;
 

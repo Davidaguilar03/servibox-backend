@@ -51,7 +51,8 @@
 Excepciones de dominio en el paquete `service` de su modulo, traducidas en un solo sitio,
 `GlobalExceptionHandler`. Tabla de codigos en [01-ARCHITECTURE.md](01-ARCHITECTURE.md)
 (Manejo centralizado de errores). Criterio: duplicado o falta de stock / saldo es **409**;
-operacion no permitida por el estado del documento es **400**; recurso de ruta es **404**,
+operacion no permitida por el estado del documento es **400**; funcionalidad apagada por
+configuracion (registro publico) es **403**; recurso de ruta es **404**,
 ver Busqueda por id mas abajo. Un cuerpo que no se puede leer (JSON mal formado, valor de
 enum que no existe) es **400**, nunca 500; si es un enum, el mensaje nombra el campo y los
 valores permitidos. Un campo NOT NULL en la base es `@NotNull` / `@NotBlank` en su
@@ -194,6 +195,10 @@ justamente lo normal entre negocios que no se conocen.
 | `Counterparty` | `(id_tenant, numero_documento)` | `uk_tercero_tenant_document` |
 | `Sale` | `(id_tenant, numero_factura_venta)` | `uk_venta_tenant_invoice_number` |
 | `Purchase` | `(id_tenant, numero_factura_compra)` | `uk_compra_tenant_invoice_number` |
+
+`TENANTS.slug_tenant` es la excepcion: unico global (`uk_tenant_slug`), porque el login lo
+usa para saber a que tenant entrar. El registro lo guarda en minusculas y lo compara sin
+distinguir mayusculas.
 
 Ademas de la restriccion de base, el service valida antes de guardar y lanza una excepcion
 legible; el error crudo de constraint violation no le sirve al usuario final. Al editar,

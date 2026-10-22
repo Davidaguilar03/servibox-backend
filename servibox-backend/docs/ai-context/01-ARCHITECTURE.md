@@ -147,8 +147,8 @@ firmado dentro del token.
 
 ### Flujo completo
 
-1. **`POST /api/auth/login`** (unica ruta con `permitAll`). Body: `tenantSlug`, `username`,
-   `password`.
+1. **`POST /api/auth/login`** (con `POST /api/auth/register`, las unicas rutas con
+   `permitAll`). Body: `tenantSlug`, `username`, `password`.
 2. **`auth.AuthController`** busca el tenant por `slug`, luego el usuario con
    `findByUsernameAndTenantId`, y compara la contrasena con
    `passwordEncoder.matches(...)` contra el `passwordHash` BCrypt.
@@ -157,8 +157,9 @@ firmado dentro del token.
    Distinguirlos le confirmaria a un atacante que usuarios existen en que tenant.
 4. Si cuadra, **`auth.JwtService.generateToken(user)`** emite un JWT firmado con HMAC SHA
    con los claims `sub` (username), `tenantId` y `role`, y expiracion segun configuracion.
-   La respuesta es `LoginResponse`: `{"token", "user": {"username", "role"}, "tenant":
-   {"name", "slug"}}`, armada con el usuario y el tenant que el login ya verifico.
+   La respuesta es `LoginResponse`: `{"token", "user": {"username", "role", "fullName"},
+   "tenant": {"name", "slug"}}`, armada con el usuario y el tenant que el login ya verifico.
+   `fullName` es null en los usuarios creados antes del registro publico.
 5. En cada request posterior el cliente manda `Authorization: Bearer <token>`.
 6. **`auth.JwtAuthenticationFilter`** (registrado antes de
    `UsernamePasswordAuthenticationFilter`) valida firma y expiracion. Con el token bueno:
@@ -182,6 +183,38 @@ filtro de Hibernate`. El tenant nunca lo aporta el cliente en claro.
 **`TenantContext.clear()` va en un `finally`** dentro del filtro. El pool de hilos de
 Tomcat se reutiliza entre requests: un tenant que quede pegado se filtraria al siguiente
 request atendido por ese hilo.
+
+### Registro publico de una serviteca
+
+**`POST /api/auth/register`**, publico. Crea un tenant nuevo con su administrador y
+responde **201 con la misma forma que el login** (token, `user`, `tenant`), asi que el
+frontend entra directo sin un segundo paso.
+
+Body: `businessName`, `nit`, `phone`, `slug`, `adminFullName`, `adminEmail`,
+`adminUsername`, `password`, `acceptTerms`. Sin `@Valid`: `auth.TenantRegistrationService`
+valida cada campo y responde 400 con un mensaje por regla (reglas en
+[03-DECISIONS.md](03-DECISIONS.md)). Un slug que ya existe, comparado en minusculas, es
+409 "Ya existe una serviteca con el identificador X".
+
+Flujo, todo en **una transaccion** (`@Transactional` del servicio):
+
+1. Si `servibox.registration.enabled` es false: 403 y nada mas.
+2. Validacion de los campos; slug repetido (`existsBySlugIgnoreCase`): 409.
+3. Inserta el tenant (activo, nombre, NIT, telefono, slug). Si otro registro simultaneo
+   gano la carrera, la violacion de `uk_tenant_slug` se traduce al mismo 409.
+4. `TenantContext.setTenantId(nuevo)` y el filtro de Hibernate habilitado a mano sobre la
+   sesion (la transaccion empezo sin tenant, asi que `TenantAwareJpaTransactionManager` no
+   lo hizo). Es el mismo mecanismo que usa `DevDataInitializer` al arrancar.
+5. Por los services de siempre: el usuario ADMIN (contrasena con el `PasswordEncoder` del
+   login), el IVA 0.19 (`InventoryService.crearIvaPorDefecto`, el mismo que la siembra dev),
+   las categorias LLANTAS, LUBRICANTES y BATERIAS (amarillo 10, rojo 3, margen 0, con el
+   IVA), la cuenta Caja General (EFECTIVO, saldo 0) y el tercero Consumidor final.
+6. `JwtService.generateToken(admin)` y `LoginResponse.from(...)`. `TenantContext.clear()` en
+   un `finally`.
+
+Cualquier excepcion en el camino deshace todo: no quedan tenants, usuarios ni catalogos a
+medias. No se crea configuracion financiera: `GET /api/inventory/financial-settings` da
+ceros hasta que el taller la guarde.
 
 ### Verificacion de usuario activo en cada request
 
@@ -211,6 +244,9 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | `IllegalArgumentException` (id del cuerpo que no resuelve, rango de fechas invalido) | 400 | mensaje de la excepcion |
 | `InvalidTransferException`, `InvalidSaleOperationException`, `InvalidPurchaseOperationException` | 400 | mensaje de la excepcion |
 | `DuplicateProductCodeException`, `DuplicateAccountNameException`, `DuplicateInvoiceNumberException`, `DuplicatePurchaseInvoiceNumberException`, `DuplicateCounterpartyDocumentException` | 409 | mensaje de la excepcion |
+| `InvalidRegistrationException` (dato del registro publico) | 400 | mensaje de la regla |
+| `DuplicateTenantSlugException` (slug ya registrado) | 409 | "Ya existe una serviteca con el identificador X" |
+| `RegistrationDisabledException` (`servibox.registration.enabled=false`) | 403 | "El registro de nuevas servitecas esta deshabilitado" |
 | `InsufficientStockException`, `InsufficientBalanceException` | 409 | mensaje de la excepcion |
 | `InvalidCredentialsException` y `AuthenticationException` | 401 | "Credenciales invalidas" |
 | `MethodArgumentNotValidException` (fallo de `@Valid`) | 400 | "Peticion invalida" |
@@ -237,7 +273,8 @@ de error.
 
 `SecurityConfig` (paquete `config`): sesion `STATELESS`, CSRF deshabilitado (es una API
 pura, sin formularios ni cookies de sesion), `BCryptPasswordEncoder` como bean,
-`permitAll` solo en `POST /api/auth/login` y `authenticated()` en todo lo demas.
+`permitAll` solo en `POST /api/auth/login` y `POST /api/auth/register`, y `authenticated()`
+en todo lo demas.
 
 Propiedades en `application.properties`:
 
@@ -245,7 +282,10 @@ Propiedades en `application.properties`:
 servibox.jwt.secret=${JWT_SECRET:dev-secret-cambiar-en-produccion-minimo-32-caracteres}
 servibox.jwt.expiration-ms=${JWT_EXPIRATION_MS:86400000}
 servibox.business.time-zone=${BUSINESS_TIME_ZONE:America/Bogota}
+servibox.registration.enabled=${REGISTRATION_ENABLED:true}
 ```
+
+`servibox.registration.enabled` apaga el registro publico (403) sin desplegar codigo.
 
 `servibox.business.time-zone` es la zona de negocio: `config.BusinessClockConfiguration`
 expone con ella el bean `Clock` (`businessClock`) del que sale todo "hoy" de negocio. Ver
@@ -257,7 +297,7 @@ tiene que venir de una variable de entorno real**, nunca el valor de respaldo.
 ### Modelo de usuario
 
 `auth.entity.User` extiende `TenantAwareEntity`: `username`, `passwordHash`, `email`,
-`active`, y `role` como enum `auth.entity.Role` (`ADMIN`, `MECANICO`, `CAJERO`, los del
+`fullName` (desde V2, null en los anteriores), `active`, y `role` como enum `auth.entity.Role` (`ADMIN`, `MECANICO`, `CAJERO`, los del
 diccionario) con `@Enumerated(STRING)`. Motivo del enum en vez de tabla en
 [03-DECISIONS.md](03-DECISIONS.md). El rol viaja en el JWT y como authority `ROLE_<rol>`,
 pero **todavia no hay reglas de permisos por rol**: toda ruta autenticada vale para
@@ -285,7 +325,7 @@ Base: `com.servibox.backend`. Un paquete por modulo de negocio, mas tres transve
 | `config` | `SecurityConfig`, `JpaAuditingConfiguration`, `JsonAuthenticationEntryPoint`, `DevDataInitializer` |
 | `tenant` | `Tenant`, `TenantRepository`, `TenantContext`, `TenantAwareJpaTransactionManager`, `TenantFilterConfiguration` |
 | `shared` | `TenantAwareEntity`, `ErrorResponse`, `GlobalExceptionHandler`, `ResourceNotFoundException` |
-| `auth` | `JwtService`, `JwtAuthenticationFilter`, `AuthController`, `InvalidCredentialsException`, mas `entity` / `repository` / `dto` |
+| `auth` | `JwtService`, `JwtAuthenticationFilter`, `AuthController`, `TenantRegistrationService`, `InvalidCredentialsException` y las tres excepciones del registro, mas `entity` / `repository` / `dto` |
 | `inventory` | primer modulo de negocio migrado, ver abajo |
 | `treasury` | segundo modulo de negocio migrado, ver abajo |
 | `counterparties` | terceros (`Counterparty`): clientes y proveedores en una sola entidad, compartida por `sales` y `purchases`, ver abajo |
@@ -999,7 +1039,9 @@ reportes en PDF y Excel".
 ### Gestion del esquema con Flyway
 
 * **El esquema lo mandan las migraciones**, en `src/main/resources/db/migration`
-  (`V1__init_schema.sql`, escrita a mano desde 04-DATA-MODEL.md). Flyway las aplica al
+  (`V1__init_schema.sql`, escrita a mano desde 04-DATA-MODEL.md, y
+  `V2__tenant_nit_phone_user_full_name.sql`, que agrega `nit_tenant` y `telefono_tenant` a
+  TENANTS y `nombre_completo` a USUARIOS, las tres NULL). Flyway las aplica al
   arrancar, y Hibernate tiene `spring.jpa.hibernate.ddl-auto=validate` en todos los
   perfiles: no crea ni altera tablas, y si una entidad no coincide con el esquema la app no
   arranca. Como agregar un cambio, en [02-CONVENTIONS.md](02-CONVENTIONS.md).
@@ -1022,8 +1064,9 @@ reportes en PDF y Excel".
     escala de NUMERIC, PK, FK con `ON DELETE RESTRICT` y unicas. No acepta desviaciones de
     tipo (la lista esta vacia). Cambiar la migracion sin cambiar el diccionario, o al
     reves, rompe esa prueba.
-  * `schema.FlywayMigrationTest`: las migraciones aplican limpias sobre una base vacia,
-    Hibernate valida el esquema del contexto, y la relacion a `Tenant` de
+  * `schema.FlywayMigrationTest`: las migraciones aplican limpias sobre una base vacia, V2
+    aplica sobre una base en V1 con datos y deja las columnas nuevas en null, Hibernate
+    valida el esquema del contexto, y la relacion a `Tenant` de
     `TenantAwareEntity` no lee TENANTS al cargar una entidad.
-  * Pendiente: no hay prueba contra PostgreSQL real (Testcontainers); V1 solo se probo en
-    H2 en modo PostgreSQL.
+  * Pendiente: no hay prueba contra PostgreSQL real (Testcontainers); V1 y V2 solo se
+    probaron en H2 en modo PostgreSQL.
