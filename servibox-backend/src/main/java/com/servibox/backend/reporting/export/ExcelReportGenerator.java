@@ -73,6 +73,9 @@ public class ExcelReportGenerator {
 
         void escribir() {
             encabezado(r.tenantName(), estilo(null, true, NEGRO, 14, null));
+            if (r.tenantNit() != null) {
+                encabezado("NIT " + r.tenantNit(), estilo(null, false, GRIS, 10, null));
+            }
             encabezado(r.title(), estilo(null, true, NEGRO, 12, null));
             encabezado("Período: " + r.desde().format(PdfReportGenerator.FECHA) + " a "
                     + r.hasta().format(PdfReportGenerator.FECHA), estilo(null, false, GRIS, 10, null));

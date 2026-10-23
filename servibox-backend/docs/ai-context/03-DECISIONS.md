@@ -12,6 +12,48 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-22: Perfil del tenant (GET y PUT /api/tenant) y NIT en los reportes
+
+* Decision: `GET /api/tenant` devuelve `name`, `slug`, `nit` y `phone` del tenant del token
+  a cualquier usuario autenticado; `PUT /api/tenant` con `name`, `nit` y `phone` lo
+  actualiza y devuelve el perfil guardado.
+  * **Solo ADMIN edita, y es la primera regla por rol.** Hasta ahora el rol solo viajaba en
+    el JWT y en la authority `ROLE_<rol>` de `JwtAuthenticationFilter`, sin ningun uso. La
+    comprobacion va en `TenantController`: si la authority no es `ROLE_ADMIN` lanza
+    `AdminRequiredException`, 403 "Solo un administrador puede editar los datos de la
+    serviteca" en el formato de siempre, antes de validar el cuerpo. La authority sale del
+    rol en base, asi que un cambio de rol surte efecto en el siguiente request.
+  * **Por que no `@PreAuthorize` ni una regla en `SecurityConfig`.** `@PreAuthorize` lanza
+    `AccessDeniedException` dentro del controlador y el `@ExceptionHandler(Exception.class)`
+    de `GlobalExceptionHandler` la convertiria en 500; una regla `hasRole` en la cadena
+    responde 403 sin el cuerpo JSON de `ErrorResponse` (haria falta un
+    `AccessDeniedHandler`). Las dos piden piezas nuevas para una sola regla; si aparecen mas
+    reglas por rol, ese es el momento de pasar a `@EnableMethodSecurity` con su manejador.
+  * **Slug inmutable.** Es el identificador del login y del enrutamiento: cambiarlo dejaria
+    sin entrada a todos los usuarios del taller y romperia enlaces guardados, y tendria que
+    pasar otra vez por las reglas de unicidad y reservados. `TenantProfileRequest` no lo
+    tiene; si llega en el JSON se ignora sin error.
+  * **NIT y telefono opcionales en la edicion, aunque el registro los exige.** Los tenants
+    anteriores al registro publico (incluido el demo) no los tienen, y exigirlos impediria
+    cambiarles el nombre. Un valor en blanco o ausente se guarda como null.
+  * **Reglas reutilizadas.** Las de nombre (obligatorio, hasta 150), NIT (hasta 25, digitos
+    con guion y digito de verificacion opcionales) y telefono (hasta 25, digitos, espacios,
+    `+`, `-` y parentesis) pasan a metodos estaticos publicos de
+    `TenantRegistrationService` (`validarNombreComercial`, `validarNit`, `validarTelefono`),
+    que usan el registro y `TenantService`. Mismos mensajes y la misma
+    `InvalidRegistrationException` (400); el registro no cambia de comportamiento.
+  * **NIT en el encabezado de los reportes.** El PDF y el Excel muestran "NIT <valor>"
+    justo bajo el nombre del tenant cuando tiene NIT; sin NIT el encabezado queda igual que
+    antes. `ReportModel` suma `tenantNit`, leido del mismo `Tenant` que da el nombre: sin
+    consultas extra.
+* Alternativas consideradas: `@PreAuthorize` o `hasRole` en `SecurityConfig` (ver arriba);
+  un `TenantProfileRequest` con `@Valid` (daria el "Peticion invalida" generico); copiar
+  las reglas del registro (dos sitios que se desincronizan); permitir editar el slug.
+* Motivo: lo minimo para que el taller corrija sus datos y estos salgan en sus reportes,
+  sin un sistema de permisos nuevo ni cambios en otros endpoints. Sin migracion: las
+  columnas son de V2.
+* Pendientes: telefono y logo en los reportes; mas reglas por rol.
+
 ## 2026-10-22: Registro publico de servitecas y primera migracion V2
 
 * Decision: `POST /api/auth/register`, publico, crea una serviteca (tenant) con su
@@ -170,7 +212,8 @@ Formato de cada entrada:
     (`servibox.reporting.max-export-rows`); pasarse es 400 pidiendo acotar el rango. El
     archivo se arma en memoria, y con esos topes cabe sin problema.
   * **Encabezado.** Solo el nombre del tenant: NIT, telefono y logo no existen en el modelo
-    y no se agregan.
+    y no se agregan. (Desde el 2026-10-22 el NIT existe y sale bajo el nombre, ver "Perfil
+    del tenant".)
   * **Queda fuera** de esta rama: ventas, compras, cartera por cobrar y por pagar, flujo de
     caja, IVA en archivo, inventario valorizado, productos vendidos, reporte diario,
     utilidad por linea (no hay costo congelado por linea), NIT y logo, comision de tarjeta.

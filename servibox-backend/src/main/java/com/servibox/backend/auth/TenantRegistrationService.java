@@ -154,18 +154,9 @@ public class TenantRegistrationService {
             throw new InvalidRegistrationException("Debe aceptar los terminos y condiciones");
         }
 
-        obligatorio(r.businessName(), 150, "El nombre comercial");
-
-        obligatorio(r.nit(), 25, "El NIT");
-        if (!NIT.matcher(r.nit().trim()).matches()) {
-            throw new InvalidRegistrationException(
-                    "El NIT solo admite digitos y un guion con el digito de verificacion, por ejemplo 900123456-7");
-        }
-
-        obligatorio(r.phone(), 25, "El telefono");
-        if (!TELEFONO.matcher(r.phone().trim()).matches()) {
-            throw new InvalidRegistrationException("El telefono solo admite digitos, espacios, +, - y parentesis");
-        }
+        validarNombreComercial(r.businessName());
+        validarNit(r.nit());
+        validarTelefono(r.phone());
 
         String slug = r.slug();
         if (slug == null || !SLUG.matcher(slug).matches()) {
@@ -201,6 +192,27 @@ public class TenantRegistrationService {
         // BCrypt solo usa los primeros 72 bytes: con tildes o enies 72 caracteres pasan de 72 bytes.
         if (password.length() > 72 || password.getBytes(StandardCharsets.UTF_8).length > 72) {
             throw new InvalidRegistrationException("La contrasena no puede superar 72 caracteres");
+        }
+    }
+
+    // Las reglas de los datos del tenant, tambien para la edicion del perfil (TenantService).
+
+    public static void validarNombreComercial(String nombre) {
+        obligatorio(nombre, 150, "El nombre comercial");
+    }
+
+    public static void validarNit(String nit) {
+        obligatorio(nit, 25, "El NIT");
+        if (!NIT.matcher(nit.trim()).matches()) {
+            throw new InvalidRegistrationException(
+                    "El NIT solo admite digitos y un guion con el digito de verificacion, por ejemplo 900123456-7");
+        }
+    }
+
+    public static void validarTelefono(String telefono) {
+        obligatorio(telefono, 25, "El telefono");
+        if (!TELEFONO.matcher(telefono.trim()).matches()) {
+            throw new InvalidRegistrationException("El telefono solo admite digitos, espacios, +, - y parentesis");
         }
     }
 
