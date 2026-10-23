@@ -12,6 +12,71 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-23: Endurecimiento de validaciones de entrada
+
+* Decision: cerrar huecos de validacion sin cambiar reglas de negocio. Cada regla responde
+  400 con un mensaje especifico (salvo las de 409 y 403 indicadas) en el formato de siempre.
+  * **Saldo en transferencias.** `registrarTransferencia` llama a `exigirSaldoSuficiente`
+    sobre el origen antes de crear las patas, dentro de la misma transaccion: 409
+    `InsufficientBalanceException`, sin mover ninguna cuenta. Motivo: era la unica salida de
+    dinero hacia otra cuenta sin control, y una transferencia sin fondos deja dos cuentas
+    descuadradas frente a la realidad. Igual que en las compras, no hay bloqueo de fila: dos
+    transferencias simultaneas podrian pasar las dos la comprobacion.
+  * **Precio de linea mayor que cero** en ventas y compras ("El precio de X debe ser mayor a
+    cero"). Un precio cero o negativo daba facturas con total cero o negativo y, en compras,
+    un costo del producto en cero por `sincronizarCosto`.
+  * **Vencimiento en credito.** `dueDate` obligatorio y no anterior a la fecha de la factura
+    (la de hoy si no llega `invoiceDate`). En contado no se valida y se guarda tal cual, como
+    antes. Una cuenta por cobrar o por pagar sin vencimiento no se puede gestionar.
+  * **Fecha de abono y pago** no anterior a la de la factura; la regla de fecha futura no
+    cambia. El mismo dia si pasa.
+  * **Categorias** (POST y PUT): umbrales no negativos, rojo no mayor que amarillo, margen
+    en [0, 1) y nombre hasta 100. Con margen 1 o mas el divisor del precio sugerido no es
+    positivo y el precio cae al costo sin avisar. El POST ahora rechaza tambien el nombre
+    repetido (409, comparado ya en mayusculas como se guarda) y el `taxTypeId` ajeno (400),
+    igual que el PUT: antes el POST los ignoraba en silencio. La logica comun vive en
+    `InventoryService` (`crearCategoria`, `validarCategoria`, `impuestosDelTenant`).
+  * **Productos** (POST y PUT): codigo hasta 50, descripcion hasta 255, costo y stock no
+    negativos, en `saveProduct` antes de cualquier consulta (si no, Hibernate escribiria el
+    valor largo al hacer flush y saldria un 500). `ProductResponse` redondea `taxAmount` y
+    `suggestedPrice` a 2 decimales con HALF_UP, como quedan en NUMERIC(14,2): el POST y el
+    PUT responden lo que dara el GET. Lo guardado y las formulas no cambian.
+  * **Movimientos manuales**: concepto y notas hasta 255.
+  * **Terceros.** El documento 222222222222 queda reservado al Consumidor final: crear o
+    editar otro tercero con el es 409 "El documento 222222222222 es del Consumidor final"
+    (`SystemCounterpartyException`); `consumidorFinal()` no pasa por esa regla. El POST se
+    alinea con el PUT por `CounterpartyService.validarDatos`: recorte, mensajes por campo,
+    limites y blancos a null; sin `@Valid` ni anotaciones en `CounterpartyRequest`. La
+    promocion a AMBOS y los 201, 200 y 409 no cambian. El correo, si viene, con el formato
+    simple del registro (`TenantRegistrationService.CORREO`), sin tocar mayusculas. Supera
+    en esto lo dicho en "Edicion de terceros" (el correo no se validaba por formato y el
+    documento reservado no estaba protegido).
+  * **Rol ADMIN** para `PUT /api/inventory/financial-settings` y `POST` y `PUT
+    /api/inventory/categories`, con la misma comprobacion que `TenantController` y la misma
+    `AdminRequiredException` (403, con un mensaje propio de cada recurso). Va antes de
+    validar el cuerpo: esos tres endpoints dejan `@Valid` y el controlador valida las
+    anotaciones del DTO despues del rol, con el mismo 400 "Peticion invalida". Un JSON que
+    no se puede leer sigue siendo 400 antes del rol, porque falla al deserializar. Motivo:
+    la configuracion financiera y las categorias mueven el precio sugerido de todo el
+    inventario.
+  * **Montos en mensajes.** `InsufficientBalanceException` formatea con
+    `shared.Moneda.formatear`: pesos es-CO sin decimales ("$ 3.250.000"), redondeo HALF_UP,
+    negativo como "-$ 30". Antes salian doubles de Java ("3250000.0", "1.2E7"). Es el unico
+    sitio con ese formato; lo usan compras, pagos, restaurar compras y transferencias.
+* Sigue sin validarse a proposito:
+  * **Saldo en gastos operativos** y en la edicion o borrado de movimientos manuales: es la
+    divergencia ya documentada con Autollantas, una cuenta puede quedar en negativo.
+  * **El costo al anular una compra** no se revierte (sin historico de costos).
+  * **La unicidad del numero de factura de compra** sigue siendo por tenant y no por
+    proveedor.
+  * **Los ingresos ocasionales en los kpis** se siguen contando como hasta hoy.
+  * El concepto de una transferencia no tiene limite de largo (no estaba en el alcance).
+* Alternativas consideradas: validar en los DTO con anotaciones (mensaje generico); un
+  bloqueo pesimista para el saldo de las transferencias (cambio mayor que el de las
+  compras); validar el rol con `@PreAuthorize` (ver la entrada del perfil del tenant).
+* Motivo: los huecos dejaban 500 por largo de columna, facturas sin sentido y mensajes con
+  numeros de Java. Sin migracion: todo cabe en el esquema actual.
+
 ## 2026-10-23: Edicion de terceros (PUT /api/counterparties/{id})
 
 * Decision: `PUT /api/counterparties/{id}` con `name`, `documentType`, `documentNumber`,
@@ -28,7 +93,9 @@ Formato de cada entrada:
     Correo y celular en blanco quedan en null. `InvalidCounterpartyException` (400); los
     mensajes de campo vacio son los de `crear`. Un `documentType` fuera del enum es el 400
     de siempre con los valores permitidos. El correo no se valida por formato porque el
-    POST tampoco lo hace.
+    POST tampoco lo hace. **SUPERADO el 2026-10-23** por "Endurecimiento de validaciones de
+    entrada": el POST y el PUT validan el formato del correo y reservan el documento
+    222222222222.
   * **Documento repetido.** Un documento de otro tercero del tenant es 409 "Ya existe un
     tercero con el documento N" (la regla de `crear` y de `uk_tercero_tenant_document`);
     dejar el propio no choca. La comparacion es exacta, como en el POST.

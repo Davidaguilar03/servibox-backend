@@ -119,15 +119,25 @@ class CollectionPaymentDateTest {
 
     private int venderACredito() throws Exception {
         return crear("/api/sales", """
-                {"paymentType":"CREDITO","details":[{"productId":%d,"quantity":1,"price":100000}]}
-                """.formatted(llanta.getId()));
+                {"invoiceDate":"%s","dueDate":"%s","paymentType":"CREDITO",
+                 "details":[{"productId":%d,"quantity":1,"price":100000}]}
+                """.formatted(emitida(), vence(), llanta.getId()));
     }
 
     private int comprarACredito() throws Exception {
         return crear("/api/purchases", """
-                {"invoiceNumber":"FAC-00001","supplierId":%d,"paymentType":"CREDITO",
+                {"invoiceNumber":"FAC-00001","supplierId":%d,"invoiceDate":"%s","dueDate":"%s","paymentType":"CREDITO",
                  "details":[{"productId":%d,"quantity":1,"price":100000}]}
-                """.formatted(proveedor.getId(), llanta.getId()));
+                """.formatted(proveedor.getId(), emitida(), vence(), llanta.getId()));
+    }
+
+    /** La factura se emite 10 dias antes de hoy: un abono o pago de hace 5 dias es posterior a ella. */
+    private String emitida() {
+        return LocalDate.now(clock).minusDays(10).toString();
+    }
+
+    private String vence() {
+        return LocalDate.now(clock).plusDays(30).toString();
     }
 
     /** date null omite el campo; si no, va tal cual dentro de comillas. */

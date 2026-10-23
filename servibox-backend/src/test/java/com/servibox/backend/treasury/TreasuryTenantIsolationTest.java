@@ -101,9 +101,14 @@ class TreasuryTenantIsolationTest {
     }
 
     private Long crearCuenta(String token, String nombre, String tipo) throws Exception {
+        return crearCuenta(token, nombre, tipo, 0);
+    }
+
+    /** Con saldo inicial: el origen de una transferencia necesita saldo. */
+    private Long crearCuenta(String token, String nombre, String tipo, int saldoInicial) throws Exception {
         String body = """
-                {"name":"%s","initialBalance":0,"type":"%s"}
-                """.formatted(nombre, tipo);
+                {"name":"%s","initialBalance":%d,"type":"%s"}
+                """.formatted(nombre, saldoInicial, tipo);
         MvcResult result = mockMvc.perform(post("/api/treasury/accounts")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -202,7 +207,7 @@ class TreasuryTenantIsolationTest {
      */
     @Test
     void elListadoDeMovimientosMuestraLosGeneradosPorUnaTransferencia() throws Exception {
-        Long cajaGeneral = crearCuenta(tokenUno, "Caja General", "EFECTIVO");
+        Long cajaGeneral = crearCuenta(tokenUno, "Caja General", "EFECTIVO", 10000);
         Long bancolombia = crearCuenta(tokenUno, "Bancolombia", "BANCO");
 
         MvcResult creada = mockMvc.perform(post("/api/treasury/transfers")
@@ -245,7 +250,7 @@ class TreasuryTenantIsolationTest {
     /** Sin concepto del usuario, cada pata lleva el autogenerado y la respuesta el del EGRESO. */
     @Test
     void unaTransferenciaSinConceptoUsaElAutogenerado() throws Exception {
-        Long caja = crearCuenta(tokenUno, "Caja General", "EFECTIVO");
+        Long caja = crearCuenta(tokenUno, "Caja General", "EFECTIVO", 10000);
         Long banco = crearCuenta(tokenUno, "Bancolombia", "BANCO");
 
         mockMvc.perform(post("/api/treasury/transfers")

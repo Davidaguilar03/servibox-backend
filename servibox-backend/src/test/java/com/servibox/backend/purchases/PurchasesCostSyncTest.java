@@ -86,7 +86,7 @@ class PurchasesCostSyncTest {
 
     private Purchase comprar(String numero, PaymentType tipo, Account cuenta,
                              PurchasesService.LineaCompra... lineas) {
-        return purchasesService.crearFactura(numero, proveedor, LocalDate.now(), null, tipo, cuenta,
+        return purchasesService.crearFactura(numero, proveedor, LocalDate.now(), LocalDate.now().plusDays(30), tipo, cuenta,
                 "Efectivo", List.of(lineas));
     }
 

@@ -109,10 +109,32 @@ public class InventoryService {
      */
     @Transactional
     public Product saveProduct(Product product) {
+        // Primero, sin consultas de por medio: una consulta con el producto ya modificado
+        // haria que Hibernate escribiera un codigo largo y saliera un error de columna.
+        validarProducto(product);
         validarCodigoUnico(product);
         // Precios antes del primer INSERT: iva_producto y precio_sugerido son NOT NULL.
         recalculatePrices(product);
         return productRepository.save(product);
+    }
+
+    /**
+     * Largos de las columnas (codigo 50, descripcion 255), costo y stock no negativos. El
+     * stock solo llega en el POST; en el PUT es el que ya tenia el producto.
+     */
+    private static void validarProducto(Product product) {
+        if (product.getCode() != null && product.getCode().length() > 50) {
+            throw new IllegalArgumentException("El codigo del producto admite hasta 50 caracteres");
+        }
+        if (product.getDescription() != null && product.getDescription().length() > 255) {
+            throw new IllegalArgumentException("La descripcion del producto admite hasta 255 caracteres");
+        }
+        if (product.getPurchaseCost() != null && product.getPurchaseCost() < 0) {
+            throw new IllegalArgumentException("El costo de compra no puede ser negativo");
+        }
+        if (product.getQuantity() != null && product.getQuantity() < 0) {
+            throw new IllegalArgumentException("La cantidad no puede ser negativa");
+        }
     }
 
     /**
@@ -244,8 +266,8 @@ public class InventoryService {
      * suggestedPrice se guardan en la base). Las lineas de venta y compra emitidas guardan
      * su propio precio e IVA, asi que no cambian.
      *
-     * A diferencia del POST, rechaza un nombre repetido en el tenant (sin contar la propia
-     * categoria) y un taxTypeId que no sea del tenant.
+     * Como el POST (crearCategoria), rechaza un nombre repetido en el tenant (sin contar la
+     * propia categoria), un taxTypeId que no sea del tenant y los rangos invalidos.
      */
     @Transactional
     public ProductCategory actualizarCategoria(Long id, String name, String color, Integer yellowStockMin,
@@ -254,13 +276,80 @@ public class InventoryService {
                 .orElseThrow(() -> new IllegalArgumentException("Categoria no encontrada: " + id));
 
         String nombre = name.trim().toUpperCase();
+        validarCategoria(nombre, yellowStockMin, redStockMin, targetMargin);
+        validarNombreCategoriaUnico(nombre, id);
+        Set<TaxType> impuestos = impuestosDelTenant(taxTypeIds);
+
+        category.setName(nombre);
+        category.setColor(color);
+        category.setYellowStockMin(yellowStockMin);
+        category.setRedStockMin(redStockMin);
+        category.setTargetMargin(targetMargin);
+        category.setTaxTypes(impuestos);
+        ProductCategory guardada = saveCategory(category);
+
+        recalcularPrecios(productRepository.findByCategoryId(id), findFinancialSettings());
+        return guardada;
+    }
+
+    /**
+     * POST /api/inventory/categories. Las mismas reglas que actualizarCategoria: rangos,
+     * nombre unico en el tenant (se compara ya en mayusculas, como se guarda) e impuestos
+     * del tenant.
+     */
+    @Transactional
+    public ProductCategory crearCategoria(String name, String color, Integer yellowStockMin, Integer redStockMin,
+                                          Double targetMargin, List<Long> taxTypeIds) {
+        String nombre = name.trim().toUpperCase();
+        validarCategoria(nombre, yellowStockMin, redStockMin, targetMargin);
+        validarNombreCategoriaUnico(nombre, null);
+
+        ProductCategory category = new ProductCategory();
+        category.setName(nombre);
+        category.setColor(color);
+        category.setYellowStockMin(yellowStockMin);
+        category.setRedStockMin(redStockMin);
+        category.setTargetMargin(targetMargin);
+        category.setTaxTypes(impuestosDelTenant(taxTypeIds));
+        return saveCategory(category);
+    }
+
+    /**
+     * Rangos de una categoria. Umbrales enteros no negativos, rojo no mayor que amarillo, y
+     * margen en [0, 1): con 1 o mas el divisor del precio sugerido no es positivo y el
+     * precio cae al costo. El nombre hasta el largo de su columna (100).
+     */
+    private static void validarCategoria(String nombre, Integer yellowStockMin, Integer redStockMin,
+                                         Double targetMargin) {
+        if (nombre.length() > 100) {
+            throw new IllegalArgumentException("El nombre de la categoria admite hasta 100 caracteres");
+        }
+        if (yellowStockMin < 0) {
+            throw new IllegalArgumentException("El umbral amarillo no puede ser negativo");
+        }
+        if (redStockMin < 0) {
+            throw new IllegalArgumentException("El umbral rojo no puede ser negativo");
+        }
+        if (redStockMin > yellowStockMin) {
+            throw new IllegalArgumentException("El umbral rojo no puede superar al amarillo");
+        }
+        if (targetMargin < 0 || targetMargin >= 1) {
+            throw new IllegalArgumentException("El margen debe estar entre 0 y menos de 100%");
+        }
+    }
+
+    /** Nombre ya en mayusculas; idPropio excluye la categoria que se edita (null al crear). */
+    private void validarNombreCategoriaUnico(String nombre, Long idPropio) {
         boolean repetido = productCategoryRepository.findByNameAndTenantId(nombre, TenantContext.getTenantId())
                 .stream()
-                .anyMatch(otra -> !otra.getId().equals(id));
+                .anyMatch(otra -> !otra.getId().equals(idPropio));
         if (repetido) {
             throw new DuplicateCategoryNameException(nombre);
         }
+    }
 
+    /** Los impuestos pedidos, todos del tenant; uno ajeno o inexistente es 400. */
+    private Set<TaxType> impuestosDelTenant(List<Long> taxTypeIds) {
         Set<TaxType> impuestos = new HashSet<>();
         if (taxTypeIds != null && !taxTypeIds.isEmpty()) {
             Map<Long, TaxType> delTenant = new HashMap<>();
@@ -273,17 +362,7 @@ public class InventoryService {
                 impuestos.add(impuesto);
             }
         }
-
-        category.setName(nombre);
-        category.setColor(color);
-        category.setYellowStockMin(yellowStockMin);
-        category.setRedStockMin(redStockMin);
-        category.setTargetMargin(targetMargin);
-        category.setTaxTypes(impuestos);
-        ProductCategory guardada = saveCategory(category);
-
-        recalcularPrecios(productRepository.findByCategoryId(id), findFinancialSettings());
-        return guardada;
+        return impuestos;
     }
 
     /** Impuestos del tenant activo, por nombre. Solo lectura. */

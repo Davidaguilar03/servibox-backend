@@ -106,7 +106,7 @@ class SalesInvoiceNumberingTest {
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                        {%s"paymentType":"CREDITO",
+                        {%s"dueDate":"2099-12-31","paymentType":"CREDITO",
                          "details":[{"productId":%d,"quantity":1,"price":100000}]}
                         """.formatted(campo, llanta.getId())));
     }
@@ -193,7 +193,7 @@ class SalesInvoiceNumberingTest {
         fixture.usarTenant(fixture.crearTenant());
         Product otraLlanta = fixture.crearProducto(fixture.crearCategoriaConIva(), "LLA-001", 100000.0, 10);
         assertThat(salesService.siguienteNumeroFactura()).isEqualTo("FV-0001");
-        String deOtro = salesService.crearFactura(null, null, LocalDate.now(), null, PaymentType.CREDITO, null, null,
+        String deOtro = salesService.crearFactura(null, null, LocalDate.now(), LocalDate.now().plusDays(30), PaymentType.CREDITO, null, null,
                 List.of(new SalesService.LineaFactura(otraLlanta.getId(), 1, 100000.0))).getInvoiceNumber();
         assertThat(deOtro).isEqualTo("FV-0001");
         TenantContext.clear();

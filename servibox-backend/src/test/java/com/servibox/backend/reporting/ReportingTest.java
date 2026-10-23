@@ -173,12 +173,12 @@ class ReportingTest {
         }
 
         Sale vender(String numero, LocalDate fecha, Product producto, int cantidad, double precio) {
-            return salesService.crearFactura(numero, cliente, fecha, null, PaymentType.CREDITO, null, null,
+            return salesService.crearFactura(numero, cliente, fecha, fecha.plusDays(30), PaymentType.CREDITO, null, null,
                     List.of(new SalesService.LineaFactura(producto.getId(), cantidad, precio)));
         }
 
         Purchase comprar(String numero, LocalDate fecha, Product producto, int cantidad, double precio) {
-            return purchasesService.crearFactura(numero, proveedor, fecha, null,
+            return purchasesService.crearFactura(numero, proveedor, fecha, fecha.plusDays(30),
                     com.servibox.backend.purchases.entity.PaymentType.CREDITO, null, null,
                     List.of(new PurchasesService.LineaCompra(producto.getId(), cantidad, precio)));
         }
@@ -390,10 +390,11 @@ class ReportingTest {
     void gastosEIngresosOcasionalesSalenDeLosMovimientosDeSuCategoria() {
         Taller t = new Taller(tenantUno);
         LocalDate dia = LocalDate.of(2026, 9, 10);
-        Movement gasto = treasuryService.registrarGastoOperativo(t.caja, "Arriendo", 50.0, dia, null);
+        // La transferencia va antes del gasto: exige saldo en la caja, el gasto no.
         Movement ingreso = treasuryService.registrarIngresoOcasional(t.caja, "Chatarra", 20.0, dia, null);
         Account banco = fixture.crearCuenta("Banco");
         treasuryService.registrarTransferencia(t.caja, banco, "Consignacion", 10.0, dia);
+        Movement gasto = treasuryService.registrarGastoOperativo(t.caja, "Arriendo", 50.0, dia, null);
 
         List<MovementSummaryResponse> renglones = reportingService.getMovements(dia, dia);
         assertThat(renglones).extracting(MovementSummaryResponse::type)
@@ -435,7 +436,7 @@ class ReportingTest {
         // LLANTAS: generado 76, descontable 38, neto 38.
         t.vender("FV-1", HOY, t.llanta, 2, 200.0);
         // BATERIAS: generado 57, descontable 38, neto 19.
-        salesService.crearFactura("FV-2", t.cliente, HOY, null, PaymentType.CREDITO, null, null, List.of(
+        salesService.crearFactura("FV-2", t.cliente, HOY, HOY.plusDays(30), PaymentType.CREDITO, null, null, List.of(
                 new SalesService.LineaFactura(bateria.getId(), 1, 300.0),
                 // LLANTAS: generado 28.5, descontable 19, neto 9.5.
                 new SalesService.LineaFactura(t.llanta.getId(), 1, 150.0)));

@@ -117,7 +117,7 @@ class PurchasesRestoreTest {
     }
 
     private Purchase comprar(String numero, PaymentType tipo, Account cuenta, int cantidad, double precio) {
-        Purchase compra = purchasesService.crearFactura(numero, proveedor, FECHA_FACTURA, null, tipo, cuenta,
+        Purchase compra = purchasesService.crearFactura(numero, proveedor, FECHA_FACTURA, FECHA_FACTURA.plusDays(30), tipo, cuenta,
                 "Efectivo", List.of(new PurchasesService.LineaCompra(llanta.getId(), cantidad, precio)));
         fixture.verificarInvariante();
         return compra;

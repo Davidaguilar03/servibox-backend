@@ -206,7 +206,7 @@ class ReportExportTest {
 
     private Sale vender(String numero, Counterparty cliente, PaymentType tipo, LocalDate fecha, double precio,
                         Product producto) {
-        return salesService.crearFactura(numero, cliente, fecha, null, tipo, tipo == PaymentType.CONTADO ? caja : null,
+        return salesService.crearFactura(numero, cliente, fecha, fecha.plusDays(30), tipo, tipo == PaymentType.CONTADO ? caja : null,
                 "Efectivo", List.of(new SalesService.LineaFactura(producto.getId(), 1, precio)));
     }
 

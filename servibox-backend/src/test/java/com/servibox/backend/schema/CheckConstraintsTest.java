@@ -103,7 +103,7 @@ class CheckConstraintsTest {
 
     @Test
     void laCantidadDeUnaLineaDeVentaTieneQueSerPositiva() {
-        Sale venta = salesService.crearFactura("VEN-CHECK", cliente, LocalDate.now(), null,
+        Sale venta = salesService.crearFactura("VEN-CHECK", cliente, LocalDate.now(), LocalDate.now().plusDays(30),
                 com.servibox.backend.sales.entity.PaymentType.CREDITO, null, null,
                 List.of(new SalesService.LineaFactura(llanta.getId(), 1, 200.0)));
 
@@ -114,7 +114,7 @@ class CheckConstraintsTest {
 
     @Test
     void laCantidadDeUnaLineaDeCompraTieneQueSerPositiva() {
-        Purchase compra = purchasesService.crearFactura("FAC-CHECK", proveedor, LocalDate.now(), null,
+        Purchase compra = purchasesService.crearFactura("FAC-CHECK", proveedor, LocalDate.now(), LocalDate.now().plusDays(30),
                 com.servibox.backend.purchases.entity.PaymentType.CREDITO, null, null,
                 List.of(new PurchasesService.LineaCompra(llanta.getId(), 1, 100.0)));
 

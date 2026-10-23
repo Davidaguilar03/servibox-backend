@@ -205,7 +205,7 @@ class InventoryEditingTest {
     void elCodigoNoSeCambiaSiElProductoTieneLineasDeCompra() throws Exception {
         fixture.usarTenant(tenantUno);
         Counterparty proveedor = fixture.crearProveedor("Proveedor", "800" + System.nanoTime());
-        purchasesService.crearFactura("PROV-1", proveedor, LocalDate.now(), null,
+        purchasesService.crearFactura("PROV-1", proveedor, LocalDate.now(), LocalDate.now().plusDays(30),
                 com.servibox.backend.purchases.entity.PaymentType.CREDITO, null, null,
                 List.of(new PurchasesService.LineaCompra(llanta.getId(), 1, 100.0)));
         TenantContext.clear();

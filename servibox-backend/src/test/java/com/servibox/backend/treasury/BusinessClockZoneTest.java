@@ -100,11 +100,11 @@ class BusinessClockZoneTest {
         Movement ingreso = treasuryService.registrarIngresoOcasional(caja, "Fondo", 500000.0, null, null);
         assertThat(ingreso.getDate()).isEqualTo(HOY_EN_BOGOTA);
 
-        Sale venta = salesService.crearFactura(null, null, null, null, PaymentType.CREDITO, null, null,
+        Sale venta = salesService.crearFactura(null, null, null, HOY_EN_BOGOTA, PaymentType.CREDITO, null, null,
                 List.of(new SalesService.LineaFactura(llanta.getId(), 1, 100000.0)));
         assertThat(venta.getInvoiceDate()).isEqualTo(HOY_EN_BOGOTA);
 
-        Purchase compra = purchasesService.crearFactura("FAC-00001", proveedor, null, null,
+        Purchase compra = purchasesService.crearFactura("FAC-00001", proveedor, null, HOY_EN_BOGOTA,
                 com.servibox.backend.purchases.entity.PaymentType.CREDITO, null, null,
                 List.of(new PurchasesService.LineaCompra(llanta.getId(), 1, 100000.0)));
         assertThat(compra.getInvoiceDate()).isEqualTo(HOY_EN_BOGOTA);

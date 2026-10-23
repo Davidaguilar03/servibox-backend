@@ -1,5 +1,6 @@
 package com.servibox.backend.counterparties.service;
 
+import com.servibox.backend.auth.TenantRegistrationService;
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.counterparties.entity.CounterpartyRole;
 import com.servibox.backend.counterparties.entity.DocumentType;
@@ -98,18 +99,20 @@ public class CounterpartyService {
         return counterpartyRepository.save(tercero);
     }
 
+    /** Datos de un tercero ya recortados y validados por validarDatos. */
+    public record DatosTercero(String nombre, DocumentType tipoDocumento, String numeroDocumento,
+                               String correo, String celular) {
+    }
+
     /**
-     * Edicion por PUT /api/counterparties/{id} de un tercero que ya se busco en el tenant. El
-     * rol no cambia. Los textos se recortan; correo y celular en blanco quedan en null. Las
-     * longitudes son las de la entidad, para que un valor largo sea 400 y no un error de
-     * columna. Un documento de otro tercero del tenant es 409; el propio, no.
+     * Reglas comunes del POST y el PUT de /api/counterparties. Los textos se recortan; correo y
+     * celular en blanco quedan en null. Las longitudes son las de la entidad, para que un valor
+     * largo sea 400 y no un error de columna. El correo, si viene, con el mismo formato simple
+     * que el registro (sin tocar mayusculas). El documento 222222222222 es del Consumidor
+     * final: 409. consumidorFinal() no pasa por aqui, asi que el sistema lo sigue creando.
      */
-    @Transactional
-    public Counterparty actualizar(Counterparty tercero, String nombre, DocumentType tipoDocumento,
-                                   String numeroDocumento, String correo, String celular) {
-        if (DOCUMENTO_CONSUMIDOR_FINAL.equals(tercero.getDocumentNumber())) {
-            throw new SystemCounterpartyException();
-        }
+    public static DatosTercero validarDatos(String nombre, DocumentType tipoDocumento, String numeroDocumento,
+                                            String correo, String celular) {
         nombre = recortar(nombre);
         numeroDocumento = recortar(numeroDocumento);
         correo = enBlancoANull(correo);
@@ -132,21 +135,42 @@ public class CounterpartyService {
         if (correo != null && correo.length() > 150) {
             throw new InvalidCounterpartyException("El correo admite hasta 150 caracteres");
         }
+        if (correo != null && !TenantRegistrationService.CORREO.matcher(correo).matches()) {
+            throw new InvalidCounterpartyException("El correo no tiene un formato valido");
+        }
         if (celular != null && celular.length() > 25) {
             throw new InvalidCounterpartyException("El celular admite hasta 25 caracteres");
         }
-        String documento = numeroDocumento;
-        findByDocumentNumber(documento)
+        if (DOCUMENTO_CONSUMIDOR_FINAL.equals(numeroDocumento)) {
+            throw new SystemCounterpartyException("El documento " + DOCUMENTO_CONSUMIDOR_FINAL
+                    + " es del Consumidor final");
+        }
+        return new DatosTercero(nombre, tipoDocumento, numeroDocumento, correo, celular);
+    }
+
+    /**
+     * Edicion por PUT /api/counterparties/{id} de un tercero que ya se busco en el tenant. El
+     * rol no cambia. Reglas de validarDatos. Un documento de otro tercero del tenant es 409;
+     * el propio, no.
+     */
+    @Transactional
+    public Counterparty actualizar(Counterparty tercero, String nombre, DocumentType tipoDocumento,
+                                   String numeroDocumento, String correo, String celular) {
+        if (DOCUMENTO_CONSUMIDOR_FINAL.equals(tercero.getDocumentNumber())) {
+            throw new SystemCounterpartyException();
+        }
+        DatosTercero datos = validarDatos(nombre, tipoDocumento, numeroDocumento, correo, celular);
+        findByDocumentNumber(datos.numeroDocumento())
                 .filter(existente -> !existente.getId().equals(tercero.getId()))
                 .ifPresent(existente -> {
-                    throw new DuplicateCounterpartyDocumentException(documento);
+                    throw new DuplicateCounterpartyDocumentException(datos.numeroDocumento());
                 });
 
-        tercero.setName(nombre);
-        tercero.setDocumentType(tipoDocumento);
-        tercero.setDocumentNumber(numeroDocumento);
-        tercero.setEmail(correo);
-        tercero.setPhone(celular);
+        tercero.setName(datos.nombre());
+        tercero.setDocumentType(datos.tipoDocumento());
+        tercero.setDocumentNumber(datos.numeroDocumento());
+        tercero.setEmail(datos.correo());
+        tercero.setPhone(datos.celular());
         return counterpartyRepository.save(tercero);
     }
 

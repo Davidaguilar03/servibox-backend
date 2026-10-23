@@ -81,7 +81,7 @@ class PurchasesFlowTest {
     }
 
     private Purchase comprar(String numero, PaymentType tipo, Account cuenta, int cantidad, double precio) {
-        return purchasesService.crearFactura(numero, proveedor, LocalDate.now(), null, tipo, cuenta,
+        return purchasesService.crearFactura(numero, proveedor, LocalDate.now(), LocalDate.now().plusDays(30), tipo, cuenta,
                 "Efectivo", List.of(new PurchasesService.LineaCompra(llanta.getId(), cantidad, precio)));
     }
 
@@ -304,7 +304,7 @@ class PurchasesFlowTest {
         assertThat(stockDe(llanta)).isEqualTo(15);
 
         // Se venden 12 de las 15 unidades: quedan 3, menos que las 5 compradas.
-        Sale venta = salesService.crearFactura("VEN-90001", null, LocalDate.now(), null,
+        Sale venta = salesService.crearFactura("VEN-90001", null, LocalDate.now(), LocalDate.now().plusDays(30),
                 com.servibox.backend.sales.entity.PaymentType.CREDITO, null, null,
                 List.of(new SalesService.LineaFactura(llanta.getId(), 12, 150000.0)));
         assertThat(venta.getId()).isNotNull();

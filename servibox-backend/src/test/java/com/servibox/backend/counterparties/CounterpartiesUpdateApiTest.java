@@ -140,7 +140,7 @@ class CounterpartiesUpdateApiTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"customerId":%d,"paymentType":"CREDITO",
+                                {"customerId":%d,"dueDate":"2099-12-31","paymentType":"CREDITO",
                                  "details":[{"productId":%d,"quantity":1,"price":100000}]}
                                 """.formatted(clienteId, llanta.getId())))
                 .andExpect(status().isCreated()));
@@ -151,7 +151,7 @@ class CounterpartiesUpdateApiTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"invoiceNumber":"%s","supplierId":%d,"paymentType":"CREDITO",
+                                {"invoiceNumber":"%s","supplierId":%d,"dueDate":"2099-12-31","paymentType":"CREDITO",
                                  "details":[{"productId":%d,"quantity":1,"price":100000}]}
                                 """.formatted(numero, proveedorId, llanta.getId())))
                 .andExpect(status().isCreated()));
@@ -264,7 +264,8 @@ class CounterpartiesUpdateApiTest {
         }
 
         // Los limites exactos si caben.
-        editar(cliente, cuerpo("A".repeat(150), "CC", "1".repeat(25), "a".repeat(150), "3".repeat(25)))
+        editar(cliente, cuerpo("A".repeat(150), "CC", "1".repeat(25), "a".repeat(140) + "@correo.co",
+                "3".repeat(25)))
                 .andExpect(status().isOk());
 
         listado().andExpect(jsonPath("$[?(@.id == %d)].name".formatted(cliente))
