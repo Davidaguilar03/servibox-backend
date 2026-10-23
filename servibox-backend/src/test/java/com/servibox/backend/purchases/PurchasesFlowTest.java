@@ -325,6 +325,6 @@ class PurchasesFlowTest {
 
         assertThatThrownBy(() -> comprar("FAC-00012", PaymentType.CREDITO, null, 1, 100000.0))
                 .isInstanceOf(DuplicatePurchaseInvoiceNumberException.class)
-                .hasMessage("Ya existe una factura de compra con el numero FAC-00012");
+                .hasMessage("Ya existe una factura de compra FAC-00012 del proveedor Importadora Andina");
     }
 }

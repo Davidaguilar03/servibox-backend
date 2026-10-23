@@ -206,7 +206,7 @@ justamente lo normal entre negocios que no se conocen.
 | `Account` | `(id_tenant, nombre_cuenta)` | `uk_cuenta_tenant_name` |
 | `Counterparty` | `(id_tenant, numero_documento)` | `uk_tercero_tenant_document` |
 | `Sale` | `(id_tenant, numero_factura_venta)` | `uk_venta_tenant_invoice_number` |
-| `Purchase` | `(id_tenant, numero_factura_compra)` | `uk_compra_tenant_invoice_number` |
+| `Purchase` | `(id_tenant, id_tercero, numero_factura_compra)` | `uk_compra_tenant_supplier_invoice_number` (V3) |
 
 `TENANTS.slug_tenant` es la excepcion: unico global (`uk_tenant_slug`), porque el login lo
 usa para saber a que tenant entrar. El registro lo guarda en minusculas y lo compara sin

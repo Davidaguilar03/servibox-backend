@@ -39,7 +39,8 @@ import static org.assertj.core.api.Assertions.fail;
  * Reglas del parseo del diccionario: una columna con UK es unica por si sola, salvo que su
  * descripcion diga que la UK va "con id_tenant" (el diccionario lo escribe "UK compuesta
  * con id_tenant" y, en TERCEROS, "UK con id_tenant"): entonces la unica es (id_tenant,
- * columna). PK en dos columnas de la misma tabla es clave compuesta. Las FK salen de la
+ * columna). Si dice "con id_tenant e id_tercero" (COMPRAS, desde V3), es (id_tenant,
+ * id_tercero, columna). PK en dos columnas de la misma tabla es clave compuesta. Las FK salen de la
  * seccion "Claves foraneas".
  *
  * Los tipos se comparan por familia. El diccionario usa BIGINT, INTEGER, VARCHAR, NUMERIC,
@@ -70,7 +71,7 @@ class SchemaConformanceTest {
     // ---- Diccionario ----
 
     record ColumnaDiccionario(String nombre, String tipo, Integer longitud, Integer escala, boolean nula,
-                              boolean pk, boolean uk, boolean ukConTenant) {
+                              boolean pk, boolean uk, boolean ukConTenant, boolean ukConTercero) {
     }
 
     record Fk(String columna, String tablaReferenciada) implements Comparable<Fk> {
@@ -126,7 +127,7 @@ class SchemaConformanceTest {
                 }
                 tablas.get(tabla).put(nombre, new ColumnaDiccionario(nombre, tipo, longitud, escala,
                         mayus(celdas[4]).equals("NULL"), clave.contains("PK"), clave.contains("UK"),
-                        descripcion.contains("con id_tenant")));
+                        descripcion.contains("con id_tenant"), descripcion.contains("con id_tenant e id_tercero")));
             } else if (seccion.equals("Claves foraneas")) {
                 fks.computeIfAbsent(mayus(celdas[1]), t -> new TreeSet<>())
                         .add(new Fk(mayus(celdas[2]), mayus(celdas[3])));
@@ -288,9 +289,13 @@ class SchemaConformanceTest {
         Set<Set<String>> ukEsperadas = new HashSet<>();
         for (ColumnaDiccionario columna : esperadas.values()) {
             if (columna.uk()) {
-                ukEsperadas.add(columna.ukConTenant()
-                        ? new TreeSet<>(Set.of("ID_TENANT", columna.nombre()))
-                        : new TreeSet<>(Set.of(columna.nombre())));
+                if (columna.ukConTercero()) {
+                    ukEsperadas.add(new TreeSet<>(Set.of("ID_TENANT", "ID_TERCERO", columna.nombre())));
+                } else {
+                    ukEsperadas.add(columna.ukConTenant()
+                            ? new TreeSet<>(Set.of("ID_TENANT", columna.nombre()))
+                            : new TreeSet<>(Set.of(columna.nombre())));
+                }
             }
         }
         Map<String, Set<String>> indices = new HashMap<>();

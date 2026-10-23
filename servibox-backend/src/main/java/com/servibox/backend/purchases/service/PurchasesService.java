@@ -17,6 +17,7 @@ import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
 import com.servibox.backend.treasury.service.TreasuryService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -82,7 +83,7 @@ public class PurchasesService {
                                  String paymentMethod,
                                  List<LineaCompra> lineas) {
 
-        validarNumeroFacturaUnico(invoiceNumber, null);
+        validarNumeroFacturaUnico(invoiceNumber, proveedor, null);
         // Toda compra tiene tercero (id_tercero NOT NULL en el diccionario), y no hay
         // proveedor por defecto: una factura de compra siempre la expide alguien.
         if (proveedor == null) {
@@ -120,7 +121,18 @@ public class PurchasesService {
         compra.setSubtotal(0.0);
         compra.setIvaTotal(0.0);
         compra.setTotal(0.0);
-        Purchase guardada = purchaseRepository.save(compra);
+        Purchase guardada;
+        try {
+            guardada = purchaseRepository.save(compra);
+        } catch (DataIntegrityViolationException ex) {
+            // Dos compras simultaneas del mismo proveedor con el mismo numero pasan las dos la
+            // validacion de arriba; la segunda choca aqui con la restriccion. Sin reintento: 409.
+            if (String.valueOf(ex.getMostSpecificCause().getMessage()).toLowerCase()
+                    .contains("uk_compra_tenant_supplier_invoice_number")) {
+                throw new DuplicatePurchaseInvoiceNumberException(invoiceNumber, proveedor.getName());
+            }
+            throw ex;
+        }
 
         double subtotal = 0.0;
         double ivaTotal = 0.0;
@@ -357,21 +369,24 @@ public class PurchasesService {
     }
 
     /**
-     * La restriccion uk_compra_tenant_invoice_number tambien lo impide, pero salta como un
-     * error crudo. Esto lo convierte en un mensaje legible antes del INSERT.
+     * El numero es unico por proveedor dentro del tenant, sin distinguir mayusculas y con las
+     * anuladas incluidas. La restriccion uk_compra_tenant_supplier_invoice_number tambien lo
+     * impide, pero distingue mayusculas y salta como un error crudo. Sin proveedor no hay con
+     * que comparar: crearFactura lo rechaza enseguida con su propio 400.
      */
-    private void validarNumeroFacturaUnico(String invoiceNumber, Long idPropio) {
+    private void validarNumeroFacturaUnico(String invoiceNumber, Counterparty proveedor, Long idPropio) {
         if (invoiceNumber == null || invoiceNumber.isBlank()) {
             throw new InvalidPurchaseOperationException("La factura de compra necesita un numero");
         }
         Long tenantId = TenantContext.getTenantId();
-        if (tenantId == null) {
+        if (tenantId == null || proveedor == null) {
             return;
         }
-        purchaseRepository.findByInvoiceNumberIgnoreCaseAndTenantId(invoiceNumber, tenantId)
+        purchaseRepository.findByInvoiceNumberIgnoreCaseAndSupplierIdAndTenantId(invoiceNumber, proveedor.getId(),
+                        tenantId)
                 .filter(existente -> !existente.getId().equals(idPropio))
                 .ifPresent(existente -> {
-                    throw new DuplicatePurchaseInvoiceNumberException(invoiceNumber);
+                    throw new DuplicatePurchaseInvoiceNumberException(invoiceNumber, proveedor.getName());
                 });
     }
 

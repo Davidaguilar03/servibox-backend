@@ -7,7 +7,7 @@ Fuente: Diccionario de Datos de ServiBox (informe UPTC-EISC-SB-01) y su diagrama
 ## Reglas generales
 
 * Multi-tenant: base compartida y esquema compartido. La columna `id_tenant` esta en todas las tablas excepto `TENANTS` y `CATEGORIA_IMPUESTOS`. En la capa JPA el aislamiento lo da el `@Filter` de Hibernate.
-* Unicos compuestos con `id_tenant`: `(id_tenant, username)` en USUARIOS, `(id_tenant, nombre_cuenta)` en CUENTAS, `(id_tenant, numero_documento)` en TERCEROS, `(id_tenant, numero_factura_compra)` en COMPRAS, `(id_tenant, numero_factura_venta)` en VENTAS, `(id_tenant, codigo_producto)` en PRODUCTOS.
+* Unicos compuestos con `id_tenant`: `(id_tenant, username)` en USUARIOS, `(id_tenant, nombre_cuenta)` en CUENTAS, `(id_tenant, numero_documento)` en TERCEROS, `(id_tenant, id_tercero, numero_factura_compra)` en COMPRAS (desde V3; antes `(id_tenant, numero_factura_compra)`), `(id_tenant, numero_factura_venta)` en VENTAS, `(id_tenant, codigo_producto)` en PRODUCTOS.
 * Motor: PostgreSQL 16. Tipos fisicos: identificadores y claves foraneas `BIGINT`; texto `VARCHAR(n)`; valores de enum `VARCHAR(n)` con su longitud, no tipo ENUM; montos en COP `NUMERIC(14,2)`; tasas y porcentajes como fraccion `NUMERIC(8,6)` (0.19 es 19 por ciento); fechas de negocio (`fecha_movimiento`, `fecha_compra`, `fecha_vencimiento_compra`, `fecha_venta`, `fecha_vencimiento_venta`) `DATE`; fechas de auditoria (`created_at`, `updated_at`, `fecha_creacion_tenant`) `TIMESTAMP WITHOUT TIME ZONE` en UTC; banderas `BOOLEAN`.
 * Integridad referencial: `ON DELETE RESTRICT` en todas las claves foraneas: nada con historial transaccional se elimina.
 * Normalizacion aplicada: (1) `MOVIMIENTOS` unifica gastos operativos, ingresos ocasionales, transferencias, pagos de compras y recaudos de ventas; `tipo_movimiento` da el flujo y `categoria_movimiento` el concepto. (2) `TERCEROS` unifica clientes y proveedores; `tipo_tercero` vale CLIENTE, PROVEEDOR o AMBOS.
@@ -123,7 +123,7 @@ Modulo: Comercial.
 | id_compra | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico de la factura de adquisicion de mercancia. |
 | id_tenant | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TENANTS(id_tenant). |
 | id_tercero | BIGINT (I) | 8 bytes | NOT NULL | FK | FK a TERCEROS(id_tercero). Proveedor que expide la factura. |
-| numero_factura_compra | VARCHAR | 50 | NOT NULL | UK | Consecutivo oficial de la factura fisica o electronica del proveedor (UK compuesta con id_tenant). |
+| numero_factura_compra | VARCHAR | 50 | NOT NULL | UK | Consecutivo oficial de la factura fisica o electronica del proveedor (UK compuesta con id_tenant e id_tercero: unico por proveedor dentro del tenant). |
 | fecha_compra | DATE (D) | 4 bytes | NOT NULL | - | Fecha de expedicion formal de la factura de compra. |
 | fecha_vencimiento_compra | DATE (D) | 4 bytes | NULL | - | Fecha limite de pago acordada para compras a credito comercial. |
 | forma_pago_compra | VARCHAR | 20 | NOT NULL | - | Modalidad de pago comercial: CONTADO o CREDITO. |

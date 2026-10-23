@@ -96,6 +96,7 @@ class FlywayMigrationTest {
         MigrateResult resultado = Flyway.configure()
                 .dataSource(url, "sa", "")
                 .locations(flyway.getConfiguration().getLocations())
+                .target("2")
                 .load()
                 .migrate();
 
@@ -116,6 +117,75 @@ class FlywayMigrationTest {
             assertThat(usuario.getString("username")).isEqualTo("admin");
             assertThat(usuario.getString("nombre_completo")).isNull();
         }
+    }
+
+    /**
+     * V3 sobre una base en V2 con compras de dos proveedores: las conserva, y la unicidad pasa
+     * a ser por proveedor (el mismo numero vale para otro proveedor, no para el mismo).
+     */
+    @Test
+    void v3AplicaSobreV2ConComprasYHaceElNumeroUnicoPorProveedor() throws SQLException {
+        String url = "jdbc:h2:mem:flyway-v2-" + UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1";
+        Flyway hastaV2 = Flyway.configure()
+                .dataSource(url, "sa", "")
+                .locations(flyway.getConfiguration().getLocations())
+                .target("2")
+                .load();
+        assertThat(hastaV2.migrate().migrationsExecuted).isEqualTo(2);
+
+        try (Connection conexion = DriverManager.getConnection(url, "sa", "")) {
+            conexion.createStatement().executeUpdate("INSERT INTO tenants (nombre_tenant, slug_tenant, activo_tenant, "
+                    + "fecha_creacion_tenant) VALUES ('Taller V2', 'taller-v2', TRUE, CURRENT_TIMESTAMP)");
+            for (String[] proveedor : new String[][]{{"Llantas del Norte", "800000001"}, {"Lubricantes SAS", "800000002"}}) {
+                conexion.createStatement().executeUpdate("INSERT INTO terceros (id_tenant, tipo_tercero, "
+                        + "nombre_razon_social, tipo_documento, numero_documento, created_at, updated_at) SELECT "
+                        + "id_tenant, 'PROVEEDOR', '" + proveedor[0] + "', 'NIT', '" + proveedor[1]
+                        + "', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM tenants");
+            }
+            insertarCompra(conexion, "800000001", "FAC-1");
+            insertarCompra(conexion, "800000002", "FAC-2");
+        }
+
+        MigrateResult resultado = Flyway.configure()
+                .dataSource(url, "sa", "")
+                .locations(flyway.getConfiguration().getLocations())
+                .load()
+                .migrate();
+
+        assertThat(resultado.success).isTrue();
+        assertThat(resultado.migrationsExecuted).isEqualTo(1);
+        assertThat(resultado.targetSchemaVersion).isEqualTo("3");
+        try (Connection conexion = DriverManager.getConnection(url, "sa", "")) {
+            ResultSet compras = conexion.createStatement().executeQuery("SELECT c.numero_factura_compra, "
+                    + "t.numero_documento, c.total_compra, c.estado_compra FROM compras c "
+                    + "JOIN terceros t ON t.id_tercero = c.id_tercero ORDER BY c.numero_factura_compra");
+            assertThat(compras.next()).isTrue();
+            assertThat(compras.getString(1)).isEqualTo("FAC-1");
+            assertThat(compras.getString(2)).isEqualTo("800000001");
+            assertThat(compras.getBigDecimal(3)).isEqualByComparingTo("119000.00");
+            assertThat(compras.getString(4)).isEqualTo("PENDIENTE");
+            assertThat(compras.next()).isTrue();
+            assertThat(compras.getString(1)).isEqualTo("FAC-2");
+            assertThat(compras.getString(2)).isEqualTo("800000002");
+            assertThat(compras.next()).isFalse();
+
+            // El mismo numero para el otro proveedor ya cabe; para el mismo, la base lo frena.
+            insertarCompra(conexion, "800000002", "FAC-1");
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> insertarCompra(conexion, "800000001", "FAC-1"))
+                    .isInstanceOf(SQLException.class)
+                    .hasMessageContaining("UK_COMPRA_TENANT_SUPPLIER_INVOICE_NUMBER");
+            // La base distingue mayusculas: "fac-1" no choca alli (lo frena el service).
+            insertarCompra(conexion, "800000001", "fac-1");
+        }
+    }
+
+    private static void insertarCompra(Connection conexion, String documentoProveedor, String numero)
+            throws SQLException {
+        conexion.createStatement().executeUpdate("INSERT INTO compras (id_tenant, id_tercero, numero_factura_compra, "
+                + "fecha_compra, forma_pago_compra, estado_compra, subtotal_compra, iva_total_compra, total_compra, "
+                + "created_at, updated_at) SELECT id_tenant, id_tercero, '" + numero + "', CURRENT_DATE, 'CREDITO', "
+                + "'PENDIENTE', 100000, 19000, 119000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM terceros "
+                + "WHERE numero_documento = '" + documentoProveedor + "'");
     }
 
     @Test
