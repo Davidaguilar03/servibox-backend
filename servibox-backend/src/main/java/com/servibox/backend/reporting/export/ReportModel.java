@@ -12,6 +12,8 @@ import java.util.List;
  */
 public record ReportModel(
         String tenantName,
+        /** Linea "NIT <valor>" bajo el nombre. Null si el tenant no tiene NIT. */
+        String tenantNit,
         String title,
         LocalDate desde,
         LocalDate hasta,

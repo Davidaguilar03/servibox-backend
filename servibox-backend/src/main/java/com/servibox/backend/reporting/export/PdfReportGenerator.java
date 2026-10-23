@@ -72,6 +72,9 @@ public class PdfReportGenerator {
         documento.open();
 
         documento.add(new Paragraph(r.tenantName(), fuente(14, Font.BOLD, Color.BLACK)));
+        if (r.tenantNit() != null) {
+            documento.add(new Paragraph("NIT " + r.tenantNit(), fuente(10, Font.NORMAL, GRIS)));
+        }
         documento.add(new Paragraph(r.title(), fuente(12, Font.BOLD, Color.BLACK)));
         documento.add(new Paragraph("Período: " + r.desde().format(FECHA) + " a " + r.hasta().format(FECHA),
                 fuente(10, Font.NORMAL, GRIS)));

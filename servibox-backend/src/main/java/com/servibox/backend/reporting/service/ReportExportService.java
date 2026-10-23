@@ -50,13 +50,14 @@ public class ReportExportService {
     @Transactional(readOnly = true)
     public ReportModel estadoDeResultados(LocalDate desde, LocalDate hasta) {
         validarRango(desde, hasta);
+        Tenant tenant = tenantActual();
         KpisResponse kpis = reportingService.getPeriodKpis(desde, hasta);
         List<List<Object>> filas = List.of(
                 List.of("Ventas totales", kpis.totalSales()),
                 List.of("Compras totales", negativo(kpis.totalPurchases())),
                 List.of("Utilidad bruta", kpis.grossProfit()),
                 List.of("Gastos operativos", negativo(kpis.operatingExpenses())));
-        return new ReportModel(nombreTenant(), "Estado de resultados", desde, hasta, null,
+        return new ReportModel(tenant.getName(), tenant.getNit(), "Estado de resultados", desde, hasta, null,
                 List.of(new Column("Concepto", ColumnType.TEXT, 60), new Column("Valor", ColumnType.MONEY, 22)),
                 filas, SIN_MOVIMIENTOS, List.of(), new Total("Utilidad neta", kpis.netProfit()),
                 "Las facturas anuladas no se incluyen", false);
@@ -69,6 +70,7 @@ public class ReportExportService {
     @Transactional(readOnly = true)
     public ReportModel movimientos(LocalDate desde, LocalDate hasta, Long accountId) {
         validarRango(desde, hasta);
+        Tenant tenant = tenantActual();
         Account cuenta = null;
         if (accountId != null) {
             cuenta = treasuryService.findAccountById(accountId)
@@ -106,7 +108,7 @@ public class ReportExportService {
             totales.add(new Total("Saldo final", treasuryService.saldoAl(cuenta, hasta)));
         }
 
-        return new ReportModel(nombreTenant(), "Movimientos de cuentas", desde, hasta,
+        return new ReportModel(tenant.getName(), tenant.getNit(), "Movimientos de cuentas", desde, hasta,
                 cuenta != null ? "Cuenta: " + cuenta.getName() : "Todas las cuentas",
                 List.of(new Column("Fecha", ColumnType.DATE, 12),
                         new Column("Cuenta", ColumnType.TEXT, 18),
@@ -137,9 +139,8 @@ public class ReportExportService {
     }
 
     /** El tenant es el del token; TENANTS no es una entidad por tenant, asi que va por id. */
-    private String nombreTenant() {
+    private Tenant tenantActual() {
         return tenantRepository.findById(TenantContext.getTenantId())
-                .map(Tenant::getName)
                 .orElseThrow(() -> new IllegalStateException("No hay un tenant activo"));
     }
 

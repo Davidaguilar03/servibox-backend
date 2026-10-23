@@ -216,6 +216,24 @@ Cualquier excepcion en el camino deshace todo: no quedan tenants, usuarios ni ca
 medias. No se crea configuracion financiera: `GET /api/inventory/financial-settings` da
 ceros hasta que el taller la guarde.
 
+### Perfil del tenant
+
+`tenant.TenantController`, con JWT. Siempre el tenant del token (`TenantContext`), por id:
+TENANTS no es una entidad por tenant y el filtro de Hibernate no aplica.
+
+* **`GET /api/tenant`**: cualquier rol. `{"name", "slug", "nit", "phone"}`; `nit` y `phone`
+  son null en los tenants anteriores al registro publico.
+* **`PUT /api/tenant`**: body `name`, `nit`, `phone`; devuelve el perfil guardado. Solo
+  ADMIN: el controlador mira la authority `ROLE_ADMIN` que pone `JwtAuthenticationFilter`
+  (rol en base) y si no esta lanza `AdminRequiredException`, 403 "Solo un administrador
+  puede editar los datos de la serviteca", antes de validar nada. Las reglas son las del
+  registro (`TenantRegistrationService.validarNombreComercial`, `validarNit`,
+  `validarTelefono`, 400 con el mismo mensaje), con `nit` y `phone` opcionales: en blanco
+  o ausentes se guardan como null. El `slug` no esta en el cuerpo; si llega, se ignora.
+
+Sin token, los dos son 401 como cualquier ruta protegida. El nombre editado sale en el
+siguiente login y en el encabezado de los reportes.
+
 ### Verificacion de usuario activo en cada request
 
 La firma de un JWT solo prueba que el token se emitio en algun momento; no dice nada del
@@ -247,6 +265,7 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | `InvalidRegistrationException` (dato del registro publico) | 400 | mensaje de la regla |
 | `DuplicateTenantSlugException` (slug ya registrado) | 409 | "Ya existe una serviteca con el identificador X" |
 | `RegistrationDisabledException` (`servibox.registration.enabled=false`) | 403 | "El registro de nuevas servitecas esta deshabilitado" |
+| `AdminRequiredException` (editar el perfil del tenant sin rol ADMIN) | 403 | "Solo un administrador puede editar los datos de la serviteca" |
 | `InsufficientStockException`, `InsufficientBalanceException` | 409 | mensaje de la excepcion |
 | `InvalidCredentialsException` y `AuthenticationException` | 401 | "Credenciales invalidas" |
 | `MethodArgumentNotValidException` (fallo de `@Valid`) | 400 | "Peticion invalida" |
@@ -990,7 +1009,7 @@ Rangos: `desde` y `hasta` son obligatorios en periodo, movimientos e IVA; si fal
   `validarRango`; a lo sumo `servibox.reporting.max-export-rows` movimientos (20000 por
   defecto, `REPORTING_MAX_EXPORT_ROWS`). Pasarse es **400**.
 * Formato: PDF A4 vertical, margenes de 36 pt, Helvetica estandar; encabezado con el nombre
-  del tenant, el titulo, el periodo y una linea roja de marca; encabezado de tabla que se
+  del tenant, la linea "NIT <valor>" bajo el nombre si el tenant tiene NIT, el titulo, el periodo y una linea roja de marca; encabezado de tabla que se
   repite en cada pagina; pie "Generado el dd/MM/yyyy HH:mm · tenant · Pag. N de M" con la
   hora del reloj de negocio, estampado en una segunda pasada. Excel: una hoja, encabezado
   en filas combinadas, titulos de la tabla inmovilizados, filtro en movimientos, montos como

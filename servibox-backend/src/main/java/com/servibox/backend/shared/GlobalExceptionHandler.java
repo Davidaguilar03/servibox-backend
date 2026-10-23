@@ -16,6 +16,7 @@ import com.servibox.backend.purchases.service.InvalidPurchaseOperationException;
 import com.servibox.backend.sales.service.DuplicateInvoiceNumberException;
 import com.servibox.backend.sales.service.InsufficientStockException;
 import com.servibox.backend.sales.service.InvalidSaleOperationException;
+import com.servibox.backend.tenant.AdminRequiredException;
 import com.servibox.backend.treasury.service.DuplicateAccountNameException;
 import com.servibox.backend.treasury.service.InvalidTransferException;
 import com.servibox.backend.treasury.service.InvalidMovementOperationException;
@@ -161,6 +162,12 @@ public class GlobalExceptionHandler {
     /** servibox.registration.enabled=false. */
     @ExceptionHandler(RegistrationDisabledException.class)
     public ResponseEntity<ErrorResponse> manejarRegistroDeshabilitado(RegistrationDisabledException ex) {
+        return construir(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
+    /** Editar el perfil del tenant sin rol ADMIN. */
+    @ExceptionHandler(AdminRequiredException.class)
+    public ResponseEntity<ErrorResponse> manejarAdminRequerido(AdminRequiredException ex) {
         return construir(HttpStatus.FORBIDDEN, ex.getMessage());
     }
 
