@@ -2,16 +2,20 @@ package com.servibox.backend.counterparties.controller;
 
 import com.servibox.backend.counterparties.dto.CounterpartyRequest;
 import com.servibox.backend.counterparties.dto.CounterpartyResponse;
+import com.servibox.backend.counterparties.dto.CounterpartyUpdateRequest;
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.counterparties.entity.CounterpartyRole;
 import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.counterparties.service.DuplicateCounterpartyDocumentException;
+import com.servibox.backend.shared.ResourceNotFoundException;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -51,5 +55,14 @@ public class CounterpartiesController {
                 request.documentNumber(), request.name(), request.email(), request.phone());
         HttpStatus status = existente.isPresent() ? HttpStatus.OK : HttpStatus.CREATED;
         return ResponseEntity.status(status).body(CounterpartyResponse.from(tercero));
+    }
+
+    /** Edita los datos del tercero; el rol no se toca. El Consumidor final es 409. */
+    @PutMapping("/{id}")
+    public CounterpartyResponse editar(@PathVariable Long id, @RequestBody CounterpartyUpdateRequest request) {
+        Counterparty tercero = counterpartyService.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Tercero no encontrado: " + id));
+        return CounterpartyResponse.from(counterpartyService.actualizar(tercero, request.name(),
+                request.documentType(), request.documentNumber(), request.email(), request.phone()));
     }
 }

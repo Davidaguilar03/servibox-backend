@@ -12,6 +12,43 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-23: Edicion de terceros (PUT /api/counterparties/{id})
+
+* Decision: `PUT /api/counterparties/{id}` con `name`, `documentType`, `documentNumber`,
+  `email` y `phone`; responde 200 con el mismo `CounterpartyResponse` del listado. La logica
+  esta en `CounterpartyService.actualizar`; el tercero se busca con `findByIdAndTenantId`.
+  * **Rol no editable.** `CounterpartyUpdateRequest` no tiene `role`; si llega en el JSON se
+    ignora sin error. El rol lo dan las facturas (`exigirRol`) y la promocion a AMBOS por
+    documento: bajar un AMBOS a CLIENTE dejaria compras ya emitidas con un proveedor que ya
+    no lo es. La promocion por POST sigue igual.
+  * **Validacion con mensajes especificos.** Sin `@Valid`, igual que `PUT /api/tenant`, para
+    no caer en el "Peticion invalida" generico. Textos recortados; nombre obligatorio y
+    hasta 150, tipo de documento obligatorio, numero obligatorio y hasta 25, correo hasta
+    150 y celular hasta 25 (las longitudes de la entidad, asi nunca sale un 500 de columna).
+    Correo y celular en blanco quedan en null. `InvalidCounterpartyException` (400); los
+    mensajes de campo vacio son los de `crear`. Un `documentType` fuera del enum es el 400
+    de siempre con los valores permitidos. El correo no se valida por formato porque el
+    POST tampoco lo hace.
+  * **Documento repetido.** Un documento de otro tercero del tenant es 409 "Ya existe un
+    tercero con el documento N" (la regla de `crear` y de `uk_tercero_tenant_document`);
+    dejar el propio no choca. La comparacion es exacta, como en el POST.
+  * **Consumidor final protegido.** El tercero con documento `222222222222` responde 409 "El
+    tercero Consumidor final es del sistema y no se puede editar"
+    (`SystemCounterpartyException`). Lo reutilizan `consumidorFinal()` y el registro por ese
+    documento: cambiarle el documento haria crear otro y cambiarle el nombre confundiria
+    todas las ventas sin cliente. No hay otro tercero de sistema.
+  * **Facturas ya emitidas.** VENTAS y COMPRAS guardan solo `id_tercero` (FK), sin copia
+    del nombre, documento ni correo; sus respuestas arman el tercero desde la fila actual,
+    asi que una factura ya emitida muestra los datos nuevos. Asumido: no hay una foto
+    fiscal del tercero al facturar.
+  * **Sin DELETE ni desactivacion.** Las FK de facturas son `ON DELETE RESTRICT` y un borrado
+    dejaria facturas sin tercero; desactivar pediria una columna nueva (migracion) y reglas
+    en ventas y compras. Fuera de alcance.
+* Alternativas consideradas: `@Valid` con `@Size` (mensaje generico); permitir editar el rol
+  (ver arriba); guardar una copia de los datos en la factura (migracion).
+* Motivo: lo minimo para corregir datos de un tercero sin tocar el esquema, el POST ni las
+  reglas de rol.
+
 ## 2026-10-22: Perfil del tenant (GET y PUT /api/tenant) y NIT en los reportes
 
 * Decision: `GET /api/tenant` devuelve `name`, `slug`, `nit` y `phone` del tenant del token

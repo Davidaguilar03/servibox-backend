@@ -662,8 +662,13 @@ venta y el proveedor de una compra (paso 1 del refactor de normalizacion, ver
   el documento N como ROL". Documento que existe con el otro rol: pasa a `AMBOS` por
   `obtenerOCrear` y responde **200** con el tercero existente (nombre y tipo de documento no
   cambian; correo y celular solo completan los vacios).
-* No hay `PUT` ni `DELETE`. Ver [03-DECISIONS.md](03-DECISIONS.md), entrada "Endpoints de
-  terceros: alta y listado".
+* `PUT /api/counterparties/{id}` con `CounterpartyUpdateRequest` (`name`, `documentType`,
+  `documentNumber`, `email`, `phone`; sin `role`, si llega se ignora): **200** con el
+  `CounterpartyResponse`. Validacion en `CounterpartyService.actualizar` con mensajes
+  especificos (**400**); documento de otro tercero del tenant **409**; Consumidor final
+  **409**; id inexistente o de otro tenant **404**; id no numerico **400**.
+* No hay `DELETE`. Ver [03-DECISIONS.md](03-DECISIONS.md), entradas "Endpoints de
+  terceros: alta y listado" y "Edicion de terceros".
 
 ### Modulo Sales
 
