@@ -6,6 +6,7 @@ import com.servibox.backend.auth.InvalidRegistrationException;
 import com.servibox.backend.auth.RegistrationDisabledException;
 import com.servibox.backend.counterparties.service.DuplicateCounterpartyDocumentException;
 import com.servibox.backend.counterparties.service.InvalidCounterpartyException;
+import com.servibox.backend.counterparties.service.SystemCounterpartyException;
 import com.servibox.backend.inventory.service.DuplicateCategoryNameException;
 import com.servibox.backend.inventory.service.DuplicateFinancialSettingsException;
 import com.servibox.backend.inventory.service.DuplicateProductCodeException;
@@ -120,6 +121,12 @@ public class GlobalExceptionHandler {
     /** Documento de tercero repetido dentro del tenant. */
     @ExceptionHandler(DuplicateCounterpartyDocumentException.class)
     public ResponseEntity<ErrorResponse> manejarTerceroDuplicado(DuplicateCounterpartyDocumentException ex) {
+        return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** Editar el Consumidor final. */
+    @ExceptionHandler(SystemCounterpartyException.class)
+    public ResponseEntity<ErrorResponse> manejarTerceroDelSistema(SystemCounterpartyException ex) {
         return construir(HttpStatus.CONFLICT, ex.getMessage());
     }
 

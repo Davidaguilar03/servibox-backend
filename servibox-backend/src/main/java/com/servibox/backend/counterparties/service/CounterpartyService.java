@@ -99,6 +99,58 @@ public class CounterpartyService {
     }
 
     /**
+     * Edicion por PUT /api/counterparties/{id} de un tercero que ya se busco en el tenant. El
+     * rol no cambia. Los textos se recortan; correo y celular en blanco quedan en null. Las
+     * longitudes son las de la entidad, para que un valor largo sea 400 y no un error de
+     * columna. Un documento de otro tercero del tenant es 409; el propio, no.
+     */
+    @Transactional
+    public Counterparty actualizar(Counterparty tercero, String nombre, DocumentType tipoDocumento,
+                                   String numeroDocumento, String correo, String celular) {
+        if (DOCUMENTO_CONSUMIDOR_FINAL.equals(tercero.getDocumentNumber())) {
+            throw new SystemCounterpartyException();
+        }
+        nombre = recortar(nombre);
+        numeroDocumento = recortar(numeroDocumento);
+        correo = enBlancoANull(correo);
+        celular = enBlancoANull(celular);
+        if (vacio(nombre)) {
+            throw new InvalidCounterpartyException("El tercero necesita un nombre o razon social");
+        }
+        if (nombre.length() > 150) {
+            throw new InvalidCounterpartyException("El nombre o razon social admite hasta 150 caracteres");
+        }
+        if (tipoDocumento == null) {
+            throw new InvalidCounterpartyException("El tercero necesita un tipo de documento");
+        }
+        if (vacio(numeroDocumento)) {
+            throw new InvalidCounterpartyException("El tercero necesita un numero de documento");
+        }
+        if (numeroDocumento.length() > 25) {
+            throw new InvalidCounterpartyException("El numero de documento admite hasta 25 caracteres");
+        }
+        if (correo != null && correo.length() > 150) {
+            throw new InvalidCounterpartyException("El correo admite hasta 150 caracteres");
+        }
+        if (celular != null && celular.length() > 25) {
+            throw new InvalidCounterpartyException("El celular admite hasta 25 caracteres");
+        }
+        String documento = numeroDocumento;
+        findByDocumentNumber(documento)
+                .filter(existente -> !existente.getId().equals(tercero.getId()))
+                .ifPresent(existente -> {
+                    throw new DuplicateCounterpartyDocumentException(documento);
+                });
+
+        tercero.setName(nombre);
+        tercero.setDocumentType(tipoDocumento);
+        tercero.setDocumentNumber(numeroDocumento);
+        tercero.setEmail(correo);
+        tercero.setPhone(celular);
+        return counterpartyRepository.save(tercero);
+    }
+
+    /**
      * El tercero de una venta (rol CLIENTE) o de una compra (rol PROVEEDOR), buscado por
      * documento dentro del tenant:
      *
@@ -173,5 +225,13 @@ public class CounterpartyService {
 
     private static boolean vacio(String valor) {
         return valor == null || valor.isBlank();
+    }
+
+    private static String recortar(String valor) {
+        return valor == null ? null : valor.trim();
+    }
+
+    private static String enBlancoANull(String valor) {
+        return vacio(valor) ? null : valor.trim();
     }
 }
