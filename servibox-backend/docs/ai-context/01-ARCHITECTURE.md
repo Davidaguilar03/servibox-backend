@@ -265,8 +265,9 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | `InvalidRegistrationException` (dato del registro publico) | 400 | mensaje de la regla |
 | `DuplicateTenantSlugException` (slug ya registrado) | 409 | "Ya existe una serviteca con el identificador X" |
 | `RegistrationDisabledException` (`servibox.registration.enabled=false`) | 403 | "El registro de nuevas servitecas esta deshabilitado" |
-| `AdminRequiredException` (editar el perfil del tenant sin rol ADMIN) | 403 | "Solo un administrador puede editar los datos de la serviteca" |
-| `InsufficientStockException`, `InsufficientBalanceException` | 409 | mensaje de la excepcion |
+| `AdminRequiredException` (sin rol ADMIN: perfil del tenant, configuracion financiera, alta o edicion de categorias) | 403 | "Solo un administrador puede editar los datos de la serviteca", "...editar la configuracion financiera" o "...crear o editar categorias" |
+| `SystemCounterpartyException` (editar el Consumidor final o usar su documento) | 409 | mensaje de la excepcion |
+| `InsufficientStockException`, `InsufficientBalanceException` | 409 | mensaje de la excepcion; los montos de saldo con `Moneda.formatear` ("hay $ 3.250.000 y se requieren $ 4.212.600") |
 | `InvalidCredentialsException` y `AuthenticationException` | 401 | "Credenciales invalidas" |
 | `MethodArgumentNotValidException` (fallo de `@Valid`) | 400 | "Peticion invalida" |
 | `HttpMessageNotReadableException` (JSON mal formado o valor del tipo equivocado) | 400 | Si el valor es de un enum: "Valor invalido 'X' en el campo f. Valores permitidos: ..."; si no, un mensaje generico |
@@ -414,12 +415,17 @@ la categoria y rehace el precio sugerido de todos sus productos.
 
 **Endpoints** (todos requieren JWT)
 
-* `GET` y `POST` `/api/inventory/categories`
-* `PUT /api/inventory/categories/{id}`: mismo cuerpo que el POST (`CategoryRequest`).
-  Reemplaza todos los campos y el conjunto de impuestos, y rehace los precios de los
-  productos de la categoria. Nombre repetido en el tenant (sin contar la propia) **409**;
-  `taxTypeId` que no es del tenant **400**; categoria de otro tenant **404**.
-* `GET` y `POST` `/api/inventory/products`
+* `GET` y `POST` `/api/inventory/categories`. El POST exige rol ADMIN (**403**) y aplica
+  las mismas reglas que el PUT: nombre repetido **409**, `taxTypeId` ajeno **400** y rangos.
+* `PUT /api/inventory/categories/{id}`: mismo cuerpo que el POST (`CategoryRequest`). Solo
+  ADMIN (**403**, antes de validar el cuerpo). Reemplaza todos los campos y el conjunto de
+  impuestos, y rehace los precios de los productos de la categoria. Nombre repetido en el
+  tenant (sin contar la propia) **409**; `taxTypeId` que no es del tenant **400**;
+  categoria de otro tenant **404**. Rangos en POST y PUT (**400**): umbrales no negativos,
+  rojo no mayor que amarillo, margen en [0, 1), nombre hasta 100.
+* `GET` y `POST` `/api/inventory/products`. Codigo hasta 50, descripcion hasta 255, costo y
+  stock no negativos (**400**, tambien en el PUT salvo el stock). POST y PUT devuelven
+  `taxAmount` y `suggestedPrice` a 2 decimales (HALF_UP), como el GET.
 * `GET /api/inventory/products/{id}`
 * `PUT /api/inventory/products/{id}`: `code`, `description`, `purchaseCost`, `categoryId`
   (`ProductUpdateRequest`). `quantity` no se edita: si llega se ignora. Codigo repetido
@@ -430,7 +436,8 @@ la categoria y rehace el precio sugerido de todos sus productos.
   lectura.
 * `GET` y `PUT` `/api/inventory/financial-settings` (`FinancialSettingsResponse`): sin fila
   guardada el GET devuelve todo en cero con 200. El PUT crea o actualiza la unica fila del
-  tenant por `saveFinancialSettings` (nunca 409), con las tasas entre 0 y 1 (los CHECK
+  tenant por `saveFinancialSettings` (nunca 409); solo ADMIN (**403**, antes de validar el
+  cuerpo), con las tasas entre 0 y 1 (los CHECK
   `ck_configuracion_*`; fuera de rango **400**), y rehace los precios de todos los
   productos del tenant.
 
@@ -542,7 +549,8 @@ Todas sus entidades extienden `TenantAwareEntity`.
   {destino}" y "Transferencia desde {origen}"). `notes` queda vacio. Devuelve el
   record `Transferencia(egreso, ingreso)`. Todo en una transaccion; **el dinero se
   conserva**. Rechaza con `InvalidTransferException` (**400**) cuentas iguales o monto no
-  positivo, sin mover ningun saldo ni dejar movimientos.
+  positivo, y con `InsufficientBalanceException` (**409**) un origen sin saldo para el
+  monto, sin mover ningun saldo ni dejar movimientos.
 * `registrarIngresoDeVenta` y `registrarEgresoDeCompra`: crean los movimientos
   `RECAUDO_VENTA` (con `sale`) y `PAGO_COMPRA` (con `purchase`) del contado, de cada abono
   y de cada pago. El de compra exige saldo suficiente (`exigirSaldoSuficiente`).
@@ -583,7 +591,8 @@ historia en [03-DECISIONS.md](03-DECISIONS.md).
   `saleId` o `purchaseId`
 * `POST /api/treasury/movements`: movimiento manual. Cuerpo `MovementRequest`:
   `accountId`, `category` (solo `GASTO_OPERATIVO` o `INGRESO_OCASIONAL`, otra es 400),
-  `concept`, `amount`, `date` (opcional, hoy por defecto) y `notes` (opcional)
+  `concept`, `amount`, `date` (opcional, hoy por defecto) y `notes` (opcional). `concept`
+  y `notes` hasta 255 caracteres (**400**, tambien en el PUT); no se valida saldo
 * `PUT /api/treasury/movements/{id}`: mismo cuerpo; la `category` tiene que ser la que ya
   tenia (si no, 400). 404 si no es del tenant. `PUT` y no `PATCH` porque el cuerpo trae
   el movimiento completo, como el formulario de Autollantas
@@ -591,7 +600,7 @@ historia en [03-DECISIONS.md](03-DECISIONS.md).
   un `/annul` porque el registro desaparece
 * `POST /api/treasury/transfers`: mismo cuerpo que antes (`originAccountId`,
   `destinationAccountId`, `concept`, `amount`); la respuesta lleva `outgoingMovementId` e
-  `incomingMovementId`
+  `incomingMovementId`. Origen sin saldo suficiente: **409**
 * `GET /api/treasury/balance` (balance global)
 
 Desaparecieron `/api/treasury/occasional-incomes` y `/api/treasury/operational-expenses`.
@@ -656,17 +665,20 @@ venta y el proveedor de una compra (paso 1 del refactor de normalizacion, ver
 * `GET /api/counterparties?role=CLIENTE|PROVEEDOR`: lista de `CounterpartyResponse`. Un
   `role` que no es del enum es 400 (`MethodArgumentTypeMismatchException`).
 * `POST /api/counterparties` con `CounterpartyRequest` (`role`, `name`, `documentType` y
-  `documentNumber` obligatorios; `email` y `phone` opcionales; longitudes de la entidad con
-  `@Size`). `role` es `CLIENTE` o `PROVEEDOR`; `AMBOS` es 400. Documento nuevo: **201**.
+  `documentNumber` obligatorios; `email` y `phone` opcionales). Sin `@Valid`: las reglas y
+  mensajes del PUT (`CounterpartyService.validarDatos`: recorte, longitudes de la entidad,
+  blancos a null, formato del correo) con **400**; el documento 222222222222 es **409**
+  "El documento 222222222222 es del Consumidor final". `role` es `CLIENTE` o `PROVEEDOR`;
+  `AMBOS` es 400. Documento nuevo: **201**.
   Documento que ya existe con el mismo rol o con `AMBOS`: **409** "Ya existe un tercero con
   el documento N como ROL". Documento que existe con el otro rol: pasa a `AMBOS` por
   `obtenerOCrear` y responde **200** con el tercero existente (nombre y tipo de documento no
   cambian; correo y celular solo completan los vacios).
 * `PUT /api/counterparties/{id}` con `CounterpartyUpdateRequest` (`name`, `documentType`,
   `documentNumber`, `email`, `phone`; sin `role`, si llega se ignora): **200** con el
-  `CounterpartyResponse`. Validacion en `CounterpartyService.actualizar` con mensajes
-  especificos (**400**); documento de otro tercero del tenant **409**; Consumidor final
-  **409**; id inexistente o de otro tenant **404**; id no numerico **400**.
+  `CounterpartyResponse`. Validacion en `CounterpartyService.validarDatos`, la misma del
+  POST, con mensajes especificos (**400**); documento de otro tercero del tenant o el
+  222222222222 **409**; Consumidor final **409**; id inexistente o de otro tenant **404**; id no numerico **400**.
 * No hay `DELETE`. Ver [03-DECISIONS.md](03-DECISIONS.md), entradas "Endpoints de
   terceros: alta y listado" y "Edicion de terceros".
 
@@ -773,14 +785,16 @@ y comparacion con Autollantas en [03-DECISIONS.md](03-DECISIONS.md).
 
 **Endpoints** (todos requieren JWT)
 
-* `POST /api/sales` (emitir factura). `invoiceNumber` es opcional, ver el paso 1 del flujo
+* `POST /api/sales` (emitir factura). `invoiceNumber` es opcional, ver el paso 1 del flujo.
+  Precio de cada linea mayor que cero; en `CREDITO`, `dueDate` obligatorio y no anterior a
+  la fecha de la factura (**400**). En `CONTADO` `dueDate` no se valida
 * `GET /api/sales/next-invoice-number`: `{"invoiceNumber": "FV-0232"}`, el numero que
   asignaria ahora un POST sin numero. No lo reserva ni escribe nada
 * `GET /api/sales`
 * `GET /api/sales/{id}`: 404 si no existe para el tenant
 * `POST /api/sales/{id}/collections` (abono): cuerpo `CollectionRequest` (`accountId`,
   `amount`, `date` opcional en `yyyy-MM-dd`: si falta es hoy en la zona de negocio, si es
-  posterior a hoy es **400**); responde **201** con el `MovementResponse` del `RECAUDO_VENTA` creado
+  posterior a hoy o anterior a la fecha de la factura es **400**); responde **201** con el `MovementResponse` del `RECAUDO_VENTA` creado
 * `POST /api/sales/{id}/annul`
 * `POST /api/sales/{id}/restore`
 
@@ -913,7 +927,7 @@ El egreso del contado al crear la compra tambien lleva la fecha de la factura.
 
 **Endpoints** (todos requieren JWT)
 
-* `POST /api/purchases`
+* `POST /api/purchases`: mismas reglas de precio y vencimiento que la venta
 * `GET /api/purchases`
 * `GET /api/purchases/{id}`: 404 si no existe para el tenant
 * `POST /api/purchases/{id}/payments`: cuerpo `PaymentRequest` (`accountId`, `amount`,

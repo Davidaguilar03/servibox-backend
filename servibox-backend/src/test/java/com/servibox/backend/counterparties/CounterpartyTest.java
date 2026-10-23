@@ -117,13 +117,13 @@ class CounterpartyTest {
     }
 
     private Sale vender(String numero, Counterparty cliente) {
-        return salesService.crearFactura(numero, cliente, LocalDate.now(), null,
+        return salesService.crearFactura(numero, cliente, LocalDate.now(), LocalDate.now().plusDays(30),
                 com.servibox.backend.sales.entity.PaymentType.CREDITO, null, null,
                 List.of(new SalesService.LineaFactura(llanta.getId(), 1, 100000.0)));
     }
 
     private void comprar(String numero, Counterparty proveedor) {
-        purchasesService.crearFactura(numero, proveedor, LocalDate.now(), null,
+        purchasesService.crearFactura(numero, proveedor, LocalDate.now(), LocalDate.now().plusDays(30),
                 com.servibox.backend.purchases.entity.PaymentType.CREDITO, null, null,
                 List.of(new PurchasesService.LineaCompra(llanta.getId(), 1, 100000.0)));
     }
@@ -179,7 +179,7 @@ class CounterpartyTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"invoiceNumber":"FAC-00002","supplierId":%d,"paymentType":"CREDITO",
+                                {"invoiceNumber":"FAC-00002","supplierId":%d,"dueDate":"2099-12-31","paymentType":"CREDITO",
                                  "details":[{"productId":%d,"quantity":1,"price":100000}]}
                                 """.formatted(cliente.getId(), llanta.getId())))
                 .andExpect(status().isBadRequest())
@@ -203,7 +203,7 @@ class CounterpartyTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"invoiceNumber":"VEN-00002","customerId":%d,"paymentType":"CREDITO",
+                                {"invoiceNumber":"VEN-00002","customerId":%d,"dueDate":"2099-12-31","paymentType":"CREDITO",
                                  "details":[{"productId":%d,"quantity":1,"price":100000}]}
                                 """.formatted(proveedor.getId(), llanta.getId())))
                 .andExpect(status().isBadRequest())
@@ -224,7 +224,7 @@ class CounterpartyTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"invoiceNumber":"VEN-00001","customerId":%d,"paymentType":"CREDITO",
+                                {"invoiceNumber":"VEN-00001","customerId":%d,"dueDate":"2099-12-31","paymentType":"CREDITO",
                                  "details":[{"productId":%d,"quantity":1,"price":100000}]}
                                 """.formatted(ambos.getId(), llanta.getId())))
                 .andExpect(status().isCreated())
@@ -237,7 +237,7 @@ class CounterpartyTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"invoiceNumber":"FAC-00001","supplierId":%d,"paymentType":"CREDITO",
+                                {"invoiceNumber":"FAC-00001","supplierId":%d,"dueDate":"2099-12-31","paymentType":"CREDITO",
                                  "details":[{"productId":%d,"quantity":1,"price":100000}]}
                                 """.formatted(ambos.getId(), llanta.getId())))
                 .andExpect(status().isCreated())
@@ -288,7 +288,7 @@ class CounterpartyTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"invoiceNumber":"VEN-00001","customerId":%d,"paymentType":"CREDITO",
+                                {"invoiceNumber":"VEN-00001","customerId":%d,"dueDate":"2099-12-31","paymentType":"CREDITO",
                                  "details":[{"productId":%d,"quantity":1,"price":100000}]}
                                 """.formatted(ajeno.getId(), llanta.getId())))
                 .andExpect(status().isBadRequest())
@@ -334,7 +334,7 @@ class CounterpartyTest {
                             .header("Authorization", "Bearer " + token)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"invoiceNumber":"%s","paymentType":"CREDITO",
+                                    {"invoiceNumber":"%s","dueDate":"2099-12-31","paymentType":"CREDITO",
                                      "details":[{"productId":%d,"quantity":1,"price":100000}]}
                                     """.formatted(numero, llanta.getId())))
                     .andExpect(status().isCreated())
@@ -367,7 +367,7 @@ class CounterpartyTest {
         Long otroTenant = fixture.crearTenant();
         fixture.usarTenant(otroTenant);
         Product otraLlanta = fixture.crearProducto(fixture.crearCategoriaConIva(), "LLA-001", 100000.0, 10);
-        Sale ventaDeDos = salesService.crearFactura("VEN-00001", null, LocalDate.now(), null,
+        Sale ventaDeDos = salesService.crearFactura("VEN-00001", null, LocalDate.now(), LocalDate.now().plusDays(30),
                 com.servibox.backend.sales.entity.PaymentType.CREDITO, null, null,
                 List.of(new SalesService.LineaFactura(otraLlanta.getId(), 1, 100000.0)));
 

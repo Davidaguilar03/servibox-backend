@@ -117,7 +117,7 @@ class SalesRestoreTest {
     }
 
     private Sale facturar(String numero, PaymentType tipo, Account cuenta, SalesService.LineaFactura... lineas) {
-        Sale venta = salesService.crearFactura(numero, cliente, FECHA_FACTURA, null, tipo, cuenta, "Efectivo",
+        Sale venta = salesService.crearFactura(numero, cliente, FECHA_FACTURA, FECHA_FACTURA.plusDays(30), tipo, cuenta, "Efectivo",
                 List.of(lineas));
         fixture.verificarInvariante();
         return venta;

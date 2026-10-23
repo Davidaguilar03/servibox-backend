@@ -59,7 +59,8 @@ public class TenantRegistrationService {
     private static final Pattern SLUG = Pattern.compile("[a-z0-9-]{3,30}");
     private static final Pattern NIT = Pattern.compile("\\d+(-\\d)?");
     private static final Pattern TELEFONO = Pattern.compile("[0-9 +()-]+");
-    private static final Pattern CORREO = Pattern.compile("[^\\s@]+@[^\\s@]+\\.[^\\s@]+");
+    /** Formato simple de correo; lo reutilizan los terceros. */
+    public static final Pattern CORREO = Pattern.compile("[^\\s@]+@[^\\s@]+\\.[^\\s@]+");
     private static final Pattern USERNAME = Pattern.compile("[A-Za-z0-9._-]{3,50}");
 
     private final TenantRepository tenantRepository;

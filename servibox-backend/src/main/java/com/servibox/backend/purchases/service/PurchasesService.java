@@ -97,11 +97,22 @@ public class PurchasesService {
             throw new InvalidPurchaseOperationException(
                     "Una compra de contado necesita la cuenta de la que sale el dinero");
         }
+        LocalDate fechaFactura = invoiceDate != null ? invoiceDate : LocalDate.now(clock);
+        // En contado dueDate no se valida: se guarda tal cual llega, como antes.
+        if (paymentType == PaymentType.CREDITO) {
+            if (dueDate == null) {
+                throw new InvalidPurchaseOperationException("Una factura a credito necesita fecha de vencimiento");
+            }
+            if (dueDate.isBefore(fechaFactura)) {
+                throw new InvalidPurchaseOperationException(
+                        "El vencimiento no puede ser anterior a la fecha de la factura");
+            }
+        }
 
         Purchase compra = new Purchase();
         compra.setInvoiceNumber(invoiceNumber);
         compra.setSupplier(proveedor);
-        compra.setInvoiceDate(invoiceDate != null ? invoiceDate : LocalDate.now(clock));
+        compra.setInvoiceDate(fechaFactura);
         compra.setDueDate(dueDate);
         compra.setPaymentType(paymentType);
         compra.setPaymentMethod(paymentMethod);
@@ -130,6 +141,10 @@ public class PurchasesService {
             }
 
             double precio = linea.price() != null ? linea.price() : 0.0;
+            if (precio <= 0) {
+                throw new InvalidPurchaseOperationException(
+                        "El precio de " + producto.getDescription() + " debe ser mayor a cero");
+            }
             double baseLinea = precio * cantidad;
             double ivaLinea = baseLinea * inventoryService.getIvaRateForProduct(producto);
 
@@ -179,7 +194,7 @@ public class PurchasesService {
      * Pago a una factura de compra a credito: un movimiento PAGO_COMPRA enlazado a la
      * compra. Se llama **pago**, no abono: el abono es lo que recibe el taller de un
      * cliente. Ver 02-CONVENTIONS.md. Sin fecha, hoy segun el Clock de negocio; una fecha
-     * posterior a hoy se rechaza.
+     * posterior a hoy o anterior a la de la factura se rechaza.
      */
     @Transactional
     public Movement registrarPago(Long purchaseId, Long accountId, Double monto, LocalDate fecha) {
@@ -199,6 +214,10 @@ public class PurchasesService {
         } else if (fecha.isAfter(hoy)) {
             throw new InvalidPurchaseOperationException(
                     "La fecha del pago (" + fecha + ") no puede ser posterior a hoy (" + hoy + ")");
+        }
+        if (fecha.isBefore(compra.getInvoiceDate())) {
+            throw new InvalidPurchaseOperationException(
+                    "La fecha del pago no puede ser anterior a la fecha de la factura");
         }
 
         double pendiente = saldoPendiente(compra);

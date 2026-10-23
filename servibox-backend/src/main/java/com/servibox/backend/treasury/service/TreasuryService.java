@@ -243,6 +243,7 @@ public class TreasuryService {
                                               Double monto, LocalDate fecha, String notas) {
         exigirCategoriaManual(categoria);
         validarManual(cuenta, monto);
+        validarTextosManual(concepto, notas);
 
         Movement movimiento = new Movement();
         movimiento.setCategory(categoria);
@@ -266,6 +267,7 @@ public class TreasuryService {
                                            Double nuevoMonto, LocalDate nuevaFecha, String nuevasNotas) {
         Movement movimiento = movimientoManual(movimientoId);
         validarManual(nuevaCuenta, nuevoMonto);
+        validarTextosManual(nuevoConcepto, nuevasNotas);
 
         deshacerEfecto(movimiento);
 
@@ -316,6 +318,16 @@ public class TreasuryService {
         }
     }
 
+    /** Largo de concepto y notas en MOVIMIENTOS (VARCHAR 255): 400 y no un error de columna. */
+    private static void validarTextosManual(String concepto, String notas) {
+        if (concepto != null && concepto.length() > 255) {
+            throw new IllegalArgumentException("El concepto admite hasta 255 caracteres");
+        }
+        if (notas != null && notas.length() > 255) {
+            throw new IllegalArgumentException("Las notas admiten hasta 255 caracteres");
+        }
+    }
+
     private static MovementType tipoDeManual(MovementCategory categoria) {
         return categoria == MovementCategory.GASTO_OPERATIVO ? MovementType.EGRESO : MovementType.INGRESO;
     }
@@ -324,7 +336,9 @@ public class TreasuryService {
 
     /**
      * Debita el origen y acredita el destino por el mismo monto, en una sola transaccion:
-     * o se mueven los dos saldos o no se mueve ninguno. El dinero se conserva.
+     * o se mueven los dos saldos o no se mueve ninguno. El dinero se conserva. El origen
+     * tiene que tener saldo para el monto (InsufficientBalanceException, 409), igual que una
+     * compra de contado; los gastos operativos siguen sin exigirlo.
      *
      * Son dos movimientos de categoria TRANSFERENCIA: un EGRESO en el origen y un INGRESO
      * en el destino que apunta al EGRESO con relatedMovement. No hay tabla de
@@ -344,6 +358,9 @@ public class TreasuryService {
         if (cuentaOrigen.getId() != null && cuentaOrigen.getId().equals(cuentaDestino.getId())) {
             throw new InvalidTransferException("La cuenta origen y la cuenta destino no pueden ser la misma");
         }
+
+        // Antes de mover nada y en la misma transaccion, como en las compras de contado.
+        exigirSaldoSuficiente(cuentaOrigen, monto);
 
         Account origen = recargar(cuentaOrigen);
         Account destino = recargar(cuentaDestino);

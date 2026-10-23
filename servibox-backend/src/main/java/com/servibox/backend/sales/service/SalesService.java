@@ -129,11 +129,22 @@ public class SalesService {
             throw new InvalidSaleOperationException(
                     "Una factura de contado necesita la cuenta donde entra el dinero");
         }
+        LocalDate fechaFactura = invoiceDate != null ? invoiceDate : LocalDate.now(clock);
+        // En contado dueDate no se valida: se guarda tal cual llega, como antes.
+        if (paymentType == PaymentType.CREDITO) {
+            if (dueDate == null) {
+                throw new InvalidSaleOperationException("Una factura a credito necesita fecha de vencimiento");
+            }
+            if (dueDate.isBefore(fechaFactura)) {
+                throw new InvalidSaleOperationException(
+                        "El vencimiento no puede ser anterior a la fecha de la factura");
+            }
+        }
 
         Sale venta = new Sale();
         venta.setInvoiceNumber(invoiceNumber);
         venta.setCustomer(cliente);
-        venta.setInvoiceDate(invoiceDate != null ? invoiceDate : LocalDate.now(clock));
+        venta.setInvoiceDate(fechaFactura);
         venta.setDueDate(dueDate);
         venta.setPaymentType(paymentType);
         venta.setPaymentMethod(paymentMethod);
@@ -169,9 +180,13 @@ public class SalesService {
                 throw new InvalidSaleOperationException(
                         "La cantidad de " + producto.getDescription() + " debe ser mayor a cero");
             }
+            double precio = linea.price() != null ? linea.price() : 0.0;
+            if (precio <= 0) {
+                throw new InvalidSaleOperationException(
+                        "El precio de " + producto.getDescription() + " debe ser mayor a cero");
+            }
             descontarStock(producto, cantidad);
 
-            double precio = linea.price() != null ? linea.price() : 0.0;
             double baseLinea = precio * cantidad;
             // Congelado aqui: la tasa que rige es la del momento de facturar.
             double ivaLinea = baseLinea * inventoryService.getIvaRateForProduct(producto);
@@ -211,7 +226,7 @@ public class SalesService {
      * Abono a una factura a credito: un movimiento RECAUDO_VENTA enlazado a la venta. Si
      * con este abono la factura queda cubierta, pasa a PAGADA. Se llama abono, no pago ni
      * cobro, ver 02-CONVENTIONS.md. Sin fecha, hoy segun el Clock de negocio; una fecha
-     * posterior a hoy se rechaza.
+     * posterior a hoy o anterior a la de la factura se rechaza.
      */
     @Transactional
     public Movement registrarAbono(Long saleId, Long accountId, Double monto, LocalDate fecha) {
@@ -231,6 +246,10 @@ public class SalesService {
         } else if (fecha.isAfter(hoy)) {
             throw new InvalidSaleOperationException(
                     "La fecha del abono (" + fecha + ") no puede ser posterior a hoy (" + hoy + ")");
+        }
+        if (fecha.isBefore(venta.getInvoiceDate())) {
+            throw new InvalidSaleOperationException(
+                    "La fecha del abono no puede ser anterior a la fecha de la factura");
         }
 
         double pendiente = saldoPendiente(venta);

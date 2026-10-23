@@ -144,7 +144,7 @@ class PurchasesTenantIsolationTest {
 
             Counterparty guardado = fixture.crearProveedor("Proveedor " + nit, nit);
 
-            return purchasesService.crearFactura(numero, guardado, LocalDate.now(), null,
+            return purchasesService.crearFactura(numero, guardado, LocalDate.now(), LocalDate.now().plusDays(30),
                     PaymentType.CREDITO, null, null,
                     List.of(new PurchasesService.LineaCompra(producto.getId(), 1, 100000.0)));
         } finally {

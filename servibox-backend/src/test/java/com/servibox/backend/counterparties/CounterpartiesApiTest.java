@@ -290,7 +290,7 @@ class CounterpartiesApiTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"invoiceNumber":"VEN-00001","customerId":%d,"paymentType":"CREDITO",
+                                {"invoiceNumber":"VEN-00001","customerId":%d,"dueDate":"2099-12-31","paymentType":"CREDITO",
                                  "details":[{"productId":%d,"quantity":1,"price":100000}]}
                                 """.formatted(cliente, llanta.getId())))
                 .andExpect(status().isCreated())
@@ -300,7 +300,7 @@ class CounterpartiesApiTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"invoiceNumber":"FAC-00001","supplierId":%d,"paymentType":"CREDITO",
+                                {"invoiceNumber":"FAC-00001","supplierId":%d,"dueDate":"2099-12-31","paymentType":"CREDITO",
                                  "details":[{"productId":%d,"quantity":1,"price":100000}]}
                                 """.formatted(proveedor, llanta.getId())))
                 .andExpect(status().isCreated())

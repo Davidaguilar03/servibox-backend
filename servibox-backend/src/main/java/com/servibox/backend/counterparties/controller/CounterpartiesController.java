@@ -7,8 +7,8 @@ import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.counterparties.entity.CounterpartyRole;
 import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.counterparties.service.DuplicateCounterpartyDocumentException;
+import com.servibox.backend.counterparties.service.InvalidCounterpartyException;
 import com.servibox.backend.shared.ResourceNotFoundException;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -39,20 +39,27 @@ public class CounterpartiesController {
 
     /**
      * 201 si el documento es nuevo. Si ya existe con el otro rol pasa a AMBOS por
-     * obtenerOCrear y responde 200 con el existente. Con el mismo rol o AMBOS, 409.
+     * obtenerOCrear y responde 200 con el existente. Con el mismo rol o AMBOS, 409. Sin
+     * @Valid: los datos pasan por CounterpartyService.validarDatos, las mismas reglas y
+     * mensajes que el PUT.
      */
     @PostMapping
-    public ResponseEntity<CounterpartyResponse> crear(@Valid @RequestBody CounterpartyRequest request) {
+    public ResponseEntity<CounterpartyResponse> crear(@RequestBody CounterpartyRequest request) {
+        if (request.role() == null) {
+            throw new InvalidCounterpartyException("El tercero necesita un rol");
+        }
         if (request.role() == CounterpartyRole.AMBOS) {
             throw new IllegalArgumentException("El rol de un tercero nuevo es CLIENTE o PROVEEDOR");
         }
-        Optional<Counterparty> existente = counterpartyService.findByDocumentNumber(request.documentNumber());
+        CounterpartyService.DatosTercero datos = CounterpartyService.validarDatos(request.name(),
+                request.documentType(), request.documentNumber(), request.email(), request.phone());
+        Optional<Counterparty> existente = counterpartyService.findByDocumentNumber(datos.numeroDocumento());
         existente.filter(t -> t.getRole() == request.role() || t.getRole() == CounterpartyRole.AMBOS)
                 .ifPresent(t -> {
                     throw new DuplicateCounterpartyDocumentException(t.getDocumentNumber(), t.getRole());
                 });
-        Counterparty tercero = counterpartyService.obtenerOCrear(request.role(), request.documentType(),
-                request.documentNumber(), request.name(), request.email(), request.phone());
+        Counterparty tercero = counterpartyService.obtenerOCrear(request.role(), datos.tipoDocumento(),
+                datos.numeroDocumento(), datos.nombre(), datos.correo(), datos.celular());
         HttpStatus status = existente.isPresent() ? HttpStatus.OK : HttpStatus.CREATED;
         return ResponseEntity.status(status).body(CounterpartyResponse.from(tercero));
     }

@@ -106,12 +106,12 @@ class InvoiceMovementCategoryTest {
     }
 
     private Sale vender(String numero, com.servibox.backend.sales.entity.PaymentType tipo, Account cuenta) {
-        return salesService.crearFactura(numero, cliente, LocalDate.now(), null, tipo, cuenta, "Efectivo",
+        return salesService.crearFactura(numero, cliente, LocalDate.now(), LocalDate.now().plusDays(30), tipo, cuenta, "Efectivo",
                 List.of(new SalesService.LineaFactura(llanta.getId(), 1, 100000.0)));
     }
 
     private Purchase comprar(String numero, com.servibox.backend.purchases.entity.PaymentType tipo, Account cuenta) {
-        return purchasesService.crearFactura(numero, proveedor, LocalDate.now(), null, tipo, cuenta, "Efectivo",
+        return purchasesService.crearFactura(numero, proveedor, LocalDate.now(), LocalDate.now().plusDays(30), tipo, cuenta, "Efectivo",
                 List.of(new PurchasesService.LineaCompra(llanta.getId(), 1, 100000.0)));
     }
 

@@ -1,5 +1,6 @@
 package com.servibox.backend.inventory.controller;
 
+import com.servibox.backend.auth.entity.Role;
 import com.servibox.backend.inventory.dto.CategoryRequest;
 import com.servibox.backend.inventory.dto.CategoryResponse;
 import com.servibox.backend.inventory.dto.FinancialSettingsRequest;
@@ -10,12 +11,14 @@ import com.servibox.backend.inventory.dto.ProductUpdateRequest;
 import com.servibox.backend.inventory.dto.TaxTypeResponse;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
-import com.servibox.backend.inventory.entity.TaxType;
 import com.servibox.backend.inventory.service.InventoryService;
 import com.servibox.backend.shared.ResourceNotFoundException;
+import com.servibox.backend.tenant.AdminRequiredException;
 import jakarta.validation.Valid;
+import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,37 +28,38 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 @RestController
 @RequestMapping("/api/inventory")
 @RequiredArgsConstructor
 public class InventoryController {
 
+    private static final String ROL_ADMIN = "ROLE_" + Role.ADMIN.name();
+    private static final String MENSAJE_CATEGORIAS = "Solo un administrador puede crear o editar categorias";
+
     private final InventoryService inventoryService;
+    private final Validator validator;
 
     @GetMapping("/categories")
     public List<CategoryResponse> listarCategorias() {
         return inventoryService.findAllCategories().stream().map(CategoryResponse::from).toList();
     }
 
+    /** Solo ADMIN, ver exigirAdmin. */
     @PostMapping("/categories")
     @ResponseStatus(HttpStatus.CREATED)
-    public CategoryResponse crearCategoria(@Valid @RequestBody CategoryRequest request) {
-        ProductCategory category = new ProductCategory();
-        category.setName(request.name());
-        category.setColor(request.color());
-        category.setYellowStockMin(request.yellowStockMin());
-        category.setRedStockMin(request.redStockMin());
-        category.setTargetMargin(request.targetMargin());
-        category.setTaxTypes(resolverImpuestos(request.taxTypeIds()));
-        return CategoryResponse.from(inventoryService.saveCategory(category));
+    public CategoryResponse crearCategoria(@RequestBody CategoryRequest request, Authentication authentication) {
+        exigirAdmin(authentication, request, MENSAJE_CATEGORIAS);
+        return CategoryResponse.from(inventoryService.crearCategoria(request.name(), request.color(),
+                request.yellowStockMin(), request.redStockMin(), request.targetMargin(), request.taxTypeIds()));
     }
 
+    /** Solo ADMIN, ver exigirAdmin. */
     @PutMapping("/categories/{id}")
-    public CategoryResponse editarCategoria(@PathVariable Long id, @Valid @RequestBody CategoryRequest request) {
+    public CategoryResponse editarCategoria(@PathVariable Long id, @RequestBody CategoryRequest request,
+                                            Authentication authentication) {
+        exigirAdmin(authentication, request, MENSAJE_CATEGORIAS);
         inventoryService.findCategoryById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Categoria no encontrada: " + id));
         return CategoryResponse.from(inventoryService.actualizarCategoria(id, request.name(), request.color(),
@@ -73,9 +77,11 @@ public class InventoryController {
         return FinancialSettingsResponse.from(inventoryService.findFinancialSettings());
     }
 
+    /** Solo ADMIN, ver exigirAdmin. */
     @PutMapping("/financial-settings")
     public FinancialSettingsResponse guardarConfiguracionFinanciera(
-            @Valid @RequestBody FinancialSettingsRequest request) {
+            @RequestBody FinancialSettingsRequest request, Authentication authentication) {
+        exigirAdmin(authentication, request, "Solo un administrador puede editar la configuracion financiera");
         return FinancialSettingsResponse.from(inventoryService.guardarConfiguracionFinanciera(
                 request.expensesRate(), request.dianRate(), request.icaRate(), request.cardCommissionRate()));
     }
@@ -118,11 +124,20 @@ public class InventoryController {
                 request.purchaseCost(), category));
     }
 
-    private Set<TaxType> resolverImpuestos(List<Long> ids) {
-        if (ids == null || ids.isEmpty()) {
-            return new HashSet<>();
+    /**
+     * La misma regla por rol que TenantController: la authority ROLE_ADMIN que pone
+     * JwtAuthenticationFilter, o AdminRequiredException (403). Va antes de validar el cuerpo,
+     * por eso estos endpoints no llevan @Valid: las anotaciones del DTO se comprueban aqui
+     * despues, con el mismo 400 "Peticion invalida" de siempre. Ver 03-DECISIONS.md.
+     */
+    private void exigirAdmin(Authentication authentication, Object request, String mensaje) {
+        boolean admin = authentication.getAuthorities().stream()
+                .anyMatch(a -> ROL_ADMIN.equals(a.getAuthority()));
+        if (!admin) {
+            throw new AdminRequiredException(mensaje);
         }
-        List<TaxType> disponibles = inventoryService.findAllTaxTypes();
-        return disponibles.stream().filter(t -> ids.contains(t.getId())).collect(java.util.stream.Collectors.toCollection(HashSet::new));
+        if (!validator.validate(request).isEmpty()) {
+            throw new IllegalArgumentException("Peticion invalida");
+        }
     }
 }

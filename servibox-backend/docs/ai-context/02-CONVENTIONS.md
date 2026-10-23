@@ -52,12 +52,23 @@ Excepciones de dominio en el paquete `service` de su modulo, traducidas en un so
 `GlobalExceptionHandler`. Tabla de codigos en [01-ARCHITECTURE.md](01-ARCHITECTURE.md)
 (Manejo centralizado de errores). Criterio: duplicado o falta de stock / saldo es **409**;
 operacion no permitida por el estado del documento es **400**; funcionalidad apagada por
-configuracion (registro publico) o sin el rol necesario (editar el perfil del tenant sin ser
-ADMIN) es **403**; recurso de ruta es **404**,
+configuracion (registro publico) o sin el rol necesario es **403**; recurso de ruta es **404**,
 ver Busqueda por id mas abajo. Un cuerpo que no se puede leer (JSON mal formado, valor de
 enum que no existe) es **400**, nunca 500; si es un enum, el mensaje nombra el campo y los
 valores permitidos. Un campo NOT NULL en la base es `@NotNull` / `@NotBlank` en su
 `Request`, para que falte con 400 y no con el error crudo de la base.
+
+* **Validaciones de dominio**: rangos, largos de columna, fechas y formatos se comprueban en
+  el service con un mensaje especifico en espanol sin tildes y **400** (la excepcion de
+  dominio del modulo o `IllegalArgumentException`), nunca el "Peticion invalida" generico
+  ni un 500 por pasar el largo de una columna. Se validan antes de modificar la entidad o
+  de cualquier consulta que haga flush.
+* **Rol**: una regla por rol usa la comprobacion de `TenantController` (authority
+  `ROLE_ADMIN`) y lanza `AdminRequiredException` (**403**, cuerpo JSON de siempre), antes de
+  validar el cuerpo. Hoy la exigen `PUT /api/tenant`, `PUT /api/inventory/financial-settings`
+  y `POST` y `PUT /api/inventory/categories`.
+* **Montos en mensajes**: siempre con `shared.Moneda.formatear` (pesos es-CO sin decimales,
+  "$ 3.250.000"), nunca concatenando un `double`.
 
 ## Formato de respuestas API (DTOs)
 

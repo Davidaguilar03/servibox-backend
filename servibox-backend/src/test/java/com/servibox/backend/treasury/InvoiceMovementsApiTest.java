@@ -144,7 +144,7 @@ class InvoiceMovementsApiTest {
     private Sale venderACredito(String numero, int cantidad) {
         fixture.usarTenant(tenantUno);
         try {
-            return salesService.crearFactura(numero, cliente, LocalDate.now(), null,
+            return salesService.crearFactura(numero, cliente, LocalDate.now(), LocalDate.now().plusDays(30),
                     com.servibox.backend.sales.entity.PaymentType.CREDITO, null, null,
                     List.of(new SalesService.LineaFactura(llanta.getId(), cantidad, 100000.0)));
         } finally {
@@ -155,7 +155,7 @@ class InvoiceMovementsApiTest {
     private Purchase comprarACredito(String numero) {
         fixture.usarTenant(tenantUno);
         try {
-            return purchasesService.crearFactura(numero, proveedor, LocalDate.now(), null,
+            return purchasesService.crearFactura(numero, proveedor, LocalDate.now(), LocalDate.now().plusDays(30),
                     com.servibox.backend.purchases.entity.PaymentType.CREDITO, null, null,
                     List.of(new PurchasesService.LineaCompra(llanta.getId(), 1, 100000.0)));
         } finally {
