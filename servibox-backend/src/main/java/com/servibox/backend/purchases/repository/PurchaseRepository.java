@@ -14,7 +14,9 @@ public interface PurchaseRepository extends JpaRepository<Purchase, Long> {
     /** Ver la nota de findByIdAndTenantId en CounterpartyRepository. */
     Optional<Purchase> findByIdAndTenantId(Long id, Long tenantId);
 
-    Optional<Purchase> findByInvoiceNumberIgnoreCaseAndTenantId(String invoiceNumber, Long tenantId);
+    /** Anuladas incluidas: conservan su numero. */
+    Optional<Purchase> findByInvoiceNumberIgnoreCaseAndSupplierIdAndTenantId(String invoiceNumber, Long supplierId,
+                                                                           Long tenantId);
 
     /** Total comprado en todo el historico, sin las compras en el estado excluido (ANULADA). */
     @Query("SELECT COALESCE(SUM(p.total), 0) FROM Purchase p WHERE p.status <> :excluido")

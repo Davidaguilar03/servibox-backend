@@ -832,7 +832,8 @@ invertido: una compra **suma** stock y **saca** dinero.
   `Counterparty` (columna `id_tercero`), `invoiceDate`,
   `dueDate`, `paymentType` (enum `CONTADO` / `CREDITO`), `paymentMethod`, `status` (enum
   `PAGADA` / `PENDIENTE` / `ANULADA`), `subtotal`, `ivaTotal`, `total`. Restriccion unica
-  `uk_compra_tenant_invoice_number`, misma divergencia deliberada que en `Sale`:
+  `uk_compra_tenant_supplier_invoice_number` (tenant, proveedor y numero; desde V3), misma
+  divergencia deliberada que en `Sale`:
   Autollantas valida el numero solo en la aplicacion. **No guarda cuenta**, igual que
   `Sale`: la de cada pago vive en su movimiento.
 * `PurchaseDetail` (`DETALLE_COMPRAS`): `ManyToOne` a `Purchase` y a `Product`,
@@ -844,8 +845,11 @@ invertido: una compra **suma** stock y **saca** dinero.
 
 `PurchasesService.crearFactura`, todo en **una transaccion**:
 
-1. Valida que el `invoiceNumber` no exista en el tenant
-   (`DuplicatePurchaseInvoiceNumberException`, **409**).
+1. Valida que el `invoiceNumber` no exista para ese proveedor en el tenant, sin distinguir
+   mayusculas y con las anuladas incluidas (`DuplicatePurchaseInvoiceNumberException`,
+   **409** "Ya existe una factura de compra N del proveedor X"). Si dos peticiones
+   simultaneas pasan esa validacion, la restriccion de base frena la segunda al insertar y
+   se traduce al mismo 409.
 2. Calcula las lineas y los totales **antes de tocar nada**:
 
    ```
@@ -1079,7 +1083,9 @@ reportes en PDF y Excel".
 * **El esquema lo mandan las migraciones**, en `src/main/resources/db/migration`
   (`V1__init_schema.sql`, escrita a mano desde 04-DATA-MODEL.md, y
   `V2__tenant_nit_phone_user_full_name.sql`, que agrega `nit_tenant` y `telefono_tenant` a
-  TENANTS y `nombre_completo` a USUARIOS, las tres NULL). Flyway las aplica al
+  TENANTS y `nombre_completo` a USUARIOS, las tres NULL, y
+  `V3__purchase_invoice_unique_per_supplier.sql`, que cambia la unica de COMPRAS a
+  (id_tenant, id_tercero, numero_factura_compra)). Flyway las aplica al
   arrancar, y Hibernate tiene `spring.jpa.hibernate.ddl-auto=validate` en todos los
   perfiles: no crea ni altera tablas, y si una entidad no coincide con el esquema la app no
   arranca. Como agregar un cambio, en [02-CONVENTIONS.md](02-CONVENTIONS.md).

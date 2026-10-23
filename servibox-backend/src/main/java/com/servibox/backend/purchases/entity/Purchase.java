@@ -21,8 +21,9 @@ import java.time.LocalDate;
 /**
  * Factura de compra. Espejo de Sale, con el signo invertido: suma stock y saca dinero.
  *
- * El numero de factura es unico dentro de un tenant con restriccion de base, igual que en
- * Sale y a diferencia de Autollantas, que lo valida solo en la aplicacion.
+ * El numero de factura es unico por tenant y proveedor con restriccion de base (V3): lo pone
+ * cada proveedor, asi que dos proveedores pueden repetirlo. La base distingue mayusculas; la
+ * comparacion sin mayusculas la hace PurchasesService. Ver 03-DECISIONS.md.
  *
  * No guarda cuenta: la cuenta de cada pago vive en su movimiento PAGO_COMPRA, que apunta a
  * esta compra por id_compra.
@@ -34,8 +35,8 @@ import java.time.LocalDate;
 @Table(
         name = "COMPRAS",
         uniqueConstraints = @UniqueConstraint(
-                name = "uk_compra_tenant_invoice_number",
-                columnNames = {"id_tenant", "numero_factura_compra"}
+                name = "uk_compra_tenant_supplier_invoice_number",
+                columnNames = {"id_tenant", "id_tercero", "numero_factura_compra"}
         )
 )
 public class Purchase extends TenantAwareEntity {

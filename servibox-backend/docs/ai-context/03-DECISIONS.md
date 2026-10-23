@@ -12,6 +12,34 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-23: Numero de factura de compra unico por proveedor (V3)
+
+* Decision: el numero de factura de compra es unico por tenant **y proveedor**, no por
+  tenant. Migracion `V3__purchase_invoice_unique_per_supplier.sql`: quita
+  `uk_compra_tenant_invoice_number (id_tenant, numero_factura_compra)` y agrega
+  `uk_compra_tenant_supplier_invoice_number (id_tenant, id_tercero, numero_factura_compra)`.
+  No toca datos: toda fila que cumplia la restriccion anterior cumple la nueva. V1 y V2 no
+  cambian.
+  * **Servicio.** `PurchasesService.validarNumeroFacturaUnico` busca con
+    `findByInvoiceNumberIgnoreCaseAndSupplierIdAndTenantId` (el metodo por tenant se retiro:
+    nadie mas lo usaba). Un repetido es 409 `DuplicatePurchaseInvoiceNumberException` con
+    "Ya existe una factura de compra N del proveedor X".
+  * **Mayusculas.** La restriccion de la base distingue mayusculas (`FAC-1` y `fac-1` caben);
+    la comparacion sin mayusculas la hace el servicio, como en ventas.
+  * **Anuladas.** Una compra anulada conserva su fila y su numero, y lo sigue reservando para
+    su proveedor (no para otro). Restaurarla no choca con nada.
+  * **Concurrencia.** Dos compras simultaneas del mismo proveedor y numero pasan las dos la
+    validacion; la segunda choca con la restriccion al insertar y `crearFactura` la traduce
+    a la misma excepcion (409), como `SalesService` con `uk_venta_tenant_invoice_number`.
+  * **Esquema.** `SchemaConformanceTest` entiende la descripcion "UK compuesta con id_tenant
+    e id_tercero" como la unica de tres columnas.
+* Alternativas consideradas: dejar la unicidad por tenant (rechaza facturas legitimas de dos
+  proveedores distintos); una restriccion sobre `LOWER(numero_factura_compra)` (un indice por
+  expresion no es portable igual entre H2 y PostgreSQL y no lo valida Hibernate).
+* Motivo: el numero lo pone cada proveedor en su factura; dos proveedores numeran por su
+  cuenta y pueden coincidir. Supera lo dicho en "Endurecimiento de validaciones de entrada",
+  que lo dejaba pendiente.
+
 ## 2026-10-23: Endurecimiento de validaciones de entrada
 
 * Decision: cerrar huecos de validacion sin cambiar reglas de negocio. Cada regla responde
@@ -68,7 +96,8 @@ Formato de cada entrada:
     divergencia ya documentada con Autollantas, una cuenta puede quedar en negativo.
   * **El costo al anular una compra** no se revierte (sin historico de costos).
   * **La unicidad del numero de factura de compra** sigue siendo por tenant y no por
-    proveedor.
+    proveedor. **SUPERADO el 2026-10-23** por "Numero de factura de compra unico por
+    proveedor (V3)".
   * **Los ingresos ocasionales en los kpis** se siguen contando como hasta hoy.
   * El concepto de una transferencia no tiene limite de largo (no estaba en el alcance).
 * Alternativas consideradas: validar en los DTO con anotaciones (mensaje generico); un

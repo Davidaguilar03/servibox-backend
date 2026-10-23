@@ -100,7 +100,7 @@ public class GlobalExceptionHandler {
         return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
-    /** Dos facturas de compra del mismo tenant con el mismo numero. */
+    /** Dos facturas de compra del mismo proveedor y tenant con el mismo numero. */
     @ExceptionHandler(DuplicatePurchaseInvoiceNumberException.class)
     public ResponseEntity<ErrorResponse> manejarCompraDuplicada(DuplicatePurchaseInvoiceNumberException ex) {
         return construir(HttpStatus.CONFLICT, ex.getMessage());
