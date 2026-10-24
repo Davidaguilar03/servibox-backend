@@ -283,16 +283,17 @@ de demostracion, para probar el frontend y Reportes sin cargar nada a mano:
 * Categoria `REPUESTOS DEMO` (amarillo 10, rojo 3, margen 0.30, IVA 19) con tres productos:
   aceite (costo 30000, stock final 50, normal), filtro (15000, stock 10, bajo) y bateria
   (250000, stock 3, critico).
-* Un ingreso ocasional de 2000000 en cada cuenta; dos clientes y un proveedor.
+* Saldo inicial de Caja General 1950000 y de Bancolombia 2000000, fijado en la cuenta (no
+  como ingreso ocasional, que sumaria a la utilidad); dos clientes y un proveedor.
 * Mes anterior: compra de contado `PROV-1001` (357000), venta de contado `FV-0001`
   (696150), venta a credito `FV-0002` (52360) y transferencia de Caja a Bancolombia
   (500000).
 * Mes actual: abono de 20000 a `FV-0002` (queda PENDIENTE con 32360), gasto operativo de
-  450000, ventas de contado `FV-0003` (160650) y `FV-0005` (107100) y `FV-0004` (428400)
-  ANULADA.
-* Resultado: `/kpis` del mes anterior ventas 748510, compras 357000, utilidad neta 391510;
-  del mes actual ventas 267750, gastos 450000, utilidad neta -182250. Caja General 1946250,
-  Bancolombia 2230650.
+  450000, ingreso ocasional "Reintegro de proveedor" de 50000 a Caja, ventas de contado
+  `FV-0003` (160650) y `FV-0005` (107100) y `FV-0004` (428400) ANULADA.
+* Resultado: `/kpis` del mes anterior ventas 748510, compras 357000, otros ingresos 0,
+  utilidad neta 391510; del mes actual ventas 267750, gastos 450000, otros ingresos 50000,
+  utilidad neta -132250. Caja General 1946250, Bancolombia 2230650.
 
 Las fechas salen del reloj de negocio (`servibox.business.time-zone`). Se desactiva con
 `servibox.dev.demo-data=false` (variable `DEV_DEMO_DATA`, en `application-dev.properties`);

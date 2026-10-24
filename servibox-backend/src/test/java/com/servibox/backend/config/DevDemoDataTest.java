@@ -58,11 +58,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * venta FV-0003 M contado Banco: 3 aceites a 45000 -> 135000 + 25650 = 160650.
  * venta FV-0004 M contado Caja: 1 bateria a 360000 -> 428400, ANULADA.
  * venta FV-0005 M contado Caja: 2 aceites a 45000 -> 90000 + 17100 = 107100.
- * gasto M Banco 450000; transferencia M-1 Caja -> Banco 500000; ingreso 2000000 en cada cuenta.
+ * gasto M Banco 450000; transferencia M-1 Caja -> Banco 500000; ingreso ocasional M Caja 50000.
+ * Saldos iniciales: Caja 1950000 y Banco 2000000, en la cuenta y no como ingreso ocasional.
  *
- * KPIs M-1: ventas 748510, compras 357000, gastos 0, utilidad bruta y neta 391510.
- * KPIs M: ventas 267750, compras 0, gastos 450000, utilidad bruta 267750, neta -182250.
- * Caja: 2000000 - 357000 + 696150 - 500000 + 107100 = 1946250.
+ * KPIs M-1: ventas 748510, compras 357000, gastos 0, otros ingresos 0, utilidad bruta y neta 391510.
+ * KPIs M: ventas 267750, compras 0, gastos 450000, otros ingresos 50000, utilidad bruta 267750,
+ * neta 267750 + 50000 - 450000 = -132250.
+ * Caja: 1950000 - 357000 + 696150 - 500000 + 107100 + 50000 = 1946250.
  * Banco: 2000000 + 500000 + 20000 + 160650 - 450000 = 2230650.
  * Stock: aceite 50 - 5 + 10 - 3 - 2 = 50, filtro 12 - 2 = 10, bateria 4 - 1 = 3.
  */
@@ -142,6 +144,10 @@ class DevDemoDataTest {
                 .collect(Collectors.toMap(Account::getName, Account::getCurrentBalance));
         assertThat(saldos.get("Caja General")).isCloseTo(1946250.0, within(DELTA));
         assertThat(saldos.get("Bancolombia")).isCloseTo(2230650.0, within(DELTA));
+        Map<String, Double> iniciales = treasuryService.findAllAccounts().stream()
+                .collect(Collectors.toMap(Account::getName, Account::getInitialBalance));
+        assertThat(iniciales.get("Caja General")).isCloseTo(1950000.0, within(DELTA));
+        assertThat(iniciales.get("Bancolombia")).isCloseTo(2000000.0, within(DELTA));
         fixture.verificarInvariante();
     }
 
@@ -174,8 +180,8 @@ class DevDemoDataTest {
     @Test
     void kpisDelMesActualYDelAnteriorCuadranConLaSiembra() throws Exception {
         String token = login();
-        kpis(token, mesAnterior, 748510.0, 357000.0, 0.0);
-        kpis(token, mesActual, 267750.0, 0.0, 450000.0);
+        kpis(token, mesAnterior, 748510.0, 357000.0, 0.0, 0.0);
+        kpis(token, mesActual, 267750.0, 0.0, 450000.0, 50000.0);
     }
 
     @Test
@@ -189,8 +195,8 @@ class DevDemoDataTest {
         assertThat(counterpartyService.findAll()).hasSize(3);
         assertThat(salesService.findAllSales()).hasSize(5);
         assertThat(purchasesService.findAllPurchases()).hasSize(1);
-        // Activos: 2 ingresos, compra, 3 ventas de contado, 2 patas de transferencia, abono y gasto.
-        assertThat(treasuryService.buscarMovimientos(null, null, null, null)).hasSize(10);
+        // Activos: compra, 3 ventas de contado, 2 patas de transferencia, abono, gasto e ingreso.
+        assertThat(treasuryService.buscarMovimientos(null, null, null, null)).hasSize(9);
         assertThat(treasuryService.balanceGlobal()).isCloseTo(1946250.0 + 2230650.0, within(DELTA));
     }
 
@@ -204,7 +210,8 @@ class DevDemoDataTest {
         return stock <= categoria.getYellowStockMin() ? "BAJO" : "NORMAL";
     }
 
-    private void kpis(String token, YearMonth mes, double ventas, double compras, double gastos) throws Exception {
+    private void kpis(String token, YearMonth mes, double ventas, double compras, double gastos,
+                      double otrosIngresos) throws Exception {
         LocalDate desde = mes.atDay(1);
         LocalDate hasta = mes.atEndOfMonth();
         mockMvc.perform(get("/api/reporting/kpis")
@@ -216,7 +223,8 @@ class DevDemoDataTest {
                 .andExpect(jsonPath("$.totalPurchases", closeTo(compras, DELTA)))
                 .andExpect(jsonPath("$.grossProfit", closeTo(ventas - compras, DELTA)))
                 .andExpect(jsonPath("$.operatingExpenses", closeTo(gastos, DELTA)))
-                .andExpect(jsonPath("$.netProfit", closeTo(ventas - compras - gastos, DELTA)));
+                .andExpect(jsonPath("$.otherIncome", closeTo(otrosIngresos, DELTA)))
+                .andExpect(jsonPath("$.netProfit", closeTo(ventas - compras + otrosIngresos - gastos, DELTA)));
     }
 
     private String login() throws Exception {

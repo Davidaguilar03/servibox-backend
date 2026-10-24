@@ -205,7 +205,7 @@ class ReportingTest {
         t.comprar("FC-1", HOY, t.llanta, 1, 100.0);  // 119
         t.gastar("Arriendo", HOY, 50.0);
         t.gastar("Servicios", HOY, 30.0);
-        // Un ingreso ocasional no es venta: no entra en ningun KPI.
+        // Un ingreso ocasional no es venta: no entra en ventas ni en la utilidad bruta, si en la neta.
         treasuryService.registrarIngresoOcasional(t.caja, "Chatarra", 1000.0, HOY, null);
 
         KpisResponse kpis = reportingService.getGlobalKpis();
@@ -214,13 +214,129 @@ class ReportingTest {
         assertThat(kpis.totalPurchases()).isCloseTo(119.0, within(DELTA));
         assertThat(kpis.grossProfit()).isCloseTo(476.0, within(DELTA));
         assertThat(kpis.operatingExpenses()).isCloseTo(80.0, within(DELTA));
-        assertThat(kpis.netProfit()).isCloseTo(396.0, within(DELTA));
+        assertThat(kpis.otherIncome()).isCloseTo(1000.0, within(DELTA));
+        assertThat(kpis.netProfit()).isCloseTo(1396.0, within(DELTA));
         assertThat(kpis.desde()).isNull();
         assertThat(kpis.hasta()).isNull();
 
         // Con perdida el neto sale negativo, sin recortes.
-        t.gastar("Nomina", HOY, 1000.0);
+        t.gastar("Nomina", HOY, 2000.0);
         assertThat(reportingService.getGlobalKpis().netProfit()).isCloseTo(-604.0, within(DELTA));
+    }
+
+    // ---- Otros ingresos ----
+
+    @Test
+    void sinIngresosOcasionalesOtherIncomeEsCeroYNetProfitNoCambia() {
+        Taller t = new Taller(tenantUno);
+        t.vender("FV-1", HOY, t.llanta, 2, 200.0);   // 476
+        t.comprar("FC-1", HOY, t.llanta, 1, 100.0);  // 119
+        t.gastar("Arriendo", HOY, 50.0);
+
+        for (KpisResponse kpis : List.of(reportingService.getGlobalKpis(), reportingService.getPeriodKpis(HOY, HOY))) {
+            assertThat(kpis.otherIncome()).isEqualTo(0.0);
+            assertThat(kpis.grossProfit()).isCloseTo(357.0, within(DELTA));
+            assertThat(kpis.netProfit()).isCloseTo(307.0, within(DELTA));
+        }
+    }
+
+    @Test
+    void unIngresoOcasionalDelRangoSubeNetProfitExactamenteYLosDeFueraNoCuentan() {
+        Taller t = new Taller(tenantUno);
+        LocalDate desde = LocalDate.of(2026, 9, 1);
+        LocalDate hasta = LocalDate.of(2026, 9, 30);
+        t.vender("FV-1", HOY, t.llanta, 2, 200.0);   // 476
+        t.gastar("Arriendo", HOY, 50.0);
+        KpisResponse antes = reportingService.getPeriodKpis(desde, hasta);
+        assertThat(antes.netProfit()).isCloseTo(426.0, within(DELTA));
+
+        treasuryService.registrarIngresoOcasional(t.caja, "Agosto", 7000.0, LocalDate.of(2026, 8, 31), null);   // fuera
+        treasuryService.registrarIngresoOcasional(t.caja, "Borde inicio", 300.0, desde, null);                 // dentro
+        treasuryService.registrarIngresoOcasional(t.caja, "Borde fin", 25.5, hasta, null);                     // dentro
+        treasuryService.registrarIngresoOcasional(t.caja, "Octubre", 9000.0, LocalDate.of(2026, 10, 1), null); // fuera
+
+        KpisResponse despues = reportingService.getPeriodKpis(desde, hasta);
+        assertThat(despues.otherIncome()).isCloseTo(325.5, within(DELTA));
+        assertThat(despues.netProfit() - antes.netProfit()).isCloseTo(325.5, within(DELTA));
+        assertThat(despues.totalSales()).isEqualTo(antes.totalSales());
+        assertThat(despues.totalPurchases()).isEqualTo(antes.totalPurchases());
+        assertThat(despues.grossProfit()).isEqualTo(antes.grossProfit());
+        assertThat(despues.operatingExpenses()).isEqualTo(antes.operatingExpenses());
+
+        // El global si los ve todos.
+        assertThat(reportingService.getGlobalKpis().otherIncome()).isCloseTo(16325.5, within(DELTA));
+    }
+
+    @Test
+    void editarOEliminarUnIngresoOcasionalSeReflejaEnOtherIncomeYNetProfit() {
+        Taller t = new Taller(tenantUno);
+        t.vender("FV-1", HOY, t.llanta, 2, 200.0);   // 476
+        Movement ingreso = treasuryService.registrarIngresoOcasional(t.caja, "Chatarra", 100.0, HOY, null);
+        assertThat(reportingService.getPeriodKpis(HOY, HOY).netProfit()).isCloseTo(576.0, within(DELTA));
+
+        treasuryService.editarMovimientoManual(ingreso.getId(), t.caja, "Chatarra", 340.0, HOY, null);
+        KpisResponse editado = reportingService.getPeriodKpis(HOY, HOY);
+        assertThat(editado.otherIncome()).isCloseTo(340.0, within(DELTA));
+        assertThat(editado.netProfit()).isCloseTo(816.0, within(DELTA));
+
+        // Moverlo fuera del rango tambien lo saca.
+        treasuryService.editarMovimientoManual(ingreso.getId(), t.caja, "Chatarra", 340.0, HOY.minusDays(1), null);
+        assertThat(reportingService.getPeriodKpis(HOY, HOY).otherIncome()).isEqualTo(0.0);
+        treasuryService.editarMovimientoManual(ingreso.getId(), t.caja, "Chatarra", 340.0, HOY, null);
+
+        treasuryService.eliminarMovimientoManual(ingreso.getId());
+        KpisResponse eliminado = reportingService.getPeriodKpis(HOY, HOY);
+        assertThat(eliminado.otherIncome()).isEqualTo(0.0);
+        assertThat(eliminado.netProfit()).isCloseTo(476.0, within(DELTA));
+    }
+
+    @Test
+    void cobrosPagosGastosYTransferenciasNoSonOtherIncome() {
+        Taller t = new Taller(tenantUno);
+        Account banco = fixture.crearCuenta("Bancolombia");
+        Sale credito = t.vender("FV-1", HOY, t.llanta, 2, 200.0);                      // 476
+        salesService.registrarAbono(credito.getId(), t.caja.getId(), 200.0, HOY);
+        salesService.crearFactura("FV-2", t.cliente, HOY, null, PaymentType.CONTADO, t.caja, "Efectivo",
+                List.of(new SalesService.LineaFactura(t.llanta.getId(), 1, 100.0)));     // 119
+        Purchase compra = t.comprar("FC-1", HOY, t.llanta, 1, 100.0);                    // 119
+        purchasesService.registrarPago(compra.getId(), t.caja.getId(), 119.0, HOY);
+        t.gastar("Arriendo", HOY, 50.0);
+        treasuryService.registrarTransferencia(t.caja, banco, null, 80.0, HOY);
+
+        KpisResponse kpis = reportingService.getPeriodKpis(HOY, HOY);
+        assertThat(kpis.otherIncome()).isEqualTo(0.0);
+        assertThat(kpis.netProfit()).isCloseTo(476.0 + 119.0 - 119.0 - 50.0, within(DELTA));
+        assertThat(reportingService.getGlobalKpis().otherIncome()).isEqualTo(0.0);
+    }
+
+    @Test
+    void laFormulaCompletaYElAislamientoPorTenantDeOtherIncome() throws Exception {
+        Taller uno = new Taller(tenantUno);
+        uno.vender("FV-1", HOY, uno.llanta, 2, 200.0);   // 476
+        uno.comprar("FC-1", HOY, uno.llanta, 1, 100.0);  // 119
+        uno.gastar("Arriendo", HOY, 50.0);
+        treasuryService.registrarIngresoOcasional(uno.caja, "Reintegro", 30.0, HOY, null);
+
+        Taller dos = new Taller(tenantDos);
+        dos.vender("FV-1", HOY, dos.llanta, 1, 100.0);   // 119
+        treasuryService.registrarIngresoOcasional(dos.caja, "Aporte", 90000.0, HOY, null);
+        TenantContext.clear();
+
+        // 476 - 119 + 30 - 50 = 337, en el global y en el periodo.
+        for (String query : List.of("", "?desde=" + HOY + "&hasta=" + HOY)) {
+            mockMvc.perform(get("/api/reporting/kpis" + query).header("Authorization", "Bearer " + tokenUno))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalSales", closeTo(476.0, DELTA)))
+                    .andExpect(jsonPath("$.totalPurchases", closeTo(119.0, DELTA)))
+                    .andExpect(jsonPath("$.grossProfit", closeTo(357.0, DELTA)))
+                    .andExpect(jsonPath("$.operatingExpenses", closeTo(50.0, DELTA)))
+                    .andExpect(jsonPath("$.otherIncome", closeTo(30.0, DELTA)))
+                    .andExpect(jsonPath("$.netProfit", closeTo(337.0, DELTA)));
+        }
+        mockMvc.perform(get("/api/reporting/kpis").header("Authorization", "Bearer " + tokenDos))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.otherIncome", closeTo(90000.0, DELTA)))
+                .andExpect(jsonPath("$.netProfit", closeTo(90119.0, DELTA)));
     }
 
     // ---- Anuladas ----

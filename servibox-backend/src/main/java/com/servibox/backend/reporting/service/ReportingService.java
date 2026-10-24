@@ -49,23 +49,25 @@ public class ReportingService {
     private final PurchaseRepository purchaseRepository;
     private final TreasuryService treasuryService;
 
-    /** Los 5 KPIs sobre todo el historico del tenant activo. */
+    /** Los KPIs sobre todo el historico del tenant activo. */
     @Transactional(readOnly = true)
     public KpisResponse getGlobalKpis() {
         return KpisResponse.of(null, null,
                 saleRepository.sumTotalByStatusNot(SaleStatus.ANULADA),
                 purchaseRepository.sumTotalByStatusNot(PurchaseStatus.ANULADA),
-                treasuryService.sumarPorCategoria(MovementCategory.GASTO_OPERATIVO));
+                treasuryService.sumarPorCategoria(MovementCategory.GASTO_OPERATIVO),
+                treasuryService.sumarPorCategoria(MovementCategory.INGRESO_OCASIONAL));
     }
 
-    /** Los mismos 5 KPIs, por fecha de factura (o de gasto) dentro de [desde, hasta]. */
+    /** Los mismos KPIs, por fecha de factura (o de movimiento) dentro de [desde, hasta]. */
     @Transactional(readOnly = true)
     public KpisResponse getPeriodKpis(LocalDate desde, LocalDate hasta) {
         validarRango(desde, hasta);
         return KpisResponse.of(desde, hasta,
                 saleRepository.sumTotalByStatusNotAndInvoiceDateBetween(SaleStatus.ANULADA, desde, hasta),
                 purchaseRepository.sumTotalByStatusNotAndInvoiceDateBetween(PurchaseStatus.ANULADA, desde, hasta),
-                treasuryService.sumarPorCategoria(MovementCategory.GASTO_OPERATIVO, desde, hasta));
+                treasuryService.sumarPorCategoria(MovementCategory.GASTO_OPERATIVO, desde, hasta),
+                treasuryService.sumarPorCategoria(MovementCategory.INGRESO_OCASIONAL, desde, hasta));
     }
 
     /**
