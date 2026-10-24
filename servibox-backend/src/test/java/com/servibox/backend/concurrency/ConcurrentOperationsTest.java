@@ -306,6 +306,48 @@ class ConcurrentOperationsTest {
         assertThat(stock(producto)).isEqualTo(100);
     }
 
+    // ---- (k) costo del producto al anular y recuperar compras a la vez ----
+
+    @Test
+    void anularYRecuperarLaMismaCompraALaVezDejanElCostoCorrecto() throws Exception {
+        long producto = producto("COS-1", 100);
+        id(enviar(compraCredito("COS-A", proveedor.getId(), producto, 1, 12000)));
+        long b = id(enviar(compraCredito("COS-B", proveedor.getId(), producto, 1, 15000)));
+
+        for (int ronda = 0; ronda < 5; ronda++) {
+            List<MvcResult> anulaciones = simultaneas(2, i -> post("/api/purchases/" + b + "/annul")
+                    .header("Authorization", "Bearer " + token));
+            assertThat(codigos(anulaciones)).as("anular, ronda %d", ronda).containsExactlyInAnyOrder(200, 400);
+            assertThat(costo(producto)).as("costo anulada, ronda %d", ronda).isEqualTo(12000.0);
+
+            List<MvcResult> recuperaciones = simultaneas(2, i -> post("/api/purchases/" + b + "/restore")
+                    .header("Authorization", "Bearer " + token));
+            assertThat(codigos(recuperaciones)).as("recuperar, ronda %d", ronda).containsExactlyInAnyOrder(200, 400);
+            assertThat(costo(producto)).as("costo recuperada, ronda %d", ronda).isEqualTo(15000.0);
+        }
+        assertThat(stock(producto)).isEqualTo(102);
+        verificarInvariante();
+    }
+
+    @Test
+    void anularALaVezDosComprasDelMismoProductoVuelveAlCostoDeLaPrimera() throws Exception {
+        long producto = producto("COS-2", 100);
+        for (int ronda = 0; ronda < 5; ronda++) {
+            id(enviar(compraCredito("COS2-A" + ronda, proveedor.getId(), producto, 1, 12000)));
+            long b = id(enviar(compraCredito("COS2-B" + ronda, proveedor.getId(), producto, 1, 15000)));
+            long c = id(enviar(compraCredito("COS2-C" + ronda, proveedor.getId(), producto, 1, 18000)));
+
+            // Gane quien gane: si C va primero el costo pasa a 15 y B lo lleva a 12; si B va
+            // primero el costo (18) no es suyo y C lo lleva a 12.
+            List<MvcResult> resultados = simultaneas(2, i -> post("/api/purchases/" + (i == 0 ? b : c) + "/annul")
+                    .header("Authorization", "Bearer " + token));
+            assertThat(codigos(resultados)).as("ronda %d", ronda).containsOnly(200);
+            assertThat(costo(producto)).as("costo, ronda %d", ronda).isEqualTo(12000.0);
+        }
+        assertThat(stock(producto)).isEqualTo(105);
+        verificarInvariante();
+    }
+
     // ---- Ayudas ----
 
     /** Lanza n peticiones a la vez y devuelve sus resultados en el orden de i. */
@@ -409,6 +451,11 @@ class ConcurrentOperationsTest {
     private int stock(long producto) throws Exception {
         MvcResult r = enviar(get("/api/inventory/products/" + producto).header("Authorization", "Bearer " + token));
         return JsonPath.read(r.getResponse().getContentAsString(), "$.quantity");
+    }
+
+    private double costo(long producto) throws Exception {
+        MvcResult r = enviar(get("/api/inventory/products/" + producto).header("Authorization", "Bearer " + token));
+        return JsonPath.<Number>read(r.getResponse().getContentAsString(), "$.purchaseCost").doubleValue();
     }
 
     private void verificarInvariante() {

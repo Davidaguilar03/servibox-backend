@@ -12,6 +12,52 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-24: Costo del producto al anular y recuperar una compra
+
+* Problema: al anular una compra el stock se revertia pero el costo no: el producto quedaba
+  con el precio de una compra que ya no existe, y el precio sugerido y el IVA calculados
+  sobre ese costo. Reemplaza la parte "anular no lo deshace" de *Comprar reescribe el costo
+  del producto, y anular no lo deshace* (2026-09-08).
+* Decision de producto: el costo vuelve al de la ultima compra no anulada del producto.
+  * **Ultima compra**: la de mayor id de compra y, dentro de ella, la linea de mayor id.
+    `crearFactura` reescribe siempre el costo con el precio de la compra que se esta
+    registrando, sin mirar su fecha de factura, y dentro de una compra gana la ultima linea:
+    el costo vigente es el de la ultima compra registrada, no el de la fecha de factura mas
+    reciente. Por eso el orden es por id y no por `invoiceDate`.
+  * **Anular** (`PurchasesService.revertirCostos`): por cada producto de las lineas, solo si
+    su `purchaseCost` todavia es el precio de su ultima linea en esta compra, con tolerancia
+    de medio centavo (el costo aun viene de esta compra), pasa al precio de la ultima linea
+    de la compra no anulada mas reciente de ese producto, sin contar esta. Si el costo es
+    otro (se edito a mano o lo fijo una compra posterior) no se toca.
+  * **Recuperar** (`reaplicarCostos`): si ninguna otra compra no anulada del producto tiene
+    mayor id, el costo pasa al precio de su ultima linea en esta compra; si hay una
+    posterior, no se toca.
+  * En los dos casos `taxAmount` y `suggestedPrice` se rehacen con
+    `InventoryService.recalculatePrices`, el mismo mecanismo de la creacion. Misma
+    transaccion que el stock y los saldos, con los productos ya bloqueados en orden
+    ascendente de id. Una sola consulta por lote para todos los productos
+    (`PurchaseDetailRepository.findLineasDeLaUltimaCompra`, subconsulta con el mayor id de
+    compra no anulada por producto). Sin migracion; stock, saldos, estados y DTO no cambian.
+* Limitacion: si el producto no tiene otras compras no anuladas, el costo se queda como
+  esta. No hay historico de costos (el costo inicial o una edicion a mano no se guardan),
+  asi que no hay a que valor volver; no se agregan columnas.
+* Matiz conocido: si dos compras del mismo producto se crean a la vez, la que toma el
+  bloqueo del producto despues escribe el costo, aunque su id de compra sea menor. Es un
+  caso de concurrencia raro y la consecuencia es solo cual de los dos precios queda.
+* Frontend (rama aparte): los modales de anular y de recuperar compra dicen hoy que el
+  costo no se revierte; deben explicar que el costo vuelve al de la ultima compra no
+  anulada (o al de esta compra al recuperarla, si es la mas reciente).
+* Pruebas: `PurchasesCostRevertTest` (10) y dos de concurrencia en
+  `ConcurrentOperationsTest`. Se renombraron `anularNoRevierteElCostoDelProducto` a
+  `anularSinOtrasComprasDejaElCostoDelProducto` y `restaurarNoCambiaElCostoDelProducto` a
+  `restaurarLaUnicaCompraDejaElCostoDelProducto`: sus cifras siguen valiendo (no hay otras
+  compras), pero su nombre decia lo contrario de la regla nueva.
+* Alternativas consideradas: guardar el costo anterior en la compra (columna nueva y
+  migracion); ordenar por fecha de factura (no coincide con como la creacion fija el costo);
+  revertir siempre, aunque el costo se hubiera editado a mano (pisaria una decision del
+  usuario).
+* Motivo: decision de producto; reutiliza el criterio y el recalculo de la creacion.
+
 ## 2026-10-24: Los ingresos ocasionales suman a la utilidad neta
 
 * Decision de producto: los movimientos `INGRESO_OCASIONAL` activos suman a la utilidad
@@ -1176,6 +1222,8 @@ Cierra la omision marcada como "la mas importante de esta migracion" en la entra
     de Autollantas, no un descuido de esta migracion: queda documentada aqui y en el javadoc
     de `anularFactura`, y **fijada por el test** `anularNoRevierteElCostoDelProducto`, para
     que nadie la "arregle" por accidente creyendo que es un bug de ServiBox.
+  * **Reemplazado el 2026-10-24**: por decision de producto, anular y recuperar ajustan el
+    costo. Ver *Costo del producto al anular y recuperar una compra*.
 * Cubierto por `PurchasesCostSyncTest`: costo y precio sugerido tras comprar (a credito y de
   contado), el precio de la ultima linea cuando el producto se repite, y la no reversion al
   anular. Ningun test previo de Purchases hubo que ajustarlo: todos compran al mismo precio

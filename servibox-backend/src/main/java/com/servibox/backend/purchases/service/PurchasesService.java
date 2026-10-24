@@ -28,7 +28,11 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -40,6 +44,9 @@ public class PurchasesService {
 
     /** Misma tolerancia de redondeo en pesos que en Sales. */
     private static final double TOLERANCIA_PESOS = 1.0;
+
+    /** Medio centavo: el costo del producto todavia es el precio de una linea. */
+    private static final double TOLERANCIA_COSTO = 0.005;
 
     private final PurchaseRepository purchaseRepository;
     private final PurchaseDetailRepository purchaseDetailRepository;
@@ -281,11 +288,8 @@ public class PurchasesService {
      * credito sin devolver; es el mismo defecto que tenia su anulacion de ventas y se
      * corrige igual. Ver 03-DECISIONS.md.
      *
-     * **No revierte el `purchaseCost` del producto.** Anular deshace el stock y el dinero,
-     * pero el costo y el precio sugerido se quedan como los dejo la compra. Es lo que hace
-     * `cancelPurchase` de Autollantas y se hereda a proposito: sin historico de costos no
-     * hay a que valor volver. Documentado en 03-DECISIONS.md y cubierto por
-     * `anularNoRevierteElCostoDelProducto`.
+     * Si el costo de un producto todavia es el precio de su linea en esta compra, vuelve al
+     * de la ultima compra no anulada de ese producto. Ver revertirCostos.
      */
     @Transactional
     public Purchase anularFactura(Long purchaseId) {
@@ -323,6 +327,7 @@ public class PurchasesService {
         for (PurchaseDetail detalle : detalles) {
             quitarStock(detalle.getProduct(), detalle.getQuantity());
         }
+        revertirCostos(compra, detalles);
 
         compra.setStatus(PurchaseStatus.ANULADA);
         return purchaseRepository.save(compra);
@@ -338,8 +343,8 @@ public class PurchasesService {
      * salen de la misma cuenta: si uno no alcanza, InsufficientBalanceException y no cambia
      * ni el estado, ni el stock, ni los saldos, ni las filas.
      *
-     * Como la anulacion, **no toca el `purchaseCost`** ni el precio sugerido. Ver
-     * 03-DECISIONS.md.
+     * Si esta compra vuelve a ser la mas reciente de un producto, el costo vuelve al precio de
+     * su linea. Ver reaplicarCostos.
      */
     @Transactional
     public Purchase restaurarCompra(Long purchaseId) {
@@ -353,9 +358,11 @@ public class PurchasesService {
 
         treasuryService.reaplicarSaldosDeCompra(compra);
 
-        for (PurchaseDetail detalle : purchaseDetailRepository.findByPurchaseId(compra.getId())) {
+        List<PurchaseDetail> detalles = purchaseDetailRepository.findByPurchaseId(compra.getId());
+        for (PurchaseDetail detalle : detalles) {
             aumentarStock(detalle.getProduct(), detalle.getQuantity());
         }
+        reaplicarCostos(compra, detalles);
 
         compra.setStatus(saldoPendiente(compra) <= TOLERANCIA_PESOS ? PurchaseStatus.PAGADA : PurchaseStatus.PENDIENTE);
         return purchaseRepository.save(compra);
@@ -455,6 +462,67 @@ public class PurchasesService {
         }
         producto.setPurchaseCost(precio);
         inventoryService.recalculatePrices(producto);
+    }
+
+    /**
+     * Al anular: por cada producto cuyo costo todavia es el precio de su linea en esta compra
+     * (la ultima, si tiene varias), el costo pasa al de la ultima compra no anulada de ese
+     * producto, con IVA y precio sugerido recalculados. Si el costo es otro (se edito a mano
+     * o lo fijo una compra posterior) no se toca, y sin otras compras se queda como esta: no
+     * hay historico de costos. "Ultima" es la de mayor id, el mismo orden en que la creacion
+     * va reescribiendo el costo. Los productos ya estan bloqueados.
+     */
+    private void revertirCostos(Purchase compra, List<PurchaseDetail> detalles) {
+        Map<Long, PurchaseDetail> lineas = ultimaLineaPorProducto(detalles);
+        Map<Long, PurchaseDetailRepository.LineaDeCosto> anteriores = ultimaLineaDeOtrasCompras(compra, lineas);
+        lineas.forEach((productoId, linea) -> {
+            Product producto = linea.getProduct();
+            PurchaseDetailRepository.LineaDeCosto anterior = anteriores.get(productoId);
+            if (anterior == null || producto.getPurchaseCost() == null
+                    || Math.abs(producto.getPurchaseCost() - linea.getPrice()) > TOLERANCIA_COSTO) {
+                return;
+            }
+            sincronizarCosto(producto, anterior.getPrice());
+        });
+    }
+
+    /**
+     * Al recuperar: si ninguna otra compra no anulada del producto es posterior a esta, el
+     * costo vuelve al precio de su linea. Mismo criterio de "ultima" que revertirCostos.
+     */
+    private void reaplicarCostos(Purchase compra, List<PurchaseDetail> detalles) {
+        Map<Long, PurchaseDetail> lineas = ultimaLineaPorProducto(detalles);
+        Map<Long, PurchaseDetailRepository.LineaDeCosto> otras = ultimaLineaDeOtrasCompras(compra, lineas);
+        lineas.forEach((productoId, linea) -> {
+            PurchaseDetailRepository.LineaDeCosto otra = otras.get(productoId);
+            if (otra == null || otra.getPurchaseId() < compra.getId()) {
+                sincronizarCosto(linea.getProduct(), linea.getPrice());
+            }
+        });
+    }
+
+    /** Por producto, su ultima linea en la compra: la que fijo el costo al crearla. */
+    private static Map<Long, PurchaseDetail> ultimaLineaPorProducto(List<PurchaseDetail> detalles) {
+        Map<Long, PurchaseDetail> lineas = new LinkedHashMap<>();
+        detalles.stream()
+                .filter(d -> d.getProduct() != null && d.getPrice() != null)
+                .sorted(Comparator.comparing(PurchaseDetail::getId))
+                .forEach(d -> lineas.put(d.getProduct().getId(), d));
+        return lineas;
+    }
+
+    /** Por producto, la ultima linea de su compra no anulada mas reciente, sin contar esta. */
+    private Map<Long, PurchaseDetailRepository.LineaDeCosto> ultimaLineaDeOtrasCompras(
+            Purchase compra, Map<Long, PurchaseDetail> lineas) {
+        Map<Long, PurchaseDetailRepository.LineaDeCosto> ultimas = new HashMap<>();
+        if (lineas.isEmpty()) {
+            return ultimas;
+        }
+        // Vienen en orden de id de linea: la ultima de cada producto pisa a las anteriores.
+        purchaseDetailRepository.findLineasDeLaUltimaCompra(lineas.keySet(), compra.getId(),
+                        PurchaseStatus.ANULADA, TenantContext.getTenantId())
+                .forEach(l -> ultimas.put(l.getProductId(), l));
+        return ultimas;
     }
 
     private void aumentarStock(Product producto, Integer cantidad) {

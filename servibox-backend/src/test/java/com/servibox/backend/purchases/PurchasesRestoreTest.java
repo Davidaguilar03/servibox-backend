@@ -265,9 +265,12 @@ class PurchasesRestoreTest {
         fixture.verificarInvariante();
     }
 
-    /** Ni la anulacion ni la restauracion tocan el costo que la compra le puso al producto. */
+    /**
+     * Sin otras compras del producto la anulacion deja el costo, y la restauracion lo deja en
+     * el de esta compra, que vuelve a ser la mas reciente. Ver PurchasesCostRevertTest.
+     */
     @Test
-    void restaurarNoCambiaElCostoDelProducto() {
+    void restaurarLaUnicaCompraDejaElCostoDelProducto() {
         Purchase compra = comprar("FAC-00007", PaymentType.CREDITO, null, 1, 120000.0);
         purchasesService.anularFactura(compra.getId());
         Product antes = productoActual();

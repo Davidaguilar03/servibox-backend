@@ -150,11 +150,12 @@ class PurchasesCostSyncTest {
     }
 
     /**
-     * Omision heredada de Autollantas a proposito: cancelPurchase devuelve el stock y el
-     * dinero, pero nunca toca purchaseCost. Ver 03-DECISIONS.md.
+     * Sin otra compra no anulada del producto no hay a que costo volver: anular devuelve el
+     * stock y el costo se queda. Con otra compra vuelve al de esa, ver PurchasesCostRevertTest
+     * y 03-DECISIONS.md.
      */
     @Test
-    void anularNoRevierteElCostoDelProducto() {
+    void anularSinOtrasComprasDejaElCostoDelProducto() {
         comprar("FAC-COSTO-4", PaymentType.CREDITO, null,
                 new PurchasesService.LineaCompra(llanta.getId(), 3, 25000.0));
         Purchase compra = purchasesService.findAllPurchases().get(0);
@@ -164,7 +165,7 @@ class PurchasesCostSyncTest {
         Product despues = recargarLlanta();
         // El stock si vuelve...
         assertThat(despues.getQuantity()).isEqualTo(10);
-        // ...pero el costo y el precio sugerido se quedan como los dejo la compra.
+        // ...y el costo y el precio sugerido se quedan: no hay otra compra a la que volver.
         assertThat(despues.getPurchaseCost()).isEqualTo(25000.0);
         assertThat(despues.getSuggestedPrice()).isCloseTo(50000.0, within(0.001));
     }
