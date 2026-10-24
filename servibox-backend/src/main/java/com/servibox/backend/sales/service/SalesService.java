@@ -16,6 +16,8 @@ import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
 import com.servibox.backend.treasury.service.TreasuryService;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -25,6 +27,7 @@ import java.math.BigInteger;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -53,6 +56,9 @@ public class SalesService {
     private final TreasuryService treasuryService;
     /** El "hoy" de negocio, ver BusinessClockConfiguration. */
     private final Clock clock;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     @Transactional(readOnly = true)
     public List<Sale> findAllSales() {
@@ -166,6 +172,12 @@ public class SalesService {
             throw ex;
         }
 
+        // Despues de insertar la venta y antes de validar el stock: la cuenta del contado y
+        // los productos, en ese orden y cada grupo por id ascendente. Ver Bloqueos en
+        // 02-CONVENTIONS.md.
+        treasuryService.bloquearCuentas(Arrays.asList(paymentType == PaymentType.CONTADO ? cuenta.getId() : null));
+        inventoryService.bloquearProductos(lineas.stream().map(LineaFactura::productId).toList());
+
         double subtotal = 0.0;
         double ivaGenerado = 0.0;
         double ivaDescontable = 0.0;
@@ -230,8 +242,9 @@ public class SalesService {
      */
     @Transactional
     public Movement registrarAbono(Long saleId, Long accountId, Double monto, LocalDate fecha) {
-        Sale venta = findSaleById(saleId)
-                .orElseThrow(() -> new IllegalArgumentException("Factura no encontrada: " + saleId));
+        // Bloqueada: dos abonos o un abono y una anulacion de la misma factura se ejecutan uno
+        // detras de otro, y el segundo ve el estado y el saldo pendiente que dejo el primero.
+        Sale venta = bloquearVenta(saleId);
 
         if (venta.getStatus() != SaleStatus.PENDIENTE) {
             throw new InvalidSaleOperationException(
@@ -258,6 +271,7 @@ public class SalesService {
                     "El abono de " + monto + " excede el saldo pendiente de " + pendiente);
         }
 
+        treasuryService.bloquearCuentas(Arrays.asList(accountId));
         Account cuenta = treasuryService.findAccountById(accountId)
                 .orElseThrow(() -> new IllegalArgumentException("Cuenta no encontrada: " + accountId));
 
@@ -283,13 +297,13 @@ public class SalesService {
      */
     @Transactional
     public Sale anularFactura(Long saleId) {
-        Sale venta = findSaleById(saleId)
-                .orElseThrow(() -> new IllegalArgumentException("Factura no encontrada: " + saleId));
+        Sale venta = bloquearVenta(saleId);
 
         if (venta.getStatus() == SaleStatus.ANULADA) {
             throw new InvalidSaleOperationException("La factura " + venta.getInvoiceNumber()
                     + " ya esta anulada");
         }
+        bloquearCuentasYProductos(venta);
 
         treasuryService.revertirSaldosDeVenta(venta);
 
@@ -313,13 +327,13 @@ public class SalesService {
      */
     @Transactional
     public Sale restaurarFactura(Long saleId) {
-        Sale venta = findSaleById(saleId)
-                .orElseThrow(() -> new IllegalArgumentException("Factura no encontrada: " + saleId));
+        Sale venta = bloquearVenta(saleId);
 
         if (venta.getStatus() != SaleStatus.ANULADA) {
             throw new InvalidSaleOperationException("Solo se puede restaurar una factura ANULADA, y la "
                     + venta.getInvoiceNumber() + " esta " + venta.getStatus());
         }
+        bloquearCuentasYProductos(venta);
 
         for (SaleDetail detalle : saleDetailRepository.findBySaleId(venta.getId())) {
             descontarStock(detalle.getProduct(), detalle.getQuantity());
@@ -329,6 +343,27 @@ public class SalesService {
 
         venta.setStatus(saldoPendiente(venta) <= TOLERANCIA_PESOS ? SaleStatus.PAGADA : SaleStatus.PENDIENTE);
         return saleRepository.save(venta);
+    }
+
+    /**
+     * La venta del tenant activo con SELECT ... FOR UPDATE y refrescada (con open-in-view el
+     * controlador ya la cargo), o el mismo 400 de siempre si no existe.
+     */
+    private Sale bloquearVenta(Long saleId) {
+        Sale venta = saleRepository.findByIdAndTenantIdForUpdate(saleId, TenantContext.getTenantId())
+                .orElseThrow(() -> new IllegalArgumentException("Factura no encontrada: " + saleId));
+        entityManager.refresh(venta);
+        return venta;
+    }
+
+    /** Anular y restaurar: las cuentas de sus movimientos y despues los productos de sus lineas. */
+    private void bloquearCuentasYProductos(Sale venta) {
+        treasuryService.bloquearCuentas(treasuryService.movimientosDeVenta(venta).stream()
+                .map(m -> m.getAccount().getId())
+                .toList());
+        inventoryService.bloquearProductos(saleDetailRepository.findBySaleId(venta.getId()).stream()
+                .map(d -> d.getProduct().getId())
+                .toList());
     }
 
     /** Concepto del ingreso de una venta de contado. Unica copia del texto. */

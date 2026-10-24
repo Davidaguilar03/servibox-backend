@@ -1,7 +1,10 @@
 package com.servibox.backend.treasury.repository;
 
 import com.servibox.backend.treasury.entity.Account;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
 
 import java.util.Optional;
 
@@ -16,4 +19,14 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
      * filtro, y ademas el tenant va explicito en el where.
      */
     Optional<Account> findByIdAndTenantId(Long id, Long tenantId);
+
+    /**
+     * findByIdAndTenantId con bloqueo pesimista de escritura (SELECT ... FOR UPDATE): la fila
+     * queda bloqueada hasta que termina la transaccion. No refresca una entidad que ya estaba
+     * en el contexto de persistencia; quien la usa la refresca. Ver Bloqueos en
+     * 02-CONVENTIONS.md.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT a FROM Account a WHERE a.id = :id AND a.tenantId = :tenantId")
+    Optional<Account> findByIdAndTenantIdForUpdate(Long id, Long tenantId);
 }

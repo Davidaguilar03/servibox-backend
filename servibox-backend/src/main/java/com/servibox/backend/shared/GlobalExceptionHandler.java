@@ -21,7 +21,10 @@ import com.servibox.backend.tenant.AdminRequiredException;
 import com.servibox.backend.treasury.service.DuplicateAccountNameException;
 import com.servibox.backend.treasury.service.InvalidTransferException;
 import com.servibox.backend.treasury.service.InvalidMovementOperationException;
+import jakarta.persistence.LockTimeoutException;
 import lombok.extern.slf4j.Slf4j;
+import org.hibernate.PessimisticLockException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -239,6 +242,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ErrorResponse> manejarNoEncontrado(NoResourceFoundException ex) {
         return construir(HttpStatus.NOT_FOUND, "Recurso no encontrado");
+    }
+
+    /**
+     * Bloqueo de fila no obtenido: se agoto la espera (jakarta.persistence.lock.timeout) o el
+     * motor detecto un interbloqueo. La operacion no escribio nada y se puede repetir: 409.
+     * Spring traduce el error de los repositorios a PessimisticLockingFailureException
+     * (CannotAcquireLockException); las demas son las de JPA y Hibernate sin traducir.
+     */
+    @ExceptionHandler({PessimisticLockingFailureException.class, jakarta.persistence.PessimisticLockException.class,
+            LockTimeoutException.class, PessimisticLockException.class})
+    public ResponseEntity<ErrorResponse> manejarBloqueo(Exception ex) {
+        log.warn("Bloqueo no obtenido: {}", ex.getMessage());
+        return construir(HttpStatus.CONFLICT, "El recurso esta siendo modificado por otra operacion, intenta de nuevo");
     }
 
     /**

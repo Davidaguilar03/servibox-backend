@@ -12,6 +12,62 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-24: Bloqueo pesimista de saldos y stock
+
+* Problema: el saldo de una cuenta y el stock de un producto se leian y se escribian en
+  Java sin ningun bloqueo (ni `@Version`, ni `@Lock`, ni `FOR UPDATE`). Con peticiones
+  simultaneas la segunda escritura pisaba la primera. Evidencia en PostgreSQL 16 real: el
+  Banco quedo en `saldo_actual` 781000.00 cuando sus movimientos sumaban 745300.00 (3 por
+  11900 perdidos) y un producto quedo en 18 unidades en vez de 21. Tambien entraban las dos
+  compras simultaneas del mismo proveedor con FAC-300 y fac-300 (el servicio compara sin
+  mayusculas, la restriccion de la base no). En H2 las pruebas nuevas de
+  `concurrency.ConcurrentOperationsTest` fallaban las 10: stock 96 en vez de 60, 16 abonos
+  aceptados donde cabian 10, 20 transferencias sin saldo aceptadas donde cabian 5, y 500 en
+  transferencias cruzadas.
+* Decision: bloqueo pesimista de escritura (`SELECT ... FOR UPDATE`) al leer.
+  * **Metodos.** `findByIdAndTenantIdForUpdate` con `@Lock(PESSIMISTIC_WRITE)` en
+    `AccountRepository`, `ProductRepository`, `SaleRepository`, `PurchaseRepository`,
+    `MovementRepository` y `CounterpartyRepository`, con el tenant en el where. Cuentas y
+    productos se bloquean con `TreasuryService.bloquearCuentas` e
+    `InventoryService.bloquearProductos`; facturas, movimientos manuales y proveedor dentro
+    de su service.
+  * **Refresh.** Despues de bloquear se refresca la entidad: con open-in-view el controlador
+    ya cargo la cuenta, la factura o el producto, y la consulta con bloqueo devuelve esa
+    misma instancia sin pisar el valor viejo.
+  * **Rutas.** Ventas: crear (cuenta del contado y productos), abonar (factura y cuenta),
+    anular y restaurar (factura, cuentas de sus movimientos, productos de sus lineas).
+    Compras: crear (proveedor, cuenta del contado y productos), pagar, anular y restaurar
+    (igual que ventas). Tesoreria: movimiento manual (su cuenta), editar y borrar un
+    movimiento manual (el movimiento y las cuentas vieja y nueva), transferencia (las dos
+    cuentas). Inventario: editar un producto, editar una categoria, cambiar su margen y la
+    configuracion financiera (los productos cuyos precios se rehacen, porque la fila se
+    reescribe entera, stock incluido).
+  * **Orden.** Documento (factura, movimiento manual o proveedor; una factura nueva cuenta
+    como documento porque se inserta antes), cuentas y productos, cada grupo por id
+    ascendente. Siempre antes de validar el saldo, el stock o el estado.
+  * **Proveedor.** Crear una compra bloquea la fila del proveedor antes de validar el
+    numero: sus compras se serializan y la segunda de FAC-300 y fac-300 ve la primera y da
+    409. La traduccion de la violacion de `uk_compra_tenant_supplier_invoice_number` a 409
+    se conserva.
+  * **Espera.** `spring.jpa.properties.jakarta.persistence.lock.timeout=5000`. Un bloqueo no
+    obtenido (espera agotada o interbloqueo detectado por el motor) es 409 "El recurso esta
+    siendo modificado por otra operacion, intenta de nuevo", en `GlobalExceptionHandler`
+    antes del generico.
+* Alternativas consideradas: UPDATE atomico del valor (`saldo_actual = saldo_actual - :monto`;
+  no sirve donde hay que validar antes de escribir, como el saldo suficiente, el stock o el
+  pendiente de una factura, y dejaria las dos reglas en dos sitios); version optimista con
+  `@Version` y reintentos (necesita una migracion para la columna y un bucle de reintento
+  en cada operacion, y bajo contencion real, que es justo este caso, reintenta mucho).
+* No se hizo: version optimista; migrar los montos de `Double` a `BigDecimal` (sigue en
+  Pendientes de 04-DATA-MODEL.md); serializar la numeracion automatica de ventas (dos
+  ventas simultaneas sin numero siguen pudiendo chocar con 409 por numero repetido, como
+  antes). Sin revisar: la primera creacion simultanea del Consumidor final.
+* Motivo: todas estas operaciones leen, validan y escriben, y deben serializarse en esos
+  tres pasos; el bloqueo pesimista es lo unico que lo garantiza sin cambiar el esquema. H2
+  (modo PostgreSQL, MVStore) y PostgreSQL soportan `FOR UPDATE` y la espera maxima con la
+  configuracion del proyecto. Supera la nota de concurrencia de "Numero de factura de compra
+  unico por proveedor (V3)".
+
 ## 2026-10-23: Numero de factura de compra unico por proveedor (V3)
 
 * Decision: el numero de factura de compra es unico por tenant **y proveedor**, no por
