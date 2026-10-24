@@ -2,6 +2,7 @@ package com.servibox.backend.purchases.service;
 
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.counterparties.entity.CounterpartyRole;
+import com.servibox.backend.counterparties.repository.CounterpartyRepository;
 import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.repository.ProductRepository;
@@ -16,6 +17,8 @@ import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
 import com.servibox.backend.treasury.service.TreasuryService;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -24,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
@@ -40,11 +44,15 @@ public class PurchasesService {
     private final PurchaseRepository purchaseRepository;
     private final PurchaseDetailRepository purchaseDetailRepository;
     private final CounterpartyService counterpartyService;
+    private final CounterpartyRepository counterpartyRepository;
     private final ProductRepository productRepository;
     private final InventoryService inventoryService;
     private final TreasuryService treasuryService;
     /** El "hoy" de negocio, ver BusinessClockConfiguration. */
     private final Clock clock;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     @Transactional(readOnly = true)
     public List<Purchase> findAllPurchases() {
@@ -83,6 +91,10 @@ public class PurchasesService {
                                  String paymentMethod,
                                  List<LineaCompra> lineas) {
 
+        // El proveedor bloqueado serializa sus compras: dos compras simultaneas suyas con
+        // FAC-300 y fac-300 ya no pasan las dos la validacion, que distingue sin mayusculas y la
+        // restriccion de la base no. Va antes de validar el numero.
+        bloquearProveedor(proveedor);
         validarNumeroFacturaUnico(invoiceNumber, proveedor, null);
         // Toda compra tiene tercero (id_tercero NOT NULL en el diccionario), y no hay
         // proveedor por defecto: una factura de compra siempre la expide alguien.
@@ -133,6 +145,11 @@ public class PurchasesService {
             }
             throw ex;
         }
+
+        // Despues del proveedor y de insertar la compra: la cuenta del contado y los
+        // productos, en ese orden y cada grupo por id ascendente, antes de validar el saldo.
+        treasuryService.bloquearCuentas(Arrays.asList(paymentType == PaymentType.CONTADO ? cuenta.getId() : null));
+        inventoryService.bloquearProductos(lineas.stream().map(LineaCompra::productId).toList());
 
         double subtotal = 0.0;
         double ivaTotal = 0.0;
@@ -210,8 +227,7 @@ public class PurchasesService {
      */
     @Transactional
     public Movement registrarPago(Long purchaseId, Long accountId, Double monto, LocalDate fecha) {
-        Purchase compra = findPurchaseById(purchaseId)
-                .orElseThrow(() -> new IllegalArgumentException("Compra no encontrada: " + purchaseId));
+        Purchase compra = bloquearCompra(purchaseId);
 
         if (compra.getStatus() != PurchaseStatus.PENDIENTE) {
             throw new InvalidPurchaseOperationException(
@@ -238,6 +254,7 @@ public class PurchasesService {
                     "El pago de " + monto + " excede el saldo pendiente de " + pendiente);
         }
 
+        treasuryService.bloquearCuentas(Arrays.asList(accountId));
         Account cuenta = treasuryService.findAccountById(accountId)
                 .orElseThrow(() -> new IllegalArgumentException("Cuenta no encontrada: " + accountId));
 
@@ -272,13 +289,13 @@ public class PurchasesService {
      */
     @Transactional
     public Purchase anularFactura(Long purchaseId) {
-        Purchase compra = findPurchaseById(purchaseId)
-                .orElseThrow(() -> new IllegalArgumentException("Compra no encontrada: " + purchaseId));
+        Purchase compra = bloquearCompra(purchaseId);
 
         if (compra.getStatus() == PurchaseStatus.ANULADA) {
             throw new InvalidPurchaseOperationException(
                     "La compra " + compra.getInvoiceNumber() + " ya esta anulada");
         }
+        bloquearCuentasYProductos(compra);
 
         List<PurchaseDetail> detalles = purchaseDetailRepository.findByPurchaseId(compra.getId());
 
@@ -326,13 +343,13 @@ public class PurchasesService {
      */
     @Transactional
     public Purchase restaurarCompra(Long purchaseId) {
-        Purchase compra = findPurchaseById(purchaseId)
-                .orElseThrow(() -> new IllegalArgumentException("Compra no encontrada: " + purchaseId));
+        Purchase compra = bloquearCompra(purchaseId);
 
         if (compra.getStatus() != PurchaseStatus.ANULADA) {
             throw new InvalidPurchaseOperationException("Solo se puede restaurar una compra ANULADA, y la "
                     + compra.getInvoiceNumber() + " esta " + compra.getStatus());
         }
+        bloquearCuentasYProductos(compra);
 
         treasuryService.reaplicarSaldosDeCompra(compra);
 
@@ -342,6 +359,36 @@ public class PurchasesService {
 
         compra.setStatus(saldoPendiente(compra) <= TOLERANCIA_PESOS ? PurchaseStatus.PAGADA : PurchaseStatus.PENDIENTE);
         return purchaseRepository.save(compra);
+    }
+
+    /**
+     * La compra del tenant activo con SELECT ... FOR UPDATE y refrescada (con open-in-view el
+     * controlador ya la cargo), o el mismo 400 de siempre si no existe.
+     */
+    private Purchase bloquearCompra(Long purchaseId) {
+        Purchase compra = purchaseRepository.findByIdAndTenantIdForUpdate(purchaseId, TenantContext.getTenantId())
+                .orElseThrow(() -> new IllegalArgumentException("Compra no encontrada: " + purchaseId));
+        entityManager.refresh(compra);
+        return compra;
+    }
+
+    /** El proveedor con SELECT ... FOR UPDATE y refrescado. Sin proveedor no hay nada que bloquear. */
+    private void bloquearProveedor(Counterparty proveedor) {
+        if (proveedor == null || proveedor.getId() == null) {
+            return;
+        }
+        counterpartyRepository.findByIdAndTenantIdForUpdate(proveedor.getId(), TenantContext.getTenantId())
+                .ifPresent(entityManager::refresh);
+    }
+
+    /** Anular y restaurar: las cuentas de sus movimientos y despues los productos de sus lineas. */
+    private void bloquearCuentasYProductos(Purchase compra) {
+        treasuryService.bloquearCuentas(treasuryService.movimientosDeCompra(compra).stream()
+                .map(m -> m.getAccount().getId())
+                .toList());
+        inventoryService.bloquearProductos(purchaseDetailRepository.findByPurchaseId(compra.getId()).stream()
+                .map(d -> d.getProduct().getId())
+                .toList());
     }
 
     /** Concepto del egreso de una compra de contado. Unica copia del texto. */

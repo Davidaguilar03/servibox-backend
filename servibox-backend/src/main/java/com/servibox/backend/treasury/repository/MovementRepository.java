@@ -1,8 +1,11 @@
 package com.servibox.backend.treasury.repository;
 
 import com.servibox.backend.treasury.entity.Movement;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
 import java.util.Optional;
@@ -21,6 +24,16 @@ public interface MovementRepository extends JpaRepository<Movement, Long>, JpaSp
      * Hibernate no se aplica a EntityManager.find(). Ver 02-CONVENTIONS.md.
      */
     Optional<Movement> findByIdAndTenantId(Long id, Long tenantId);
+
+    /**
+     * findByIdAndTenantId con bloqueo pesimista de escritura (SELECT ... FOR UPDATE): la fila
+     * queda bloqueada hasta que termina la transaccion. No refresca una entidad que ya estaba
+     * en el contexto de persistencia; quien la usa la refresca. Ver Bloqueos en
+     * 02-CONVENTIONS.md.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT m FROM Movement m WHERE m.id = :id AND m.tenantId = :tenantId")
+    Optional<Movement> findByIdAndTenantIdForUpdate(Long id, Long tenantId);
 
     /**
      * Todos los movimientos de una venta, **activos o no**: el contado y los abonos. Los

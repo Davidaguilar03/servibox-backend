@@ -231,6 +231,35 @@ activo es `ResourceNotFoundException` (**404**, el mismo para "no existe" y para
 otro tenant"). Un id que llega **dentro del cuerpo** y no resuelve es
 `IllegalArgumentException` (**400**): ahi el problema si es la peticion.
 
+### Bloqueos
+
+**Toda operacion que lea y escriba el saldo de una cuenta (`currentBalance`) o el stock de
+un producto (`quantity`) bloquea esas filas antes de validar.** Sin bloqueo, dos peticiones
+simultaneas leen el mismo valor y la segunda pisa la escritura de la primera. Como se
+detecto en [03-DECISIONS.md](03-DECISIONS.md), "Bloqueo pesimista de saldos y stock".
+
+* Cuentas con `TreasuryService.bloquearCuentas(ids)` y productos con
+  `InventoryService.bloquearProductos(ids)`: `findByIdAndTenantIdForUpdate` (`SELECT ... FOR
+  UPDATE`, con el tenant en el where como `findByIdAndTenantId`) en **orden ascendente de
+  id**, sin repetir, y despues `refresh`. El refresh no sobra: con open-in-view el
+  controlador ya cargo la entidad, y la consulta con bloqueo devuelve esa misma instancia
+  sin pisar su valor viejo. Los dos metodos exigen una transaccion abierta
+  (`Propagation.MANDATORY`): fuera de ella el bloqueo se soltaria enseguida.
+* La operacion que decide segun el estado o el saldo pendiente de un documento (abonar,
+  pagar, anular, restaurar una factura; editar o borrar un movimiento manual; crear una
+  compra de un proveedor) bloquea primero ese documento con su
+  `findByIdAndTenantIdForUpdate` y lo refresca.
+* **Orden fijo entre tipos**: primero el documento (una sola fila: la factura, el
+  movimiento manual o el proveedor de la compra; una factura nueva cuenta como documento
+  porque se inserta antes), despues las cuentas y por ultimo los productos, cada grupo por
+  id ascendente. Dos operaciones que toman los bloqueos en el mismo orden no se
+  interbloquean.
+* Se bloquea antes de validar y solo lo que la operacion modifica. El bloqueo dura hasta el
+  fin de la transaccion del service; las transacciones siguen siendo las del metodo publico.
+* Espera maxima `spring.jpa.properties.jakarta.persistence.lock.timeout` (5000 ms). Un
+  bloqueo no obtenido (espera agotada o interbloqueo detectado por el motor) es **409**
+  "El recurso esta siendo modificado por otra operacion, intenta de nuevo".
+
 ### Calculos que no se copian
 
 La tasa de IVA de un producto sale **solo** de

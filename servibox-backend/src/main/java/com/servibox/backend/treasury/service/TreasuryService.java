@@ -13,17 +13,23 @@ import com.servibox.backend.treasury.repository.AccountRepository;
 import com.servibox.backend.treasury.repository.MovementRepository;
 import com.servibox.backend.treasury.repository.MovementRepositoryCustom;
 import com.servibox.backend.treasury.repository.MovementSpecifications;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 @Service
@@ -34,6 +40,9 @@ public class TreasuryService {
     private final MovementRepository movementRepository;
     /** El "hoy" de negocio, ver BusinessClockConfiguration. */
     private final Clock clock;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     /** Las dos patas de una transferencia: el EGRESO del origen y el INGRESO del destino. */
     public record Transferencia(Movement egreso, Movement ingreso) {
@@ -244,6 +253,7 @@ public class TreasuryService {
         exigirCategoriaManual(categoria);
         validarManual(cuenta, monto);
         validarTextosManual(concepto, notas);
+        bloquearCuentas(Arrays.asList(cuenta.getId()));
 
         Movement movimiento = new Movement();
         movimiento.setCategory(categoria);
@@ -268,6 +278,7 @@ public class TreasuryService {
         Movement movimiento = movimientoManual(movimientoId);
         validarManual(nuevaCuenta, nuevoMonto);
         validarTextosManual(nuevoConcepto, nuevasNotas);
+        bloquearCuentas(Arrays.asList(movimiento.getAccount().getId(), nuevaCuenta.getId()));
 
         deshacerEfecto(movimiento);
 
@@ -287,14 +298,20 @@ public class TreasuryService {
     @Transactional
     public void eliminarMovimientoManual(Long movimientoId) {
         Movement movimiento = movimientoManual(movimientoId);
+        bloquearCuentas(Arrays.asList(movimiento.getAccount().getId()));
         deshacerEfecto(movimiento);
         movementRepository.delete(movimiento);
     }
 
-    /** El movimiento del tenant activo, o 404; y 400 si no es manual. */
+    /**
+     * El movimiento del tenant activo, bloqueado y refrescado, o 404; y 400 si no es manual.
+     * El bloqueo serializa dos ediciones o borrados del mismo movimiento: el segundo ve lo
+     * que dejo el primero (o 404 si lo borro) y no revierte dos veces el mismo efecto.
+     */
     private Movement movimientoManual(Long movimientoId) {
-        Movement movimiento = findMovementById(movimientoId)
+        Movement movimiento = movementRepository.findByIdAndTenantIdForUpdate(movimientoId, TenantContext.getTenantId())
                 .orElseThrow(() -> new ResourceNotFoundException("Movimiento no encontrado: " + movimientoId));
+        entityManager.refresh(movimiento);
         if (movimiento.getCategory() == null || !movimiento.getCategory().esManual()) {
             throw new InvalidMovementOperationException("El movimiento " + movimientoId + " es de categoria "
                     + movimiento.getCategory() + " y se gestiona desde su operacion");
@@ -359,6 +376,9 @@ public class TreasuryService {
             throw new InvalidTransferException("La cuenta origen y la cuenta destino no pueden ser la misma");
         }
 
+        // Las dos cuentas, en orden ascendente de id: dos transferencias en sentidos opuestos
+        // entre las mismas cuentas piden los bloqueos en el mismo orden y no se interbloquean.
+        bloquearCuentas(Arrays.asList(cuentaOrigen.getId(), cuentaDestino.getId()));
         // Antes de mover nada y en la misma transaccion, como en las compras de contado.
         exigirSaldoSuficiente(cuentaOrigen, monto);
 
@@ -516,6 +536,27 @@ public class TreasuryService {
     }
 
     // ---- Saldos ----
+
+    /**
+     * Bloquea las cuentas con SELECT ... FOR UPDATE, en orden ascendente de id y sin repetir,
+     * y las refresca. Toda operacion que lea y escriba currentBalance la llama antes de
+     * validar el saldo; el bloqueo dura hasta el fin de la transaccion, asi que otra
+     * operacion sobre la misma cuenta espera y despues ve el saldo ya escrito.
+     *
+     * El refresh es necesario: con open-in-view el controlador ya cargo la cuenta en el
+     * contexto de persistencia, y una consulta con bloqueo devuelve esa misma instancia sin
+     * pisar su saldo viejo. Orden y regla en Bloqueos de 02-CONVENTIONS.md.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void bloquearCuentas(Collection<Long> ids) {
+        Long tenantId = TenantContext.getTenantId();
+        ids.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .sorted()
+                .forEach(id -> accountRepository.findByIdAndTenantIdForUpdate(id, tenantId)
+                        .ifPresent(entityManager::refresh));
+    }
 
     /**
      * Unico sitio donde se guarda un Movement nuevo o editado, junto con su efecto sobre el

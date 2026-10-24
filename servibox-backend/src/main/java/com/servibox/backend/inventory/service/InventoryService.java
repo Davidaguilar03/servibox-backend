@@ -11,14 +11,19 @@ import com.servibox.backend.inventory.repository.TaxTypeRepository;
 import com.servibox.backend.purchases.repository.PurchaseDetailRepository;
 import com.servibox.backend.sales.repository.SaleDetailRepository;
 import com.servibox.backend.tenant.TenantContext;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -32,6 +37,9 @@ public class InventoryService {
     private final FinancialSettingsRepository financialSettingsRepository;
     private final SaleDetailRepository saleDetailRepository;
     private final PurchaseDetailRepository purchaseDetailRepository;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     @Transactional(readOnly = true)
     public List<Product> findAllProducts() {
@@ -50,6 +58,28 @@ public class InventoryService {
             return Optional.empty();
         }
         return productRepository.findByIdAndTenantId(id, tenantId);
+    }
+
+    /**
+     * Bloquea los productos con SELECT ... FOR UPDATE, en orden ascendente de id y sin
+     * repetir, y los refresca. Toda operacion que lea y escriba quantity (o reescriba la fila
+     * entera, como los recalculos de precio) la llama antes de validar el stock. Mismo
+     * patron que TreasuryService.bloquearCuentas; orden y regla en Bloqueos de
+     * 02-CONVENTIONS.md.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void bloquearProductos(Collection<Long> ids) {
+        Long tenantId = TenantContext.getTenantId();
+        ids.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .sorted()
+                .forEach(id -> productRepository.findByIdAndTenantIdForUpdate(id, tenantId)
+                        .ifPresent(entityManager::refresh));
+    }
+
+    private static List<Long> idsDe(List<Product> productos) {
+        return productos.stream().map(Product::getId).toList();
     }
 
     @Transactional(readOnly = true)
@@ -239,6 +269,8 @@ public class InventoryService {
     @Transactional
     public Product actualizarProducto(Long id, String code, String description, Double purchaseCost,
                                       ProductCategory category) {
+        // La fila se reescribe entera, stock incluido: sin bloqueo pisaria el de una venta.
+        bloquearProductos(List.of(id));
         Product product = findProductById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Producto no encontrado: " + id));
 
@@ -274,6 +306,7 @@ public class InventoryService {
                                                Integer redStockMin, Double targetMargin, List<Long> taxTypeIds) {
         ProductCategory category = findCategoryById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Categoria no encontrada: " + id));
+        bloquearProductos(idsDe(productRepository.findByCategoryId(id)));
 
         String nombre = name.trim().toUpperCase();
         validarCategoria(nombre, yellowStockMin, redStockMin, targetMargin);
@@ -383,6 +416,7 @@ public class InventoryService {
     @Transactional
     public FinancialSettings guardarConfiguracionFinanciera(Double expensesRate, Double dianRate, Double icaRate,
                                                             Double cardCommissionRate) {
+        bloquearProductos(idsDe(productRepository.findAll()));
         FinancialSettings settings = financialSettingsRepository.findByTenantId(TenantContext.getTenantId())
                 .orElseGet(FinancialSettings::new);
         settings.setExpensesRate(expensesRate);
@@ -437,6 +471,7 @@ public class InventoryService {
     public ProductCategory updateCategoryMargin(Long categoryId, Double targetMargin) {
         ProductCategory category = findCategoryById(categoryId)
                 .orElseThrow(() -> new IllegalArgumentException("Categoria no encontrada: " + categoryId));
+        bloquearProductos(idsDe(productRepository.findByCategoryId(categoryId)));
         category.setTargetMargin(targetMargin);
         ProductCategory guardada = saveCategory(category);
 

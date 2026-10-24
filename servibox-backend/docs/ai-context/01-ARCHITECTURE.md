@@ -268,6 +268,7 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | `AdminRequiredException` (sin rol ADMIN: perfil del tenant, configuracion financiera, alta o edicion de categorias) | 403 | "Solo un administrador puede editar los datos de la serviteca", "...editar la configuracion financiera" o "...crear o editar categorias" |
 | `SystemCounterpartyException` (editar el Consumidor final o usar su documento) | 409 | mensaje de la excepcion |
 | `InsufficientStockException`, `InsufficientBalanceException` | 409 | mensaje de la excepcion; los montos de saldo con `Moneda.formatear` ("hay $ 3.250.000 y se requieren $ 4.212.600") |
+| `PessimisticLockingFailureException` de Spring, `PessimisticLockException` y `LockTimeoutException` de JPA y `PessimisticLockException` de Hibernate (bloqueo de fila no obtenido: espera agotada o interbloqueo) | 409 | "El recurso esta siendo modificado por otra operacion, intenta de nuevo" |
 | `InvalidCredentialsException` y `AuthenticationException` | 401 | "Credenciales invalidas" |
 | `MethodArgumentNotValidException` (fallo de `@Valid`) | 400 | "Peticion invalida" |
 | `HttpMessageNotReadableException` (JSON mal formado o valor del tipo equivocado) | 400 | Si el valor es de un enum: "Valor invalido 'X' en el campo f. Valores permitidos: ..."; si no, un mensaje generico |
@@ -1077,6 +1078,13 @@ reportes en PDF y Excel".
   fechas de negocio `DATE` (`LocalDate`); auditoria `TIMESTAMP` en UTC (el
   `DateTimeProvider` de `JpaAuditingConfiguration` y `Tenant.onCreate`); enums `VARCHAR`
   con `@JdbcTypeCode(SqlTypes.VARCHAR)`, para que Hibernate no use el `ENUM` nativo de H2.
+* Concurrencia: bloqueo pesimista de fila (`SELECT ... FOR UPDATE`) en las operaciones que
+  leen y escriben saldos, stock o el estado de una factura, con un orden fijo (documento,
+  cuentas, productos; cada grupo por id ascendente) y espera maxima de 5 s
+  (`jakarta.persistence.lock.timeout`). Hibernate lo traduce a `for update wait 5` en H2 y a
+  `set local lock_timeout = 5000` mas `for no key update` en PostgreSQL (este modo no choca
+  con el `FOR KEY SHARE` que toman las claves foraneas al insertar). Regla en Bloqueos de
+  [02-CONVENTIONS.md](02-CONVENTIONS.md).
 
 ### Gestion del esquema con Flyway
 
