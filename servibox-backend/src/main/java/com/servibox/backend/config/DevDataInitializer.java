@@ -206,9 +206,10 @@ public class DevDataInitializer implements CommandLineRunner {
             Counterparty clienteDos = tercero(CounterpartyRole.CLIENTE, DocumentType.NIT, "900111222", "Transportes Andinos SAS");
             Counterparty proveedor = tercero(CounterpartyRole.PROVEEDOR, DocumentType.NIT, "800333444", "Lubricantes del Valle SAS");
 
-            paso = "ingresos ocasionales";
-            treasuryService.registrarIngresoOcasional(caja, "Aporte inicial demo", 2000000.0, mesAnterior, null);
-            treasuryService.registrarIngresoOcasional(banco, "Aporte inicial demo", 2000000.0, mesAnterior, null);
+            // Saldo inicial en la cuenta, no como ingreso ocasional: un aporte no es utilidad.
+            paso = "saldos iniciales";
+            caja = fijarSaldoInicial(caja, 1950000.0);
+            banco = fijarSaldoInicial(banco, 2000000.0);
 
             paso = "compra de contado";
             purchasesService.crearFactura("PROV-1001", proveedor, mesAnterior.plusDays(2), null,
@@ -229,6 +230,7 @@ public class DevDataInitializer implements CommandLineRunner {
             paso = "abono, gasto y ventas del mes actual";
             salesService.registrarAbono(credito.getId(), banco.getId(), 20000.0, inicioMes);
             treasuryService.registrarGastoOperativo(banco, "Arriendo del local", 450000.0, inicioMes, null);
+            treasuryService.registrarIngresoOcasional(caja, "Reintegro de proveedor", 50000.0, inicioMes, null);
             salesService.crearFactura(null, clienteDos, inicioMes, null, PaymentType.CONTADO, banco,
                     "Transferencia", List.of(new SalesService.LineaFactura(aceite.getId(), 3, 45000.0)));
             Sale anulada = salesService.crearFactura(null, clienteUno, hoy, null, PaymentType.CONTADO, caja,
@@ -240,8 +242,8 @@ public class DevDataInitializer implements CommandLineRunner {
             salesService.anularFactura(anulada.getId());
 
             log.info("Perfil dev: datos de demostracion en [{}]: 1 categoria, 3 productos, 3 terceros, "
-                    + "5 ventas (1 a credito con abono, 1 anulada), 1 compra, 5 movimientos manuales "
-                    + "(2 ingresos ocasionales, 1 gasto, las 2 patas de 1 transferencia) y 1 abono", TENANT_SLUG);
+                    + "5 ventas (1 a credito con abono, 1 anulada), 1 compra, 4 movimientos manuales "
+                    + "(1 ingreso ocasional, 1 gasto, las 2 patas de 1 transferencia) y 1 abono", TENANT_SLUG);
         } catch (RuntimeException ex) {
             log.warn("Perfil dev: fallo la siembra de demostracion en el paso [{}]: {}. El arranque sigue "
                     + "con los datos creados hasta ese punto.", paso, ex.getMessage());
@@ -257,6 +259,16 @@ public class DevDataInitializer implements CommandLineRunner {
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("No existe la cuenta base " + nombre));
         return treasuryService.findAccountById(id).orElseThrow();
+    }
+
+    /**
+     * Fija el saldo inicial de una cuenta de la siembra base. currentBalance se mueve en la
+     * misma diferencia, asi se conserva saldo_actual = balance_inicial + movimientos activos.
+     */
+    private Account fijarSaldoInicial(Account cuenta, double saldoInicial) {
+        cuenta.setCurrentBalance(cuenta.getCurrentBalance() + saldoInicial - cuenta.getInitialBalance());
+        cuenta.setInitialBalance(saldoInicial);
+        return treasuryService.saveAccount(cuenta);
     }
 
     private Product producto(ProductCategory categoria, String codigo, String descripcion,

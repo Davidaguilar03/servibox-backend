@@ -12,6 +12,59 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-24: Los ingresos ocasionales suman a la utilidad neta
+
+* Decision de producto: los movimientos `INGRESO_OCASIONAL` activos suman a la utilidad
+  neta, como en Autollantas. La utilidad bruta no cambia (ventas menos compras).
+  * `GET /api/reporting/kpis` agrega `otherIncome`: suma de los `INGRESO_OCASIONAL` activos
+    del rango, con el mismo criterio que `operatingExpenses`
+    (`TreasuryService.sumarPorCategoria`: `MovementSpecifications.activo()`, `date` dentro de
+    `[desde, hasta]` inclusive en el periodo, todo el historico en el global, tenant por el
+    filtro de Hibernate). `netProfit = grossProfit + otherIncome - operatingExpenses`. Los
+    demas campos no cambian; sin ingresos ocasionales `otherIncome` es 0 y `netProfit` el
+    de antes.
+  * Estado de resultados exportado (PDF y XLSX): seis filas, Ventas totales, Compras
+    totales (negativo), Utilidad bruta, **Otros ingresos** (positivo, texto normal),
+    Gastos operativos (negativo) y Utilidad neta, todas de `getPeriodKpis` del mismo rango.
+    Los generadores no cambiaron: Otros ingresos es una fila mas del modelo.
+  * Movimientos de cuentas, `/api/reporting/movements` y `/api/reporting/iva` no cambian.
+* Siembra de demostracion (solo perfil dev): los dos ingresos ocasionales "Aporte inicial
+  demo" de 2000000 se volvian 4000000 de utilidad del mes anterior. Ahora la siembra fija
+  el saldo inicial de las cuentas de la siembra base (Caja General 1950000, Bancolombia
+  2000000; `currentBalance` se mueve en la misma diferencia) y registra un solo ingreso
+  ocasional realista, "Reintegro de proveedor" de 50000 a Caja el primer dia del mes
+  actual. Saldos finales, ventas, compras y stock iguales que antes (Caja 1946250, Banco
+  2230650). KPIs nuevos: mes anterior ventas 748510, compras 357000, otros ingresos 0,
+  gastos 0, neta 391510; mes actual ventas 267750, compras 0, otros ingresos 50000, gastos
+  450000, neta -132250. La siembra base y el registro no cambian.
+* Hallazgo, saldo inicial de una cuenta: `POST /api/treasury/accounts` acepta
+  `initialBalance`, pero la Caja General que crea el registro (y las cuentas de la siembra
+  base) empiezan en 0 y no hay `PUT` de cuentas. Hoy la unica forma de cargar el saldo con
+  que arranca un taller es un ingreso ocasional, que ahora cuenta como utilidad. Opciones:
+  * `PUT /api/treasury/accounts/{id}` con nombre y saldo inicial: `currentBalance` se mueve
+    en la diferencia (`nuevo - inicial`), con bloqueo de la cuenta (`bloquearCuentas`) y la
+    validacion de nombre unico; `saldoAl` y el reporte de movimientos lo toman solos.
+    Archivos: `TreasuryController`, `TreasuryService`, un DTO de edicion (o reutilizar
+    `AccountRequest` sin `type`); pruebas nuevas de cuenta (cambio de saldo inicial con
+    movimientos, invariante, nombre duplicado, 404 de otro tenant, 400 por validacion,
+    concurrencia con un cobro). Sin migracion.
+  * Categoria de movimiento `APORTE` o `SALDO_INICIAL` (INGRESO, manual, fuera de
+    `otherIncome`): la `CHECK` de `movimientos` solo restringe `RECAUDO_VENTA` y
+    `PAGO_COMPRA`, asi que no pide migracion. Toca `MovementCategory` (`esManual`),
+    `validarManual` y la coherencia tipo/categoria en `TreasuryService`, el `origen` del
+    reporte de movimientos, `MovementRequest`; pruebas de tesoreria, de kpis y del reporte.
+    El frontend tendria que ofrecer la categoria nueva.
+  * Recomendacion: el `PUT` de cuentas. El saldo con que arranca una cuenta ya tiene su
+    columna (`balance_inicial`) y la invariante lo usa; un movimiento de aporte duplicaria
+    ese concepto y ensuciaria el historial y los reportes de movimientos. **Pendiente**, no
+    se implemento en esta rama.
+* Frontend (rama aparte): actualizar la vista previa de Reportes (fila Otros ingresos) y
+  las definiciones del panel (utilidad neta incluye otros ingresos, campo `otherIncome`).
+* Alternativas consideradas: sumar los ingresos ocasionales a la utilidad bruta (no son
+  ventas); dejarlos fuera como antes (descuadra con Autollantas, que si los suma).
+* Motivo: decision de producto ya tomada; reutiliza la misma suma que los gastos sin
+  formulas nuevas fuera de `KpisResponse.of`.
+
 ## 2026-10-24: Bloqueo pesimista de saldos y stock
 
 * Problema: el saldo de una cuenta y el stock de un producto se leian y se escribian en

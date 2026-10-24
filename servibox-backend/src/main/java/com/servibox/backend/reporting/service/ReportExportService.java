@@ -44,8 +44,8 @@ public class ReportExportService {
     private int maxFilas;
 
     /**
-     * Las cinco cifras de GET /api/reporting/kpis para el mismo rango, del mismo servicio:
-     * el archivo cuadra con el panel. Los ingresos ocasionales no entran, igual que en kpis.
+     * Las seis cifras de GET /api/reporting/kpis para el mismo rango, del mismo servicio:
+     * el archivo cuadra con el panel. Otros ingresos son los ingresos ocasionales, igual que en kpis.
      */
     @Transactional(readOnly = true)
     public ReportModel estadoDeResultados(LocalDate desde, LocalDate hasta) {
@@ -56,6 +56,7 @@ public class ReportExportService {
                 List.of("Ventas totales", kpis.totalSales()),
                 List.of("Compras totales", negativo(kpis.totalPurchases())),
                 List.of("Utilidad bruta", kpis.grossProfit()),
+                List.of("Otros ingresos", kpis.otherIncome()),
                 List.of("Gastos operativos", negativo(kpis.operatingExpenses())));
         return new ReportModel(tenant.getName(), tenant.getNit(), "Estado de resultados", desde, hasta, null,
                 List.of(new Column("Concepto", ColumnType.TEXT, 60), new Column("Valor", ColumnType.MONEY, 22)),

@@ -26,6 +26,7 @@ import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.xssf.usermodel.XSSFCellStyle;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -67,6 +68,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * credito FV-0101 (total 238.000) con abono de 100.000, compra de contado FAC-500 (total
  * 59.500) y una venta de contado FV-0102 (95.200) que se anula. El 05/10 un gasto de 10.000
  * (despues del rango).
+ *
+ * Estado de resultados de septiembre: ventas 357.000, compras 59.500, bruta 297.500, otros
+ * ingresos 50.000 (el del 20/08 queda fuera), gastos 30.000, neta 297.500 + 50.000 - 30.000 =
+ * 317.500. Octubre no tiene ingresos ocasionales: todo en 0 salvo gastos 10.000 y neta -10.000.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -79,6 +84,9 @@ class ReportExportTest {
     private static final LocalDate DESDE = LocalDate.of(2026, 9, 1);
     private static final LocalDate HASTA = LocalDate.of(2026, 9, 30);
     private static final String RANGO = "&desde=2026-09-01&hasta=2026-09-30";
+    private static final String RANGO_OCTUBRE = "&desde=2026-10-01&hasta=2026-10-31";
+    private static final List<String> FILAS_ESTADO = List.of("Ventas totales", "Compras totales", "Utilidad bruta",
+            "Otros ingresos", "Gastos operativos", "Utilidad neta");
 
     @Autowired
     private MockMvc mockMvc;
@@ -268,6 +276,44 @@ class ReportExportTest {
         return todos;
     }
 
+    /** Las etiquetas de la primera columna que son filas del Estado de resultados, en orden. */
+    private static List<String> filasEstado(Sheet hoja) {
+        List<String> filas = new ArrayList<>();
+        for (Row row : hoja) {
+            Cell primera = row.getCell(0);
+            if (primera != null && primera.getCellType() == CellType.STRING
+                    && FILAS_ESTADO.contains(primera.getStringCellValue())) {
+                filas.add(primera.getStringCellValue());
+            }
+        }
+        return filas;
+    }
+
+    /** Cada etiqueta seguida de su valor, en ese orden, dentro del texto del PDF. */
+    private static void enOrden(String texto, String... etiquetasYValores) {
+        int desde = 0;
+        for (String parte : etiquetasYValores) {
+            int pos = texto.indexOf(parte, desde);
+            assertThat(pos).as("'%s' despues de la posicion %d", parte, desde).isGreaterThanOrEqualTo(0);
+            desde = pos + parte.length();
+        }
+    }
+
+    private static String colorTexto(Cell celda) {
+        return ((XSSFCellStyle) celda.getCellStyle()).getFont().getXSSFColor().getARGBHex();
+    }
+
+    private String kpisJson(String rango) throws Exception {
+        return mockMvc.perform(get("/api/reporting/kpis?" + rango.substring(1))
+                        .header("Authorization", "Bearer " + tokenUno))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+    }
+
+    private static double kpi(String json, String campo) {
+        return ((Number) JsonPath.read(json, "$." + campo)).doubleValue();
+    }
+
     private String pieEsperado() {
         return "Generado el " + LocalDateTime.now(clock).format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
     }
@@ -283,18 +329,20 @@ class ReportExportTest {
                 .andExpect(jsonPath("$.totalSales").value(357000.0))
                 .andExpect(jsonPath("$.totalPurchases").value(59500.0))
                 .andExpect(jsonPath("$.operatingExpenses").value(30000.0))
-                .andExpect(jsonPath("$.netProfit").value(267500.0))
+                .andExpect(jsonPath("$.otherIncome").value(50000.0))
+                .andExpect(jsonPath("$.netProfit").value(317500.0))
                 .andReturn();
         String json = kpis.getResponse().getContentAsString();
 
         fixture.usarTenant(tenantUno);
         ReportModel modelo = reportExportService.estadoDeResultados(DESDE, HASTA);
-        assertThat(modelo.rows()).extracting(f -> f.get(0))
-                .containsExactly("Ventas totales", "Compras totales", "Utilidad bruta", "Gastos operativos");
+        assertThat(modelo.rows()).extracting(f -> f.get(0)).containsExactly("Ventas totales", "Compras totales",
+                "Utilidad bruta", "Otros ingresos", "Gastos operativos");
         assertThat(modelo.rows()).extracting(f -> f.get(1)).containsExactly(
                 ((Number) JsonPath.read(json, "$.totalSales")).doubleValue(),
                 -((Number) JsonPath.read(json, "$.totalPurchases")).doubleValue(),
                 ((Number) JsonPath.read(json, "$.grossProfit")).doubleValue(),
+                ((Number) JsonPath.read(json, "$.otherIncome")).doubleValue(),
                 -((Number) JsonPath.read(json, "$.operatingExpenses")).doubleValue());
         assertThat(modelo.result().label()).isEqualTo("Utilidad neta");
         assertThat(modelo.result().amount()).isEqualTo(((Number) JsonPath.read(json, "$.netProfit")).doubleValue());
@@ -308,12 +356,27 @@ class ReportExportTest {
                 "application/pdf", "estado-resultados_2026-09-01_2026-09-30.pdf"));
 
         assertThat(texto).contains(NOMBRE_TALLER, "Estado de resultados", "Período: 01/09/2026 a 30/09/2026",
-                "Ventas totales", "$ 357.000", "Compras totales", "-$ 59.500", "Utilidad bruta", "$ 297.500",
-                "Gastos operativos", "-$ 30.000", "Utilidad neta", "$ 267.500",
                 "Las facturas anuladas no se incluyen",
                 pieEsperado(), NOMBRE_TALLER + " · Pág. 1 de 1");
-        // Los ingresos ocasionales no entran, igual que en kpis.
-        assertThat(texto).doesNotContain("50.000", "200.000");
+        // Las seis filas en orden, cada una con su valor: el ingreso del rango suma, positivo.
+        enOrden(texto, "Ventas totales", "$ 357.000", "Compras totales", "-$ 59.500", "Utilidad bruta", "$ 297.500",
+                "Otros ingresos", "$ 50.000", "Gastos operativos", "-$ 30.000", "Utilidad neta", "$ 317.500");
+        // El ingreso ocasional del 20/08 queda fuera del rango, igual que en kpis.
+        assertThat(texto).doesNotContain("200.000", "-$ 50.000");
+    }
+
+    @Test
+    void elEstadoDeResultadosEnPdfSinIngresosOcasionalesMuestraOtrosIngresosEnCero() throws Exception {
+        escenario();
+        String json = kpisJson(RANGO_OCTUBRE);
+        assertThat(kpi(json, "otherIncome")).isEqualTo(0.0);
+        assertThat(kpi(json, "netProfit")).isEqualTo(-10000.0);
+
+        String texto = textoPdf(descargar("type=ESTADO_RESULTADOS&format=PDF" + RANGO_OCTUBRE,
+                "application/pdf", "estado-resultados_2026-10-01_2026-10-31.pdf"));
+        enOrden(texto, "Ventas totales", "$ 0", "Compras totales", "$ 0", "Utilidad bruta", "$ 0",
+                "Otros ingresos", "$ 0", "Gastos operativos", "-$ 10.000", "Utilidad neta", "-$ 10.000");
+        assertThat(texto).contains("Las facturas anuladas no se incluyen");
     }
 
     @Test
@@ -327,11 +390,39 @@ class ReportExportTest {
                 "Período: 01/09/2026 a 30/09/2026", "Las facturas anuladas no se incluyen");
         assertThat(monto(hoja, "Ventas totales")).isEqualTo(357000.0);
         assertThat(monto(hoja, "Compras totales")).isEqualTo(-59500.0);
-        assertThat(monto(hoja, "Utilidad bruta")).isEqualTo(297500.0);
-        assertThat(monto(hoja, "Gastos operativos")).isEqualTo(-30000.0);
-        assertThat(monto(hoja, "Utilidad neta")).isEqualTo(267500.0);
+        assertThat(filasEstado(hoja)).containsExactlyElementsOf(FILAS_ESTADO);
+        String json = kpisJson(RANGO);
+        assertThat(monto(hoja, "Ventas totales")).isEqualTo(357000.0).isEqualTo(kpi(json, "totalSales"));
+        assertThat(monto(hoja, "Compras totales")).isEqualTo(-59500.0).isEqualTo(-kpi(json, "totalPurchases"));
+        assertThat(monto(hoja, "Utilidad bruta")).isEqualTo(297500.0).isEqualTo(kpi(json, "grossProfit"));
+        assertThat(monto(hoja, "Otros ingresos")).isEqualTo(50000.0).isEqualTo(kpi(json, "otherIncome"));
+        assertThat(monto(hoja, "Gastos operativos")).isEqualTo(-30000.0).isEqualTo(-kpi(json, "operatingExpenses"));
+        assertThat(monto(hoja, "Utilidad neta")).isEqualTo(317500.0).isEqualTo(kpi(json, "netProfit"));
         assertThat(fila(hoja, "Ventas totales").getCell(1).getCellStyle().getDataFormatString()).isEqualTo("#,##0");
+        // Otros ingresos es una fila mas: mismo formato y texto normal, no el verde de la utilidad.
+        Cell otros = fila(hoja, "Otros ingresos").getCell(1);
+        assertThat(otros.getCellStyle().getDataFormatString()).isEqualTo("#,##0");
+        assertThat(colorTexto(otros)).isEqualTo(colorTexto(fila(hoja, "Ventas totales").getCell(1)))
+                .isEqualTo("FF000000");
+        assertThat(((XSSFCellStyle) otros.getCellStyle()).getFont().getBold()).isFalse();
         assertThat(hoja.getPaneInformation().isFreezePane()).isTrue();
+    }
+
+    @Test
+    void elEstadoDeResultadosEnExcelSinIngresosOcasionalesTieneOtrosIngresosEnCero() throws Exception {
+        escenario();
+        Sheet hoja = hoja(descargar("type=ESTADO_RESULTADOS&format=XLSX" + RANGO_OCTUBRE,
+                XLSX, "estado-resultados_2026-10-01_2026-10-31.xlsx"));
+        String json = kpisJson(RANGO_OCTUBRE);
+
+        assertThat(filasEstado(hoja)).containsExactlyElementsOf(FILAS_ESTADO);
+        assertThat(monto(hoja, "Ventas totales")).isEqualTo(0.0).isEqualTo(kpi(json, "totalSales"));
+        assertThat(monto(hoja, "Compras totales")).isEqualTo(0.0);
+        assertThat(monto(hoja, "Utilidad bruta")).isEqualTo(0.0).isEqualTo(kpi(json, "grossProfit"));
+        assertThat(monto(hoja, "Otros ingresos")).isEqualTo(0.0).isEqualTo(kpi(json, "otherIncome"));
+        assertThat(monto(hoja, "Gastos operativos")).isEqualTo(-10000.0).isEqualTo(-kpi(json, "operatingExpenses"));
+        assertThat(monto(hoja, "Utilidad neta")).isEqualTo(-10000.0).isEqualTo(kpi(json, "netProfit"));
+        assertThat(textos(hoja)).contains("Las facturas anuladas no se incluyen");
     }
 
     // ---- Movimientos de cuentas ----

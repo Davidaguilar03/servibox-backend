@@ -967,9 +967,9 @@ eliminan, y al eliminarse desaparecen solos.
 
 **`ReportingService`**
 
-* `getGlobalKpis()`: los 5 KPIs sobre todo el historico del tenant.
-* `getPeriodKpis(desde, hasta)`: los mismos 5, por `invoiceDate` de la factura o `date`
-  del movimiento de gasto dentro de `[desde, hasta]`, ambos inclusive. Dos metodos y dos consultas por
+* `getGlobalKpis()`: los KPIs sobre todo el historico del tenant.
+* `getPeriodKpis(desde, hasta)`: los mismos, por `invoiceDate` de la factura o `date`
+  del movimiento de gasto o de ingreso ocasional dentro de `[desde, hasta]`, ambos inclusive. Dos metodos y dos consultas por
   cifra, no uno con fechas opcionales: un `(:desde IS NULL OR ...)` en JPQL da problemas de
   tipado en PostgreSQL.
 
@@ -977,12 +977,13 @@ eliminan, y al eliminarse desaparecen solos.
   totalSales        = suma(Sale.total)            sin ANULADA
   totalPurchases    = suma(Purchase.total)        sin ANULADA
   grossProfit       = totalSales - totalPurchases
-  operatingExpenses = suma(Movement.amount)       categoria GASTO_OPERATIVO
-  netProfit         = grossProfit - operatingExpenses
+  operatingExpenses = suma(Movement.amount)       categoria GASTO_OPERATIVO, activos
+  otherIncome       = suma(Movement.amount)       categoria INGRESO_OCASIONAL, activos
+  netProfit         = grossProfit + otherIncome - operatingExpenses
   ```
 
   Los totales son **con IVA**, que es lo que guarda `total`. Los ingresos ocasionales no
-  entran en ningun KPI.
+  son ventas: no entran en `totalSales` ni en `grossProfit`, si en `netProfit`.
 * `getMovements(desde, hasta)`: ventas, compras, gastos e ingresos ocasionales del rango
   como renglones (`VENTA`, `COMPRA`, `GASTO`, `INGRESO`), del mas reciente al mas antiguo y
   cortado en `MAX_MOVEMENTS` (100), igual que Autollantas. `VENTA` y `COMPRA` salen de las
@@ -1015,9 +1016,10 @@ Rangos: `desde` y `hasta` son obligatorios en periodo, movimientos e IVA; si fal
   fila de resultado) y no genera archivos. `PdfReportGenerator` (OpenPDF) y
   `ExcelReportGenerator` (Apache POI, `XSSFWorkbook`) solo le dan formato al modelo, asi
   que las cifras se prueban sin leer archivos.
-* `estadoDeResultados(desde, hasta)`: llama a `getPeriodKpis` del mismo rango; las cinco
-  filas son `totalSales`, `-totalPurchases`, `grossProfit`, `-operatingExpenses` y
-  `netProfit`. No hay formula propia: el archivo cuadra con `/kpis` y con el panel.
+* `estadoDeResultados(desde, hasta)`: llama a `getPeriodKpis` del mismo rango; las seis
+  filas son `totalSales` (Ventas totales), `-totalPurchases` (Compras totales),
+  `grossProfit` (Utilidad bruta), `otherIncome` (Otros ingresos), `-operatingExpenses`
+  (Gastos operativos) y `netProfit` (Utilidad neta, fila de resultado). No hay formula propia: el archivo cuadra con `/kpis` y con el panel.
 * `movimientos(desde, hasta, accountId)`: `TreasuryService.listarParaReporte`, una sola
   consulta Criteria que proyecta fecha, cuenta, tipo, categoria, concepto, monto y los
   numeros de factura de venta y compra (join a `CUENTAS`, `VENTAS` y `COMPRAS`), con el
@@ -1044,7 +1046,8 @@ Rangos: `desde` y `hasta` son obligatorios en periodo, movimientos e IVA; si fal
 
 * `/api/reporting/kpis`: sin parametros, KPIs globales. Con `desde` y `hasta` (ISO,
   `2026-09-01`), KPIs del periodo. Una sola ruta porque la respuesta es el mismo DTO;
-  `desde` / `hasta` vuelven null en el global.
+  `desde` / `hasta` vuelven null en el global. Respuesta: `desde`, `hasta`, `totalSales`,
+  `totalPurchases`, `grossProfit`, `operatingExpenses`, `otherIncome`, `netProfit`.
 * `/api/reporting/movements?desde=...&hasta=...`
 * `/api/reporting/iva?desde=...&hasta=...`
 * `/api/reporting/export?type=ESTADO_RESULTADOS|MOVIMIENTOS&format=PDF|XLSX&desde=...&hasta=...[&accountId=...]`:
