@@ -907,10 +907,15 @@ activos o no, igual que en Sales.
   saldo de su cuenta, sin validar (`revertirSaldosDeCompra`). **No borra filas.**
 * Quita el stock que la compra habia sumado y deja la compra en `ANULADA`: sus
   movimientos quedan inactivos.
-* **No revierte el `purchaseCost` ni el `suggestedPrice` del producto**: se quedan como los
-  dejo la compra. Es lo que hace `cancelPurchase` de Autollantas y se hereda a proposito,
-  ver [03-DECISIONS.md](03-DECISIONS.md). Cubierto por
-  `anularNoRevierteElCostoDelProducto`.
+* **Costo del producto** (`revertirCostos`): por cada producto de sus lineas, si su
+  `purchaseCost` todavia es el precio de su ultima linea en esta compra (tolerancia de
+  medio centavo), pasa al precio de la ultima linea de la compra no anulada mas reciente
+  (mayor id) de ese producto, sin contar esta, y se rehacen `taxAmount` y `suggestedPrice`
+  con `recalculatePrices`. Si el costo es otro (editado a mano o fijado por una compra
+  posterior) no se toca; sin otras compras no anuladas se queda como esta. Una sola
+  consulta para todos los productos (`PurchaseDetailRepository.findLineasDeLaUltimaCompra`),
+  con los productos ya bloqueados. Ver [03-DECISIONS.md](03-DECISIONS.md), "Costo del
+  producto al anular y recuperar una compra". Cubierto por `PurchasesCostRevertTest`.
 
 Una compra ya `ANULADA` no se puede volver a anular.
 
@@ -925,8 +930,10 @@ Una compra ya `ANULADA` no se puede volver a anular.
 * Vuelve a sumar el stock (sin validacion: sumar siempre se puede).
 * Estado derivado igual que en ventas: `PAGADA` si el pendiente cae en la tolerancia de un
   peso, `PENDIENTE` si no.
-* **No toca `purchaseCost` ni `suggestedPrice`**, igual que la anulacion; cubierto por
-  `restaurarNoCambiaElCostoDelProducto`.
+* **Costo del producto** (`reaplicarCostos`): por cada producto de sus lineas, si ninguna
+  otra compra no anulada del producto tiene mayor id, el costo vuelve al precio de su ultima
+  linea en esta compra y se rehacen `taxAmount` y `suggestedPrice`; si hay una posterior, no
+  se toca. Cubierto por `PurchasesCostRevertTest`.
 
 El egreso del contado al crear la compra tambien lleva la fecha de la factura.
 
