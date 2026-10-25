@@ -97,6 +97,11 @@ class TenantRegistrationTest {
         return base.replaceFirst("\"" + campo + "\":(\"[^\"]*\"|true)", "\"" + campo + "\":" + valorJson);
     }
 
+    /** El cuerpo valido sin un campo de texto: el campo queda ausente del JSON. */
+    private static String cuerpoSin(String campo) {
+        return cuerpo("taller-errores", "ana.rojas").replaceFirst("\"" + campo + "\":\"[^\"]*\",\\s*", "");
+    }
+
     private MvcResult registrar(String body) throws Exception {
         return mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -340,6 +345,20 @@ class TenantRegistrationTest {
     // ---- Errores de validacion: uno por regla ----
 
     @Test
+    void nitYTelefonoValidosSeGuardanRecortadosYElPerfilLosDevuelve() throws Exception {
+        String body = cuerpo("taller-contacto", "ana.rojas")
+                .replace("\"nit\":\"900123456-7\"", "\"nit\":\"  900123456-7 \"")
+                .replace("\"phone\":\"+57 (300) 123-4567\"", "\"phone\":\" +57 (300) 123-4567  \"");
+        MvcResult result = registrar(body);
+        assertThat(result.getResponse().getStatus()).isEqualTo(201);
+        String token = JsonPath.read(result.getResponse().getContentAsString(), "$.token");
+
+        String perfil = getJson("/api/tenant", token);
+        assertThat(JsonPath.<String>read(perfil, "$.nit")).isEqualTo("900123456-7");
+        assertThat(JsonPath.<String>read(perfil, "$.phone")).isEqualTo("+57 (300) 123-4567");
+    }
+
+    @Test
     void sinAceptarLosTerminosEs400() throws Exception {
         esperarError(cuerpoCon("acceptTerms", "false"), 400, "Debe aceptar los terminos y condiciones");
         esperarError(cuerpoCon("acceptTerms", "null"), 400, "Debe aceptar los terminos y condiciones");
@@ -354,7 +373,11 @@ class TenantRegistrationTest {
 
     @Test
     void nitInvalidoEs400() throws Exception {
+        assertThat(cuerpoSin("nit")).doesNotContain("\"nit\"");
+        esperarError(cuerpoSin("nit"), 400, "El NIT es obligatorio");
+        esperarError(cuerpoCon("nit", "null"), 400, "El NIT es obligatorio");
         esperarError(cuerpoCon("nit", "\"\""), 400, "El NIT es obligatorio");
+        esperarError(cuerpoCon("nit", "\"   \""), 400, "El NIT es obligatorio");
         esperarError(cuerpoCon("nit", "\"" + "9".repeat(26) + "\""), 400, "El NIT no puede superar 25 caracteres");
         String formato = "El NIT solo admite digitos y un guion con el digito de verificacion, por ejemplo 900123456-7";
         esperarError(cuerpoCon("nit", "\"900.123.456\""), 400, formato);
@@ -364,6 +387,10 @@ class TenantRegistrationTest {
 
     @Test
     void telefonoInvalidoEs400() throws Exception {
+        assertThat(cuerpoSin("phone")).doesNotContain("\"phone\"");
+        esperarError(cuerpoSin("phone"), 400, "El telefono es obligatorio");
+        esperarError(cuerpoCon("phone", "null"), 400, "El telefono es obligatorio");
+        esperarError(cuerpoCon("phone", "\"\""), 400, "El telefono es obligatorio");
         esperarError(cuerpoCon("phone", "\" \""), 400, "El telefono es obligatorio");
         esperarError(cuerpoCon("phone", "\"" + "3".repeat(26) + "\""), 400,
                 "El telefono no puede superar 25 caracteres");

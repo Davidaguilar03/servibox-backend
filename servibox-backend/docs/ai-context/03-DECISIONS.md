@@ -12,6 +12,28 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-24: NIT y telefono del tenant obligatorios en la API
+
+* Decision: NIT y telefono son obligatorios en `POST /api/auth/register` (ya lo eran) y en
+  `PUT /api/tenant` (antes opcionales: en blanco o ausentes se guardaban como null). Ausentes,
+  null, vacios o solo espacios son 400 "El NIT es obligatorio" / "El telefono es
+  obligatorio"; el formato y el largo no cambian y se aplican sobre el valor recortado. Un
+  error por peticion, como en el registro. Sin rol ADMIN, `PUT /api/tenant` sigue siendo 403
+  antes de validar.
+  * **Solo en la API, sin migracion.** `nit_tenant` y `telefono_tenant` siguen NULL en la
+    base: pueden existir tenants anteriores sin esos datos. Un tenant antiguo se lee con null
+    en los dos (`GET /api/tenant`) y para editar su perfil tiene que mandar ambos.
+  * El NIT no es unico entre tenants: dos tenants pueden registrar el mismo.
+  * La siembra base crea el tenant demo con NIT 900000000-0 y telefono 3000000000,
+    inventados con el formato valido.
+  * La respuesta del login y del registro no cambia, y el encabezado de los reportes sigue
+    mostrando el NIT cuando existe.
+* Alternativas consideradas: migracion con NOT NULL y relleno (inventaria datos de tenants
+  existentes o fallaria con ellos); seguir aceptando el NIT en blanco al editar (el perfil
+  podria quedar sin los datos que el registro exige).
+* Motivo: los reportes y los documentos del taller necesitan el NIT y el telefono; un perfil
+  editado no puede quedar con menos datos de los que pide el registro.
+
 ## 2026-10-24: Precio sugerido e IVA del costo en pesos enteros
 
 * Decision: `Product.suggestedPrice` y `Product.taxAmount` se guardan y se devuelven en

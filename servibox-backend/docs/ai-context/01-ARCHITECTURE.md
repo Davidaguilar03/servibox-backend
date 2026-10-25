@@ -222,14 +222,18 @@ ceros hasta que el taller la guarde.
 TENANTS no es una entidad por tenant y el filtro de Hibernate no aplica.
 
 * **`GET /api/tenant`**: cualquier rol. `{"name", "slug", "nit", "phone"}`; `nit` y `phone`
-  son null en los tenants anteriores al registro publico.
+  son null solo en los tenants anteriores a que fueran obligatorios, hasta que editen su
+  perfil.
 * **`PUT /api/tenant`**: body `name`, `nit`, `phone`; devuelve el perfil guardado. Solo
   ADMIN: el controlador mira la authority `ROLE_ADMIN` que pone `JwtAuthenticationFilter`
   (rol en base) y si no esta lanza `AdminRequiredException`, 403 "Solo un administrador
   puede editar los datos de la serviteca", antes de validar nada. Las reglas son las del
   registro (`TenantRegistrationService.validarNombreComercial`, `validarNit`,
-  `validarTelefono`, 400 con el mismo mensaje), con `nit` y `phone` opcionales: en blanco
-  o ausentes se guardan como null. El `slug` no esta en el cuerpo; si llega, se ignora.
+  `validarTelefono`, 400 con el mismo mensaje, un error por peticion): `name`, `nit` y
+  `phone` obligatorios, en ese orden ("El NIT es obligatorio", "El telefono es
+  obligatorio"), y se guardan recortados. Un tenant antiguo con `nit` o `phone` null tiene
+  que mandar los dos para editar. En la base las dos columnas siguen admitiendo null (sin
+  migracion, ver 03-DECISIONS.md). El `slug` no esta en el cuerpo; si llega, se ignora.
 
 Sin token, los dos son 401 como cualquier ruta protegida. El nombre editado sale en el
 siguiente login y en el encabezado de los reportes.

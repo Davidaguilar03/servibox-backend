@@ -297,6 +297,15 @@ class DevDemoDataTest {
     }
 
     @Test
+    void elTenantDemoTieneNitYTelefono() throws Exception {
+        String perfil = mockMvc.perform(get("/api/tenant").header("Authorization", "Bearer " + login()))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<String>read(perfil, "$.nit")).isEqualTo("900000000-0");
+        assertThat(JsonPath.<String>read(perfil, "$.phone")).isEqualTo("3000000000");
+    }
+
+    @Test
     void ejecutarElInicializadorDosVecesNoDuplicaNada() throws Exception {
         int productos = inventoryService.findAllProducts().size();
         int terceros = counterpartyService.findAll().size();

@@ -23,29 +23,20 @@ public class TenantService {
     }
 
     /**
-     * Mismas reglas y mensajes que el registro, salvo que nit y phone son opcionales: en
-     * blanco se guardan como null.
+     * Mismas reglas y mensajes que el registro: nombre, NIT y telefono obligatorios, en ese
+     * orden, y recortados. Un tenant antiguo con NIT o telefono null tiene que mandar los dos
+     * para editar su perfil. En la base las columnas siguen admitiendo null (03-DECISIONS.md).
      */
     @Transactional
     public Tenant actualizar(TenantProfileRequest request) {
         TenantRegistrationService.validarNombreComercial(request.name());
-        String nit = enBlancoANull(request.nit());
-        if (nit != null) {
-            TenantRegistrationService.validarNit(nit);
-        }
-        String telefono = enBlancoANull(request.phone());
-        if (telefono != null) {
-            TenantRegistrationService.validarTelefono(telefono);
-        }
+        TenantRegistrationService.validarNit(request.nit());
+        TenantRegistrationService.validarTelefono(request.phone());
 
         Tenant tenant = actual();
         tenant.setName(request.name().trim());
-        tenant.setNit(nit);
-        tenant.setPhone(telefono);
+        tenant.setNit(request.nit().trim());
+        tenant.setPhone(request.phone().trim());
         return tenantRepository.save(tenant);
-    }
-
-    private static String enBlancoANull(String valor) {
-        return valor == null || valor.isBlank() ? null : valor.trim();
     }
 }
