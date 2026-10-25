@@ -71,6 +71,13 @@ public class DevDataInitializer implements CommandLineRunner {
     private static final com.servibox.backend.purchases.entity.PaymentType COMPRA_CREDITO =
             com.servibox.backend.purchases.entity.PaymentType.CREDITO;
 
+    /**
+     * Recargo de la siembra sobre el precio sugerido. Con la utilidad bruta sobre costo de lo
+     * vendido, vender al sugerido deja un margen bruto cercano al 25 por ciento y utilidad neta
+     * negativa todos los meses; con el 12 por ciento el margen queda cerca del 33 por ciento.
+     */
+    private static final double RECARGO_VENTA = 1.12;
+
     private final TenantRepository tenantRepository;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -411,14 +418,16 @@ public class DevDataInitializer implements CommandLineRunner {
     }
 
     /**
-     * Venta al precio sugerido del momento redondeado al millar. Sin cuenta es a credito, con
+     * Venta al precio sugerido del momento con RECARGO_VENTA, redondeado al millar. El costo de
+     * cada linea lo congela SalesService con el costo vigente: por eso las operaciones van en
+     * orden de fecha. Sin cuenta es a credito, con
      * vencimiento a 30 dias; sin cliente, al Consumidor final.
      */
     private Sale vender(LocalDate fecha, Counterparty cliente, Account cuenta, String medio, String... lineas) {
         List<SalesService.LineaFactura> detalle = Arrays.stream(lineas).map(linea -> {
             String[] partes = linea.split(":");
             Product producto = inventoryService.findProductById(productosPorCodigo.get(partes[0])).orElseThrow();
-            double precio = Math.round(producto.getSuggestedPrice() / 1000.0) * 1000.0;
+            double precio = Math.round(producto.getSuggestedPrice() * RECARGO_VENTA / 1000.0) * 1000.0;
             return new SalesService.LineaFactura(producto.getId(), Integer.parseInt(partes[1]), precio);
         }).toList();
         if (cuenta == null) {

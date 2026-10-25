@@ -69,9 +69,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 59.500) y una venta de contado FV-0102 (95.200) que se anula. El 05/10 un gasto de 10.000
  * (despues del rango).
  *
- * Estado de resultados de septiembre: ventas 357.000, compras 59.500, bruta 297.500, otros
- * ingresos 50.000 (el del 20/08 queda fuera), gastos 30.000, neta 297.500 + 50.000 - 30.000 =
- * 317.500. Octubre no tiene ingresos ocasionales: todo en 0 salvo gastos 10.000 y neta -10.000.
+ * La llanta cuesta 40.000 hasta la compra FAC-500, que la sube a 50.000: FV-0100 y FV-0101
+ * congelan 40.000 por linea; la anulada FV-0102 (50.000) no cuenta.
+ *
+ * Estado de resultados de septiembre: ventas sin IVA 300.000, costo de lo vendido 80.000,
+ * bruta 220.000, otros ingresos 50.000 (el del 20/08 queda fuera), gastos 30.000, neta
+ * 220.000 + 50.000 - 30.000 = 240.000. Las compras (59.500) ya no son fila. Octubre no tiene
+ * ventas ni ingresos ocasionales: todo en 0 salvo gastos 10.000 y neta -10.000.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -85,8 +89,8 @@ class ReportExportTest {
     private static final LocalDate HASTA = LocalDate.of(2026, 9, 30);
     private static final String RANGO = "&desde=2026-09-01&hasta=2026-09-30";
     private static final String RANGO_OCTUBRE = "&desde=2026-10-01&hasta=2026-10-31";
-    private static final List<String> FILAS_ESTADO = List.of("Ventas totales", "Compras totales", "Utilidad bruta",
-            "Otros ingresos", "Gastos operativos", "Utilidad neta");
+    private static final List<String> FILAS_ESTADO = List.of("Ventas sin IVA", "Costo de lo vendido",
+            "Utilidad bruta", "Otros ingresos", "Gastos operativos", "Utilidad neta");
 
     @Autowired
     private MockMvc mockMvc;
@@ -328,19 +332,22 @@ class ReportExportTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalSales").value(357000.0))
                 .andExpect(jsonPath("$.totalPurchases").value(59500.0))
+                .andExpect(jsonPath("$.netSales").value(300000.0))
+                .andExpect(jsonPath("$.costOfSales").value(80000.0))
+                .andExpect(jsonPath("$.grossProfit").value(220000.0))
                 .andExpect(jsonPath("$.operatingExpenses").value(30000.0))
                 .andExpect(jsonPath("$.otherIncome").value(50000.0))
-                .andExpect(jsonPath("$.netProfit").value(317500.0))
+                .andExpect(jsonPath("$.netProfit").value(240000.0))
                 .andReturn();
         String json = kpis.getResponse().getContentAsString();
 
         fixture.usarTenant(tenantUno);
         ReportModel modelo = reportExportService.estadoDeResultados(DESDE, HASTA);
-        assertThat(modelo.rows()).extracting(f -> f.get(0)).containsExactly("Ventas totales", "Compras totales",
+        assertThat(modelo.rows()).extracting(f -> f.get(0)).containsExactly("Ventas sin IVA", "Costo de lo vendido",
                 "Utilidad bruta", "Otros ingresos", "Gastos operativos");
         assertThat(modelo.rows()).extracting(f -> f.get(1)).containsExactly(
-                ((Number) JsonPath.read(json, "$.totalSales")).doubleValue(),
-                -((Number) JsonPath.read(json, "$.totalPurchases")).doubleValue(),
+                ((Number) JsonPath.read(json, "$.netSales")).doubleValue(),
+                -((Number) JsonPath.read(json, "$.costOfSales")).doubleValue(),
                 ((Number) JsonPath.read(json, "$.grossProfit")).doubleValue(),
                 ((Number) JsonPath.read(json, "$.otherIncome")).doubleValue(),
                 -((Number) JsonPath.read(json, "$.operatingExpenses")).doubleValue());
@@ -359,8 +366,11 @@ class ReportExportTest {
                 "Las facturas anuladas no se incluyen",
                 pieEsperado(), NOMBRE_TALLER + " · Pág. 1 de 1");
         // Las seis filas en orden, cada una con su valor: el ingreso del rango suma, positivo.
-        enOrden(texto, "Ventas totales", "$ 357.000", "Compras totales", "-$ 59.500", "Utilidad bruta", "$ 297.500",
-                "Otros ingresos", "$ 50.000", "Gastos operativos", "-$ 30.000", "Utilidad neta", "$ 317.500");
+        enOrden(texto, "Ventas sin IVA", "$ 300.000", "Costo de lo vendido", "-$ 80.000", "Utilidad bruta",
+                "$ 220.000", "Otros ingresos", "$ 50.000", "Gastos operativos", "-$ 30.000", "Utilidad neta",
+                "$ 240.000");
+        // Compras ya no es fila del estado de resultados.
+        assertThat(texto).doesNotContain("Compras", "59.500");
         // El ingreso ocasional del 20/08 queda fuera del rango, igual que en kpis.
         assertThat(texto).doesNotContain("200.000", "-$ 50.000");
     }
@@ -374,7 +384,7 @@ class ReportExportTest {
 
         String texto = textoPdf(descargar("type=ESTADO_RESULTADOS&format=PDF" + RANGO_OCTUBRE,
                 "application/pdf", "estado-resultados_2026-10-01_2026-10-31.pdf"));
-        enOrden(texto, "Ventas totales", "$ 0", "Compras totales", "$ 0", "Utilidad bruta", "$ 0",
+        enOrden(texto, "Ventas sin IVA", "$ 0", "Costo de lo vendido", "$ 0", "Utilidad bruta", "$ 0",
                 "Otros ingresos", "$ 0", "Gastos operativos", "-$ 10.000", "Utilidad neta", "-$ 10.000");
         assertThat(texto).contains("Las facturas anuladas no se incluyen");
     }
@@ -388,21 +398,19 @@ class ReportExportTest {
         assertThat(hoja.getSheetName()).isEqualTo("Estado de resultados");
         assertThat(textos(hoja)).contains(NOMBRE_TALLER, "Estado de resultados",
                 "Período: 01/09/2026 a 30/09/2026", "Las facturas anuladas no se incluyen");
-        assertThat(monto(hoja, "Ventas totales")).isEqualTo(357000.0);
-        assertThat(monto(hoja, "Compras totales")).isEqualTo(-59500.0);
         assertThat(filasEstado(hoja)).containsExactlyElementsOf(FILAS_ESTADO);
         String json = kpisJson(RANGO);
-        assertThat(monto(hoja, "Ventas totales")).isEqualTo(357000.0).isEqualTo(kpi(json, "totalSales"));
-        assertThat(monto(hoja, "Compras totales")).isEqualTo(-59500.0).isEqualTo(-kpi(json, "totalPurchases"));
-        assertThat(monto(hoja, "Utilidad bruta")).isEqualTo(297500.0).isEqualTo(kpi(json, "grossProfit"));
+        assertThat(monto(hoja, "Ventas sin IVA")).isEqualTo(300000.0).isEqualTo(kpi(json, "netSales"));
+        assertThat(monto(hoja, "Costo de lo vendido")).isEqualTo(-80000.0).isEqualTo(-kpi(json, "costOfSales"));
+        assertThat(monto(hoja, "Utilidad bruta")).isEqualTo(220000.0).isEqualTo(kpi(json, "grossProfit"));
         assertThat(monto(hoja, "Otros ingresos")).isEqualTo(50000.0).isEqualTo(kpi(json, "otherIncome"));
         assertThat(monto(hoja, "Gastos operativos")).isEqualTo(-30000.0).isEqualTo(-kpi(json, "operatingExpenses"));
-        assertThat(monto(hoja, "Utilidad neta")).isEqualTo(317500.0).isEqualTo(kpi(json, "netProfit"));
-        assertThat(fila(hoja, "Ventas totales").getCell(1).getCellStyle().getDataFormatString()).isEqualTo("#,##0");
+        assertThat(monto(hoja, "Utilidad neta")).isEqualTo(240000.0).isEqualTo(kpi(json, "netProfit"));
+        assertThat(fila(hoja, "Ventas sin IVA").getCell(1).getCellStyle().getDataFormatString()).isEqualTo("#,##0");
         // Otros ingresos es una fila mas: mismo formato y texto normal, no el verde de la utilidad.
         Cell otros = fila(hoja, "Otros ingresos").getCell(1);
         assertThat(otros.getCellStyle().getDataFormatString()).isEqualTo("#,##0");
-        assertThat(colorTexto(otros)).isEqualTo(colorTexto(fila(hoja, "Ventas totales").getCell(1)))
+        assertThat(colorTexto(otros)).isEqualTo(colorTexto(fila(hoja, "Ventas sin IVA").getCell(1)))
                 .isEqualTo("FF000000");
         assertThat(((XSSFCellStyle) otros.getCellStyle()).getFont().getBold()).isFalse();
         assertThat(hoja.getPaneInformation().isFreezePane()).isTrue();
@@ -416,8 +424,8 @@ class ReportExportTest {
         String json = kpisJson(RANGO_OCTUBRE);
 
         assertThat(filasEstado(hoja)).containsExactlyElementsOf(FILAS_ESTADO);
-        assertThat(monto(hoja, "Ventas totales")).isEqualTo(0.0).isEqualTo(kpi(json, "totalSales"));
-        assertThat(monto(hoja, "Compras totales")).isEqualTo(0.0);
+        assertThat(monto(hoja, "Ventas sin IVA")).isEqualTo(0.0).isEqualTo(kpi(json, "netSales"));
+        assertThat(monto(hoja, "Costo de lo vendido")).isEqualTo(0.0).isEqualTo(kpi(json, "costOfSales"));
         assertThat(monto(hoja, "Utilidad bruta")).isEqualTo(0.0).isEqualTo(kpi(json, "grossProfit"));
         assertThat(monto(hoja, "Otros ingresos")).isEqualTo(0.0).isEqualTo(kpi(json, "otherIncome"));
         assertThat(monto(hoja, "Gastos operativos")).isEqualTo(-10000.0).isEqualTo(-kpi(json, "operatingExpenses"));

@@ -44,8 +44,10 @@ public class ReportExportService {
     private int maxFilas;
 
     /**
-     * Las seis cifras de GET /api/reporting/kpis para el mismo rango, del mismo servicio:
-     * el archivo cuadra con el panel. Otros ingresos son los ingresos ocasionales, igual que en kpis.
+     * Seis filas con las cifras de GET /api/reporting/kpis para el mismo rango, del mismo servicio:
+     * ventas sin IVA, costo de lo vendido, utilidad bruta, otros ingresos, gastos operativos y
+     * utilidad neta. El archivo cuadra con el panel. Las compras no son fila: el costo de lo
+     * vendido las reemplaza. Otros ingresos son los ingresos ocasionales, igual que en kpis.
      */
     @Transactional(readOnly = true)
     public ReportModel estadoDeResultados(LocalDate desde, LocalDate hasta) {
@@ -53,8 +55,8 @@ public class ReportExportService {
         Tenant tenant = tenantActual();
         KpisResponse kpis = reportingService.getPeriodKpis(desde, hasta);
         List<List<Object>> filas = List.of(
-                List.of("Ventas totales", kpis.totalSales()),
-                List.of("Compras totales", negativo(kpis.totalPurchases())),
+                List.of("Ventas sin IVA", kpis.netSales()),
+                List.of("Costo de lo vendido", negativo(kpis.costOfSales())),
                 List.of("Utilidad bruta", kpis.grossProfit()),
                 List.of("Otros ingresos", kpis.otherIncome()),
                 List.of("Gastos operativos", negativo(kpis.operatingExpenses())));

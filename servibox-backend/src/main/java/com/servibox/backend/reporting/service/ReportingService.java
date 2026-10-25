@@ -55,6 +55,8 @@ public class ReportingService {
         return KpisResponse.of(null, null,
                 saleRepository.sumTotalByStatusNot(SaleStatus.ANULADA),
                 purchaseRepository.sumTotalByStatusNot(PurchaseStatus.ANULADA),
+                saleRepository.sumSubtotalByStatusNot(SaleStatus.ANULADA),
+                saleDetailRepository.sumCostByStatusNot(SaleStatus.ANULADA),
                 treasuryService.sumarPorCategoria(MovementCategory.GASTO_OPERATIVO),
                 treasuryService.sumarPorCategoria(MovementCategory.INGRESO_OCASIONAL));
     }
@@ -66,6 +68,8 @@ public class ReportingService {
         return KpisResponse.of(desde, hasta,
                 saleRepository.sumTotalByStatusNotAndInvoiceDateBetween(SaleStatus.ANULADA, desde, hasta),
                 purchaseRepository.sumTotalByStatusNotAndInvoiceDateBetween(PurchaseStatus.ANULADA, desde, hasta),
+                saleRepository.sumSubtotalByStatusNotAndInvoiceDateBetween(SaleStatus.ANULADA, desde, hasta),
+                saleDetailRepository.sumCostByStatusNotAndInvoiceDateBetween(SaleStatus.ANULADA, desde, hasta),
                 treasuryService.sumarPorCategoria(MovementCategory.GASTO_OPERATIVO, desde, hasta),
                 treasuryService.sumarPorCategoria(MovementCategory.INGRESO_OCASIONAL, desde, hasta));
     }

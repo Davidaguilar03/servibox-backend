@@ -41,5 +41,13 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             + "AND s.invoiceDate BETWEEN :desde AND :hasta")
     double sumTotalByStatusNotAndInvoiceDateBetween(SaleStatus excluido, LocalDate desde, LocalDate hasta);
 
+    /** Ventas sin IVA (suma de subtotal) en todo el historico, sin las del estado excluido. */
+    @Query("SELECT COALESCE(SUM(s.subtotal), 0) FROM Sale s WHERE s.status <> :excluido")
+    double sumSubtotalByStatusNot(SaleStatus excluido);
+
+    @Query("SELECT COALESCE(SUM(s.subtotal), 0) FROM Sale s WHERE s.status <> :excluido "
+            + "AND s.invoiceDate BETWEEN :desde AND :hasta")
+    double sumSubtotalByStatusNotAndInvoiceDateBetween(SaleStatus excluido, LocalDate desde, LocalDate hasta);
+
     List<Sale> findByInvoiceDateBetweenAndStatusNot(LocalDate desde, LocalDate hasta, SaleStatus excluido);
 }

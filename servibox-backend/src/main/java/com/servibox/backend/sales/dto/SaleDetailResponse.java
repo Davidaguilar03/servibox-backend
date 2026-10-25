@@ -10,7 +10,9 @@ public record SaleDetailResponse(
         Integer quantity,
         Double price,
         /** IVA congelado al facturar. No se recalcula. */
-        Double ivaAmount
+        Double ivaAmount,
+        /** Costo unitario sin IVA congelado al facturar. No se recalcula. */
+        Double unitCost
 ) {
 
     public static SaleDetailResponse from(SaleDetail detail) {
@@ -21,7 +23,8 @@ public record SaleDetailResponse(
                 detail.getProduct() != null ? detail.getProduct().getDescription() : null,
                 detail.getQuantity(),
                 detail.getPrice(),
-                detail.getIvaAmount()
+                detail.getIvaAmount(),
+                detail.getUnitCost()
         );
     }
 }

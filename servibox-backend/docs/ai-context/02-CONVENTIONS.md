@@ -179,11 +179,13 @@ producto en negativo.
 
 | Termino | Significado | Cuidado |
 |-|-|-|
-| KPIs globales / del periodo | Los mismos 5 indicadores sobre todo el historico o sobre `[desde, hasta]` | Global en Autollantas significa **otra cosa** (por cobrar, por pagar, saldo, alertas). Aqui global es "sin rango". Ver [03-DECISIONS.md](03-DECISIONS.md) |
+| KPIs globales / del periodo | Los mismos 8 indicadores sobre todo el historico o sobre `[desde, hasta]` | Global en Autollantas significa **otra cosa** (por cobrar, por pagar, saldo, alertas). Aqui global es "sin rango". Ver [03-DECISIONS.md](03-DECISIONS.md) |
 | `totalSales` / `totalPurchases` | Suma de `total` de las facturas, **con IVA** | Nunca incluyen facturas `ANULADA`. No confundir con `subtotal` |
-| `grossProfit` | `totalSales - totalPurchases` | Es utilidad de caja por documentos, no margen contable: compra y venta del mismo periodo no tienen por que ser de los mismos productos |
+| `netSales` | Suma de `subtotal` de las ventas, **sin IVA** | Sin `ANULADA` |
+| `costOfSales` | Suma de `unitCost * quantity` de las lineas de esas ventas | `unitCost` es el costo del producto congelado al facturar: no cambia despues |
+| `grossProfit` | `netSales - costOfSales` | Las compras **no** entran: es la utilidad de lo vendido |
 | `operatingExpenses` | Suma de los gastos operativos | Solo movimientos `GASTO_OPERATIVO`; las compras van en `totalPurchases` |
-| `netProfit` | `grossProfit - operatingExpenses` | Puede ser negativo. Los ingresos ocasionales **no** entran |
+| `netProfit` | `grossProfit + otherIncome - operatingExpenses` | Puede ser negativo. `otherIncome` son los ingresos ocasionales |
 | IVA Generado | Suma de `SaleDetail.ivaAmount` | El IVA cobrado al vender, congelado al facturar |
 | IVA Descontable | IVA ya pagado al comprar las unidades vendidas: `ivaAmount - ivaDifference` | Tambien llamado IVA a favor. **No es** el `ivaTotal` de las compras del periodo: es el de las unidades **vendidas** |
 | IVA Neto a Pagar | Generado menos Descontable, `SaleDetail.ivaDifference` | Por linea es el mismo concepto que `Sale.ivaPorPagar` por factura |
@@ -291,22 +293,25 @@ Reportes sin cargar nada a mano. Todo pasa por los services.
   criticos, `LL-007` (6) y `LU-010` (9) bajos, el resto normal. Valor del inventario a costo
   53734000.
 * Cuentas con saldo inicial fijado en la cuenta (no como ingreso ocasional): Caja General
-  2500000, Bancolombia 15000000 y Nequi (DIGITAL) 600000. Saldos finales 3011750,
-  10262260 y 6014000.
+  2500000, Bancolombia 15000000 y Nequi (DIGITAL) 600000. Saldos finales 3618650,
+  14051220 y 6808920.
 * Terceros inventados: 8 clientes (3 personas, una empresa de taxis, dos flotas, dos
   talleres), 5 proveedores y el Consumidor final. NIT con digito de verificacion valido.
 * 40 ventas (29 de contado con EFECTIVO en Caja y TRANSFERENCIA, TARJETA_DEBITO o
   TARJETA_CREDITO en Bancolombia o Nequi; 11 a credito a 30 dias, 6 pagadas con abonos y 5
-  PENDIENTE, 3 de ellas con abono parcial; 2 ANULADA) al precio sugerido redondeado al
-  millar. 9 compras con numero del proveedor (6 de contado, 3 a credito con pagos parciales,
+  PENDIENTE, 3 de ellas con abono parcial; 2 ANULADA) al precio sugerido, redondeado al
+  millar con un recargo del 12 por ciento (`RECARGO_VENTA`). 9 compras con numero del proveedor (6 de contado, 3 a credito con pagos parciales,
   1 ANULADA por duplicada). 22 gastos operativos (arriendo, energia, acueducto, internet,
   nomina por quincena, aseo, publicidad), el ingreso ocasional "Reintegro de Distrillantas
   del Oriente por garantia" de 310000 en el mes anterior y 2 transferencias de Caja a
   Bancolombia ("Consignacion de efectivo").
-* `/kpis` por mes (hace dos meses / mes anterior / mes actual): ventas 21429520 / 24552080 /
-  15234380; compras 14518000 / 10595760 / 7097160; utilidad bruta 6911520 / 13956320 /
-  8137220; gastos 7294000 / 7221800 / 5192200; otros ingresos 0 / 310000 / 0; utilidad neta
-  -382480 / 7044520 / 2945020.
+* `/kpis` por mes (hace dos meses / mes anterior / mes actual): ventas con IVA 23985640 /
+  27494950 / 17053890; compras 14518000 / 10595760 / 7097160; ventas sin IVA 20156000 /
+  23105000 / 14331000; costo de lo vendido 13572000 / 15636000 / 9606000; utilidad bruta
+  6584000 / 7469000 / 4725000 (margen 32,7 / 32,3 / 33,0 por ciento); gastos 7294000 /
+  7221800 / 5192200; otros ingresos 0 / 310000 / 0; utilidad neta -710000 / 557200 /
+  -467200. Cada venta congela el costo vigente de su momento: las operaciones van en orden de
+  fecha.
 
 Las fechas salen del reloj de negocio (`servibox.business.time-zone`): un dia que el mes no
 tiene pasa al ultimo y una fecha posterior a hoy pasa a hoy, asi que las cifras por mes son

@@ -242,9 +242,13 @@ class DevDemoDataTest {
             YearMonth mes = YearMonth.now(clock).minusMonths(atras);
             LocalDate desde = mes.atDay(1);
             LocalDate hasta = mes.atEndOfMonth();
-            double ventas = salesService.findAllSales().stream()
+            List<Sale> activas = salesService.findAllSales().stream()
                     .filter(v -> v.getStatus() != SaleStatus.ANULADA && enRango(v.getInvoiceDate(), desde, hasta))
-                    .mapToDouble(Sale::getTotal).sum();
+                    .toList();
+            double ventas = activas.stream().mapToDouble(Sale::getTotal).sum();
+            double ventasSinIva = activas.stream().mapToDouble(Sale::getSubtotal).sum();
+            double costo = activas.stream().flatMap(v -> salesService.detallesDe(v).stream())
+                    .mapToDouble(d -> d.getUnitCost() * d.getQuantity()).sum();
             double compras = purchasesService.findAllPurchases().stream()
                     .filter(c -> c.getStatus() != PurchaseStatus.ANULADA && enRango(c.getInvoiceDate(), desde, hasta))
                     .mapToDouble(Purchase::getTotal).sum();
@@ -256,11 +260,15 @@ class DevDemoDataTest {
             assertThat(numero(kpis, "$.totalPurchases")).as("compras " + mes).isCloseTo(compras, within(DELTA));
             assertThat(numero(kpis, "$.operatingExpenses")).as("gastos " + mes).isCloseTo(gastos, within(DELTA));
             assertThat(numero(kpis, "$.otherIncome")).as("otros " + mes).isCloseTo(otros, within(DELTA));
-            assertThat(numero(kpis, "$.grossProfit")).as("bruta " + mes).isCloseTo(ventas - compras, within(DELTA))
-                    .isPositive();
+            assertThat(numero(kpis, "$.netSales")).as("ventas sin IVA " + mes).isCloseTo(ventasSinIva, within(DELTA));
+            assertThat(numero(kpis, "$.costOfSales")).as("costo " + mes).isCloseTo(costo, within(DELTA));
+            double bruta = numero(kpis, "$.grossProfit");
+            assertThat(bruta).as("bruta " + mes).isCloseTo(ventasSinIva - costo, within(DELTA)).isPositive();
+            // Margen bruto plausible sobre ventas sin IVA.
+            assertThat(bruta / ventasSinIva).as("margen " + mes).isBetween(0.10, 0.45);
             assertThat(ventas).isPositive();
             netas[atras] = numero(kpis, "$.netProfit");
-            assertThat(netas[atras]).isCloseTo(ventas - compras + otros - gastos, within(DELTA));
+            assertThat(netas[atras]).isCloseTo(bruta + otros - gastos, within(DELTA));
         }
         assertThat(Math.max(netas[0], netas[1])).as("neta del mes actual o del anterior").isPositive();
     }
@@ -269,9 +277,10 @@ class DevDemoDataTest {
     void kpisDeLosTresMesesConLasCifrasDocumentadas() throws Exception {
         String token = login();
         // Agosto, septiembre y octubre de 2026: cifras de 02-CONVENTIONS.md.
-        kpisEsperados(token, YearMonth.of(2026, 8), 21429520.0, 14518000.0, 7294000.0, 0.0);
-        kpisEsperados(token, YearMonth.of(2026, 9), 24552080.0, 10595760.0, 7221800.0, 310000.0);
-        kpisEsperados(token, YearMonth.of(2026, 10), 15234380.0, 7097160.0, 5192200.0, 0.0);
+        kpisEsperados(token, YearMonth.of(2026, 8), 23985640.0, 14518000.0, 20156000.0, 13572000.0, 7294000.0, 0.0);
+        kpisEsperados(token, YearMonth.of(2026, 9), 27494950.0, 10595760.0, 23105000.0, 15636000.0, 7221800.0,
+                310000.0);
+        kpisEsperados(token, YearMonth.of(2026, 10), 17053890.0, 7097160.0, 14331000.0, 9606000.0, 5192200.0, 0.0);
     }
 
     @Test
@@ -319,15 +328,18 @@ class DevDemoDataTest {
                 .mapToDouble(Movement::getAmount).sum();
     }
 
-    private void kpisEsperados(String token, YearMonth mes, double ventas, double compras, double gastos,
-                               double otros) throws Exception {
+    private void kpisEsperados(String token, YearMonth mes, double ventas, double compras, double ventasSinIva,
+                               double costo, double gastos, double otros) throws Exception {
         String kpis = kpis(token, mes.atDay(1), mes.atEndOfMonth());
         assertThat(numero(kpis, "$.totalSales")).as("ventas " + mes).isCloseTo(ventas, within(DELTA));
         assertThat(numero(kpis, "$.totalPurchases")).as("compras " + mes).isCloseTo(compras, within(DELTA));
         assertThat(numero(kpis, "$.operatingExpenses")).as("gastos " + mes).isCloseTo(gastos, within(DELTA));
         assertThat(numero(kpis, "$.otherIncome")).as("otros " + mes).isCloseTo(otros, within(DELTA));
+        assertThat(numero(kpis, "$.netSales")).as("ventas sin IVA " + mes).isCloseTo(ventasSinIva, within(DELTA));
+        assertThat(numero(kpis, "$.costOfSales")).as("costo " + mes).isCloseTo(costo, within(DELTA));
+        assertThat(numero(kpis, "$.grossProfit")).as("bruta " + mes).isCloseTo(ventasSinIva - costo, within(DELTA));
         assertThat(numero(kpis, "$.netProfit")).as("neta " + mes)
-                .isCloseTo(ventas - compras + otros - gastos, within(DELTA));
+                .isCloseTo(ventasSinIva - costo + otros - gastos, within(DELTA));
     }
 
     private String kpis(String token, LocalDate desde, LocalDate hasta) throws Exception {

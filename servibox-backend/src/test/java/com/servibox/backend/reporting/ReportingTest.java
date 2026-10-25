@@ -60,6 +60,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * venta de 2 unidades a 200 -> subtotal 400, IVA 76, total 476, descontable 38, neto 38.
  * venta de 1 unidad a 100   -> subtotal 100, IVA 19, total 119, descontable 19, neto 0.
  * compra de 1 unidad a 100  -> subtotal 100, IVA 19, total 119.
+ *
+ * Utilidad bruta = ventas sin IVA - costo de lo vendido (costo 100 congelado por unidad):
+ * la venta de 2 a 200 deja bruta 400 - 200 = 200; la de 1 a 100, 100 - 100 = 0.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -198,7 +201,7 @@ class ReportingTest {
     // ---- Utilidades ----
 
     @Test
-    void grossProfitYNetProfitCombinanVentasComprasYGastos() {
+    void grossProfitYNetProfitCombinanVentasSinIvaCostoDeLoVendidoYGastos() {
         Taller t = new Taller(tenantUno);
         t.vender("FV-1", HOY, t.llanta, 2, 200.0);   // 476
         t.vender("FV-2", HOY, t.llanta, 1, 100.0);   // 119
@@ -212,16 +215,19 @@ class ReportingTest {
 
         assertThat(kpis.totalSales()).isCloseTo(595.0, within(DELTA));
         assertThat(kpis.totalPurchases()).isCloseTo(119.0, within(DELTA));
-        assertThat(kpis.grossProfit()).isCloseTo(476.0, within(DELTA));
+        assertThat(kpis.netSales()).isCloseTo(500.0, within(DELTA));
+        assertThat(kpis.costOfSales()).isCloseTo(300.0, within(DELTA));
+        // Las compras no entran en la utilidad bruta: 500 - 300.
+        assertThat(kpis.grossProfit()).isCloseTo(200.0, within(DELTA));
         assertThat(kpis.operatingExpenses()).isCloseTo(80.0, within(DELTA));
         assertThat(kpis.otherIncome()).isCloseTo(1000.0, within(DELTA));
-        assertThat(kpis.netProfit()).isCloseTo(1396.0, within(DELTA));
+        assertThat(kpis.netProfit()).isCloseTo(1120.0, within(DELTA));
         assertThat(kpis.desde()).isNull();
         assertThat(kpis.hasta()).isNull();
 
         // Con perdida el neto sale negativo, sin recortes.
         t.gastar("Nomina", HOY, 2000.0);
-        assertThat(reportingService.getGlobalKpis().netProfit()).isCloseTo(-604.0, within(DELTA));
+        assertThat(reportingService.getGlobalKpis().netProfit()).isCloseTo(-880.0, within(DELTA));
     }
 
     // ---- Otros ingresos ----
@@ -235,8 +241,8 @@ class ReportingTest {
 
         for (KpisResponse kpis : List.of(reportingService.getGlobalKpis(), reportingService.getPeriodKpis(HOY, HOY))) {
             assertThat(kpis.otherIncome()).isEqualTo(0.0);
-            assertThat(kpis.grossProfit()).isCloseTo(357.0, within(DELTA));
-            assertThat(kpis.netProfit()).isCloseTo(307.0, within(DELTA));
+            assertThat(kpis.grossProfit()).isCloseTo(200.0, within(DELTA));
+            assertThat(kpis.netProfit()).isCloseTo(150.0, within(DELTA));
         }
     }
 
@@ -248,7 +254,7 @@ class ReportingTest {
         t.vender("FV-1", HOY, t.llanta, 2, 200.0);   // 476
         t.gastar("Arriendo", HOY, 50.0);
         KpisResponse antes = reportingService.getPeriodKpis(desde, hasta);
-        assertThat(antes.netProfit()).isCloseTo(426.0, within(DELTA));
+        assertThat(antes.netProfit()).isCloseTo(150.0, within(DELTA));
 
         treasuryService.registrarIngresoOcasional(t.caja, "Agosto", 7000.0, LocalDate.of(2026, 8, 31), null);   // fuera
         treasuryService.registrarIngresoOcasional(t.caja, "Borde inicio", 300.0, desde, null);                 // dentro
@@ -272,12 +278,12 @@ class ReportingTest {
         Taller t = new Taller(tenantUno);
         t.vender("FV-1", HOY, t.llanta, 2, 200.0);   // 476
         Movement ingreso = treasuryService.registrarIngresoOcasional(t.caja, "Chatarra", 100.0, HOY, null);
-        assertThat(reportingService.getPeriodKpis(HOY, HOY).netProfit()).isCloseTo(576.0, within(DELTA));
+        assertThat(reportingService.getPeriodKpis(HOY, HOY).netProfit()).isCloseTo(300.0, within(DELTA));
 
         treasuryService.editarMovimientoManual(ingreso.getId(), t.caja, "Chatarra", 340.0, HOY, null);
         KpisResponse editado = reportingService.getPeriodKpis(HOY, HOY);
         assertThat(editado.otherIncome()).isCloseTo(340.0, within(DELTA));
-        assertThat(editado.netProfit()).isCloseTo(816.0, within(DELTA));
+        assertThat(editado.netProfit()).isCloseTo(540.0, within(DELTA));
 
         // Moverlo fuera del rango tambien lo saca.
         treasuryService.editarMovimientoManual(ingreso.getId(), t.caja, "Chatarra", 340.0, HOY.minusDays(1), null);
@@ -287,7 +293,7 @@ class ReportingTest {
         treasuryService.eliminarMovimientoManual(ingreso.getId());
         KpisResponse eliminado = reportingService.getPeriodKpis(HOY, HOY);
         assertThat(eliminado.otherIncome()).isEqualTo(0.0);
-        assertThat(eliminado.netProfit()).isCloseTo(476.0, within(DELTA));
+        assertThat(eliminado.netProfit()).isCloseTo(200.0, within(DELTA));
     }
 
     @Test
@@ -305,7 +311,7 @@ class ReportingTest {
 
         KpisResponse kpis = reportingService.getPeriodKpis(HOY, HOY);
         assertThat(kpis.otherIncome()).isEqualTo(0.0);
-        assertThat(kpis.netProfit()).isCloseTo(476.0 + 119.0 - 119.0 - 50.0, within(DELTA));
+        assertThat(kpis.netProfit()).isCloseTo((400.0 + 100.0) - (200.0 + 100.0) - 50.0, within(DELTA));
         assertThat(reportingService.getGlobalKpis().otherIncome()).isEqualTo(0.0);
     }
 
@@ -322,21 +328,23 @@ class ReportingTest {
         treasuryService.registrarIngresoOcasional(dos.caja, "Aporte", 90000.0, HOY, null);
         TenantContext.clear();
 
-        // 476 - 119 + 30 - 50 = 337, en el global y en el periodo.
+        // Bruta 400 - 200 = 200; neta 200 + 30 - 50 = 180, en el global y en el periodo.
         for (String query : List.of("", "?desde=" + HOY + "&hasta=" + HOY)) {
             mockMvc.perform(get("/api/reporting/kpis" + query).header("Authorization", "Bearer " + tokenUno))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.totalSales", closeTo(476.0, DELTA)))
                     .andExpect(jsonPath("$.totalPurchases", closeTo(119.0, DELTA)))
-                    .andExpect(jsonPath("$.grossProfit", closeTo(357.0, DELTA)))
+                    .andExpect(jsonPath("$.netSales", closeTo(400.0, DELTA)))
+                    .andExpect(jsonPath("$.costOfSales", closeTo(200.0, DELTA)))
+                    .andExpect(jsonPath("$.grossProfit", closeTo(200.0, DELTA)))
                     .andExpect(jsonPath("$.operatingExpenses", closeTo(50.0, DELTA)))
                     .andExpect(jsonPath("$.otherIncome", closeTo(30.0, DELTA)))
-                    .andExpect(jsonPath("$.netProfit", closeTo(337.0, DELTA)));
+                    .andExpect(jsonPath("$.netProfit", closeTo(180.0, DELTA)));
         }
         mockMvc.perform(get("/api/reporting/kpis").header("Authorization", "Bearer " + tokenDos))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.otherIncome", closeTo(90000.0, DELTA)))
-                .andExpect(jsonPath("$.netProfit", closeTo(90119.0, DELTA)));
+                .andExpect(jsonPath("$.netProfit", closeTo(90000.0, DELTA)));
     }
 
     // ---- Anuladas ----
@@ -410,7 +418,9 @@ class ReportingTest {
         assertThat(periodo.totalSales()).isCloseTo(476.0, within(DELTA));
         assertThat(periodo.totalPurchases()).isCloseTo(119.0, within(DELTA));
         assertThat(periodo.operatingExpenses()).isCloseTo(50.0, within(DELTA));
-        assertThat(periodo.netProfit()).isCloseTo(307.0, within(DELTA));
+        assertThat(periodo.netSales()).isCloseTo(400.0, within(DELTA));
+        assertThat(periodo.costOfSales()).isCloseTo(200.0, within(DELTA));
+        assertThat(periodo.netProfit()).isCloseTo(150.0, within(DELTA));
 
         // El global si lo ve todo.
         KpisResponse global = reportingService.getGlobalKpis();
@@ -606,21 +616,23 @@ class ReportingTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalSales", closeTo(476.0, DELTA)))
                 .andExpect(jsonPath("$.totalPurchases", closeTo(119.0, DELTA)))
-                .andExpect(jsonPath("$.grossProfit", closeTo(357.0, DELTA)))
+                .andExpect(jsonPath("$.costOfSales", closeTo(200.0, DELTA)))
+                .andExpect(jsonPath("$.grossProfit", closeTo(200.0, DELTA)))
                 .andExpect(jsonPath("$.operatingExpenses", closeTo(50.0, DELTA)))
-                .andExpect(jsonPath("$.netProfit", closeTo(307.0, DELTA)));
+                .andExpect(jsonPath("$.netProfit", closeTo(150.0, DELTA)));
 
         mockMvc.perform(get("/api/reporting/kpis").param("desde", HOY.toString()).param("hasta", HOY.toString())
                         .header("Authorization", "Bearer " + tokenUno))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.desde").value(HOY.toString()))
                 .andExpect(jsonPath("$.totalSales", closeTo(476.0, DELTA)))
-                .andExpect(jsonPath("$.netProfit", closeTo(307.0, DELTA)));
+                .andExpect(jsonPath("$.netProfit", closeTo(150.0, DELTA)));
 
         mockMvc.perform(get("/api/reporting/kpis").header("Authorization", "Bearer " + tokenDos))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalSales", closeTo(11900.0, DELTA)))
                 .andExpect(jsonPath("$.totalPurchases", closeTo(595.0, DELTA)))
+                .andExpect(jsonPath("$.costOfSales", closeTo(1000.0, DELTA)))
                 .andExpect(jsonPath("$.operatingExpenses", closeTo(9000.0, DELTA)));
 
         mockMvc.perform(get("/api/reporting/movements").param("desde", HOY.toString()).param("hasta", HOY.toString())
