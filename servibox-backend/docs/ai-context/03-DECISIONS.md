@@ -12,6 +12,44 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-24: Utilidad bruta con costo de lo vendido congelado por linea
+
+* Decision de producto: utilidad bruta = ventas sin IVA menos costo de lo vendido.
+  **Reemplaza** la regla `grossProfit = totalSales - totalPurchases` (ver "Los ingresos
+  ocasionales suman a la utilidad neta" y el modulo Reporting) y las seis filas anteriores
+  del Estado de resultados (Ventas totales, Compras totales, Utilidad bruta, Otros ingresos,
+  Gastos operativos, Utilidad neta).
+  * **Costo congelado por linea.** Migracion V4: `DETALLE_VENTAS.costo_unitario_linea`
+    NUMERIC(14,2) NOT NULL con `ck_detalle_venta_costo` (`>= 0`), `SaleDetail.unitCost`.
+    `SalesService.crearFactura` guarda el `purchaseCost` del producto leido despues de
+    `bloquearProductos` (fix/33), nunca antes; un costo nulo se guarda como 0. No se toca
+    nunca despues: anular, restaurar, una compra que cambie el costo o editar producto,
+    categoria o configuracion no lo mueven. Mismo criterio que `iva_generado_linea`.
+  * **kpis** agrega `netSales` (suma de `subtotal` de las ventas no anuladas) y
+    `costOfSales` (suma de `unitCost * quantity` de sus lineas, una sola consulta agregada en
+    `SaleDetailRepository`, mismo filtro de estado, fechas y tenant que las ventas).
+    `grossProfit = netSales - costOfSales`, `netProfit = grossProfit + otherIncome -
+    operatingExpenses`; las cuatro salen redondeadas a 2 decimales. `totalSales` y
+    `totalPurchases` siguen como estaban (con IVA, sin anuladas).
+  * **Estado de resultados** (PDF y XLSX): Ventas sin IVA, Costo de lo vendido (negativo),
+    Utilidad bruta, Otros ingresos, Gastos operativos (negativo) y Utilidad neta, de
+    `getPeriodKpis`. Compras ya no es fila. Movimientos de cuentas no cambia.
+  * `SaleDetailResponse` expone `unitCost` (campo nuevo, no se quita nada).
+  * **Relleno de V4**: las lineas existentes toman el costo actual del producto (nulo como
+    0), no el de su fecha. Es una aproximacion para datos anteriores a V4.
+  * **Siembra de demostracion**: con la regla nueva, vender al precio sugerido dejaba margen
+    bruto cercano al 25 por ciento y utilidad neta negativa los tres meses. Las ventas de la
+    siembra usan el sugerido con un recargo del 12 por ciento (`RECARGO_VENTA`); margen cerca
+    del 33 por ciento y neta positiva en el mes anterior. Cantidades, fechas, conteos, costos
+    y saldos iniciales no cambian.
+* Alternativas consideradas: costo promedio ponderado por periodo (no hay kardex, y el
+  costo del producto ya es el ultimo de compra); calcular el costo al consultar con el costo
+  actual del producto (una compra posterior cambiaria la utilidad de meses cerrados); seguir
+  con compras del periodo (no es utilidad de lo vendido: compra y venta no son de los
+  mismos productos).
+* Motivo: la utilidad bruta tiene que ser la de lo vendido y no moverse despues de facturar,
+  igual que el IVA de la factura.
+
 ## 2026-10-24: Datos de demostracion realistas en el perfil dev
 
 * Decision: la siembra de demostracion de `DevDataInitializer` pasa de 3 productos y 5

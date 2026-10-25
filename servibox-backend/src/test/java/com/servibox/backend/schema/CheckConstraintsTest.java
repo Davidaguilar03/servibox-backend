@@ -131,6 +131,7 @@ class CheckConstraintsTest {
         linea.setPrice(200.0);
         linea.setIvaAmount(0.0);
         linea.setIvaDifference(0.0);
+        linea.setUnitCost(100.0);
         return linea;
     }
 

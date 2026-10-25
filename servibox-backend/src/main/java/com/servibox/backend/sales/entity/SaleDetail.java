@@ -19,7 +19,9 @@ import org.hibernate.type.SqlTypes;
 @Data
 @EqualsAndHashCode(callSuper = true)
 @AttributeOverride(name = "id", column = @Column(name = "id_detalle_venta"))
-@Table(name = "DETALLE_VENTAS", check = @CheckConstraint(name = "ck_detalle_venta_cantidad", constraint = "cantidad_venta > 0"))
+@Table(name = "DETALLE_VENTAS", check = {
+        @CheckConstraint(name = "ck_detalle_venta_cantidad", constraint = "cantidad_venta > 0"),
+        @CheckConstraint(name = "ck_detalle_venta_costo", constraint = "costo_unitario_linea >= 0")})
 public class SaleDetail extends TenantAwareEntity {
 
     @ManyToOne
@@ -57,4 +59,14 @@ public class SaleDetail extends TenantAwareEntity {
     @JdbcTypeCode(SqlTypes.NUMERIC)
     @Column(name = "diferencia_iva_linea", precision = 14, scale = 2, nullable = false)
     private Double ivaDifference;
+
+    /**
+     * Costo unitario sin IVA de lo vendido: el purchaseCost del producto al facturar, leido
+     * con el producto ya bloqueado; un costo nulo se guarda como 0. **No se recalcula
+     * despues**, igual que ivaAmount: ni al anular o restaurar la venta, ni cuando una
+     * compra o una edicion cambian el costo del producto. Es el costo de lo vendido de kpis.
+     */
+    @JdbcTypeCode(SqlTypes.NUMERIC)
+    @Column(name = "costo_unitario_linea", precision = 14, scale = 2, nullable = false)
+    private Double unitCost;
 }

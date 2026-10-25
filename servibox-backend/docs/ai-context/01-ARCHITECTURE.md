@@ -985,14 +985,20 @@ eliminan, y al eliminarse desaparecen solos.
   ```
   totalSales        = suma(Sale.total)            sin ANULADA
   totalPurchases    = suma(Purchase.total)        sin ANULADA
-  grossProfit       = totalSales - totalPurchases
+  netSales          = suma(Sale.subtotal)         sin ANULADA
+  costOfSales       = suma(SaleDetail.unitCost * quantity)  lineas de ventas sin ANULADA
+  grossProfit       = netSales - costOfSales
   operatingExpenses = suma(Movement.amount)       categoria GASTO_OPERATIVO, activos
   otherIncome       = suma(Movement.amount)       categoria INGRESO_OCASIONAL, activos
   netProfit         = grossProfit + otherIncome - operatingExpenses
   ```
 
-  Los totales son **con IVA**, que es lo que guarda `total`. Los ingresos ocasionales no
-  son ventas: no entran en `totalSales` ni en `grossProfit`, si en `netProfit`.
+  `totalSales` y `totalPurchases` son **con IVA**, que es lo que guarda `total`; `netSales`
+  es sin IVA. `unitCost` es el costo del producto congelado en la linea al facturar (V4), asi
+  que una compra posterior no mueve la utilidad de un periodo ya facturado. `costOfSales` es
+  una sola consulta agregada. `netSales`, `costOfSales`, `grossProfit` y `netProfit` salen
+  redondeados a 2 decimales. Las compras no entran en la utilidad bruta. Los ingresos
+  ocasionales no son ventas: no entran en `totalSales` ni en `grossProfit`, si en `netProfit`.
 * `getMovements(desde, hasta)`: ventas, compras, gastos e ingresos ocasionales del rango
   como renglones (`VENTA`, `COMPRA`, `GASTO`, `INGRESO`), del mas reciente al mas antiguo y
   cortado en `MAX_MOVEMENTS` (100), igual que Autollantas. `VENTA` y `COMPRA` salen de las
@@ -1026,7 +1032,7 @@ Rangos: `desde` y `hasta` son obligatorios en periodo, movimientos e IVA; si fal
   `ExcelReportGenerator` (Apache POI, `XSSFWorkbook`) solo le dan formato al modelo, asi
   que las cifras se prueban sin leer archivos.
 * `estadoDeResultados(desde, hasta)`: llama a `getPeriodKpis` del mismo rango; las seis
-  filas son `totalSales` (Ventas totales), `-totalPurchases` (Compras totales),
+  filas son `netSales` (Ventas sin IVA), `-costOfSales` (Costo de lo vendido),
   `grossProfit` (Utilidad bruta), `otherIncome` (Otros ingresos), `-operatingExpenses`
   (Gastos operativos) y `netProfit` (Utilidad neta, fila de resultado). No hay formula propia: el archivo cuadra con `/kpis` y con el panel.
 * `movimientos(desde, hasta, accountId)`: `TreasuryService.listarParaReporte`, una sola
@@ -1056,7 +1062,8 @@ Rangos: `desde` y `hasta` son obligatorios en periodo, movimientos e IVA; si fal
 * `/api/reporting/kpis`: sin parametros, KPIs globales. Con `desde` y `hasta` (ISO,
   `2026-09-01`), KPIs del periodo. Una sola ruta porque la respuesta es el mismo DTO;
   `desde` / `hasta` vuelven null en el global. Respuesta: `desde`, `hasta`, `totalSales`,
-  `totalPurchases`, `grossProfit`, `operatingExpenses`, `otherIncome`, `netProfit`.
+  `totalPurchases`, `netSales`, `costOfSales`, `grossProfit`, `operatingExpenses`,
+  `otherIncome`, `netProfit`.
 * `/api/reporting/movements?desde=...&hasta=...`
 * `/api/reporting/iva?desde=...&hasta=...`
 * `/api/reporting/export?type=ESTADO_RESULTADOS|MOVIMIENTOS&format=PDF|XLSX&desde=...&hasta=...[&accountId=...]`:

@@ -79,15 +79,18 @@ class DevDemoDataFirstDayTest {
         assertThat(treasuryService.buscarMovimientos(null, null, null, null))
                 .extracting(Movement::getDate).allMatch(f -> !f.isAfter(HOY));
 
-        kpis(YearMonth.of(2026, 1), 21429520.0, 14518000.0, 7294000.0, 0.0);
-        kpis(YearMonth.of(2026, 2), 24552080.0, 10595760.0, 7221800.0, 310000.0);
-        kpis(YearMonth.of(2026, 3), 15234380.0, 7097160.0, 5192200.0, 0.0);
+        kpis(YearMonth.of(2026, 1), 23985640.0, 14518000.0, 20156000.0, 13572000.0, 7294000.0, 0.0);
+        kpis(YearMonth.of(2026, 2), 27494950.0, 10595760.0, 23105000.0, 15636000.0, 7221800.0, 310000.0);
+        kpis(YearMonth.of(2026, 3), 17053890.0, 7097160.0, 14331000.0, 9606000.0, 5192200.0, 0.0);
     }
 
-    private void kpis(YearMonth mes, double ventas, double compras, double gastos, double otros) {
+    private void kpis(YearMonth mes, double ventas, double compras, double ventasSinIva, double costo, double gastos,
+                      double otros) {
         KpisResponse kpis = reportingService.getPeriodKpis(mes.atDay(1), mes.atEndOfMonth());
         assertThat(kpis.totalSales()).as("ventas " + mes).isCloseTo(ventas, within(0.001));
         assertThat(kpis.totalPurchases()).as("compras " + mes).isCloseTo(compras, within(0.001));
+        assertThat(kpis.netSales()).as("ventas sin IVA " + mes).isCloseTo(ventasSinIva, within(0.001));
+        assertThat(kpis.costOfSales()).as("costo " + mes).isCloseTo(costo, within(0.001));
         assertThat(kpis.operatingExpenses()).as("gastos " + mes).isCloseTo(gastos, within(0.001));
         assertThat(kpis.otherIncome()).as("otros " + mes).isCloseTo(otros, within(0.001));
     }

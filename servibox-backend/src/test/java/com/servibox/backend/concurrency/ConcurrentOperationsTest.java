@@ -157,6 +157,40 @@ class ConcurrentOperationsTest {
         verificarInvariante();
     }
 
+    /**
+     * Ventas y compras simultaneas del mismo producto: cada compra cambia el costo a uno propio,
+     * y cada linea vendida congela un costo que el producto tuvo de verdad (el inicial o el de
+     * alguna compra), nunca uno a medias. costOfSales de kpis es la suma de esas lineas.
+     */
+    @Test
+    void ventasSimultaneasDelMismoProductoCongelanCadaUnaUnCostoValido() throws Exception {
+        long producto = producto("CDV-1", 100);
+        int compras = HILOS / 2;
+
+        List<MvcResult> resultados = simultaneas(HILOS, i -> i % 2 == 0
+                ? ventaCredito(producto, 1, 5000)
+                : compraCredito("CDV-" + i, proveedor.getId(), producto, 1, 1000 + 100 * i));
+
+        assertThat(codigos(resultados)).containsOnly(201);
+        List<Double> validos = new ArrayList<>(List.of(1000.0));
+        for (int i = 1; i < HILOS; i += 2) {
+            validos.add(1000.0 + 100 * i);
+        }
+        double costoVendido = 0.0;
+        for (int i = 0; i < HILOS; i += 2) {
+            MvcResult venta = enviar(get("/api/sales/" + id(resultados.get(i))).header("Authorization", "Bearer " + token));
+            double costo = JsonPath.<Number>read(venta.getResponse().getContentAsString(), "$.details[0].unitCost")
+                    .doubleValue();
+            assertThat(costo).as("costo de la venta %d", i).isIn(validos);
+            costoVendido += costo;
+        }
+        assertThat(stock(producto)).isEqualTo(100 - (HILOS - compras) + compras);
+        MvcResult kpis = enviar(get("/api/reporting/kpis").header("Authorization", "Bearer " + token));
+        assertThat(JsonPath.<Number>read(kpis.getResponse().getContentAsString(), "$.costOfSales").doubleValue())
+                .isCloseTo(costoVendido, within(0.001));
+        verificarInvariante();
+    }
+
     // ---- (c) compras simultaneas del mismo producto ----
 
     @Test

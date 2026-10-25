@@ -101,7 +101,7 @@ public class SalesService {
     }
 
     /**
-     * Emite una factura: descuenta el stock, congela el IVA de cada linea y, si es de
+     * Emite una factura: descuenta el stock, congela el IVA y el costo de cada linea y, si es de
      * contado, registra el ingreso en tesoreria. Todo en una transaccion.
      *
      * Flujo completo en 01-ARCHITECTURE.md, seccion Modulo Sales.
@@ -212,6 +212,8 @@ public class SalesService {
             detalle.setPrice(precio);
             detalle.setIvaAmount(ivaLinea);
             detalle.setIvaDifference(ivaLinea - descontableLinea);
+            // Congelado aqui, con el producto ya bloqueado: el costo vigente al facturar.
+            detalle.setUnitCost(producto.getPurchaseCost() != null ? producto.getPurchaseCost() : 0.0);
             saleDetailRepository.save(detalle);
 
             subtotal += baseLinea;

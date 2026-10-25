@@ -149,6 +149,7 @@ class FlywayMigrationTest {
         MigrateResult resultado = Flyway.configure()
                 .dataSource(url, "sa", "")
                 .locations(flyway.getConfiguration().getLocations())
+                .target("3")
                 .load()
                 .migrate();
 
@@ -176,6 +177,89 @@ class FlywayMigrationTest {
                     .hasMessageContaining("UK_COMPRA_TENANT_SUPPLIER_INVOICE_NUMBER");
             // La base distingue mayusculas: "fac-1" no choca alli (lo frena el service).
             insertarCompra(conexion, "800000001", "fac-1");
+        }
+    }
+
+    /** Datos con el esquema hasta V3: un tenant, dos productos y una venta de dos lineas. */
+    static final String[] DATOS_V3 = {
+            "INSERT INTO tenants (nombre_tenant, slug_tenant, activo_tenant, fecha_creacion_tenant) "
+                    + "VALUES ('Taller V3', 'taller-v3', TRUE, CURRENT_TIMESTAMP)",
+            "INSERT INTO categoria_productos (id_tenant, nombre_categoria_producto, color_categoria, "
+                    + "stock_min_amarillo, stock_min_rojo, margen_utilidad, created_at, updated_at) SELECT "
+                    + "id_tenant, 'LLANTAS', '#e74c3c', 5, 2, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM tenants",
+            "INSERT INTO productos (id_tenant, id_categoria_producto, codigo_producto, descripcion_producto, "
+                    + "costo_compra, cantidad, iva_producto, precio_sugerido, created_at, updated_at) SELECT "
+                    + "id_tenant, id_categoria_producto, 'LLA-1', 'Llanta', 12000, 8, 2280, 12000, "
+                    + "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM categoria_productos",
+            "INSERT INTO productos (id_tenant, id_categoria_producto, codigo_producto, descripcion_producto, "
+                    + "costo_compra, cantidad, iva_producto, precio_sugerido, created_at, updated_at) SELECT "
+                    + "id_tenant, id_categoria_producto, 'SRV-1', 'Alineacion', 0, 0, 0, 0, "
+                    + "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM categoria_productos",
+            "INSERT INTO terceros (id_tenant, tipo_tercero, nombre_razon_social, tipo_documento, numero_documento, "
+                    + "created_at, updated_at) SELECT id_tenant, 'CLIENTE', 'Cliente V3', 'CC', '1000', "
+                    + "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM tenants",
+            "INSERT INTO ventas (id_tenant, id_tercero, numero_factura_venta, fecha_venta, fecha_vencimiento_venta, "
+                    + "forma_pago_venta, estado_venta, subtotal_venta, iva_por_pagar_venta, total_venta, created_at, "
+                    + "updated_at) SELECT id_tenant, id_tercero, 'FV-0001', CURRENT_DATE, CURRENT_DATE, 'CREDITO', "
+                    + "'PENDIENTE', 80000, 7600, 95200, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM terceros",
+            "INSERT INTO detalle_ventas (id_tenant, id_venta, id_producto, cantidad_venta, precio_venta, "
+                    + "iva_generado_linea, diferencia_iva_linea, created_at, updated_at) SELECT v.id_tenant, "
+                    + "v.id_venta, p.id_producto, 2, 15000, 5700, 1140, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP "
+                    + "FROM ventas v, productos p WHERE p.codigo_producto = 'LLA-1'",
+            "INSERT INTO detalle_ventas (id_tenant, id_venta, id_producto, cantidad_venta, precio_venta, "
+                    + "iva_generado_linea, diferencia_iva_linea, created_at, updated_at) SELECT v.id_tenant, "
+                    + "v.id_venta, p.id_producto, 1, 50000, 9500, 9500, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP "
+                    + "FROM ventas v, productos p WHERE p.codigo_producto = 'SRV-1'"
+    };
+
+    /**
+     * V4 sobre una base en V3 con una venta de dos lineas: cada linea queda con el costo actual
+     * de su producto (12000 y 0), la columna es NOT NULL y el CHECK rechaza un costo negativo.
+     */
+    @Test
+    void v4AplicaSobreV3ConVentasYRellenaElCostoConElDelProducto() throws SQLException {
+        String url = "jdbc:h2:mem:flyway-v3-" + UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1";
+        Flyway hastaV3 = Flyway.configure()
+                .dataSource(url, "sa", "")
+                .locations(flyway.getConfiguration().getLocations())
+                .target("3")
+                .load();
+        assertThat(hastaV3.migrate().migrationsExecuted).isEqualTo(3);
+        try (Connection conexion = DriverManager.getConnection(url, "sa", "")) {
+            for (String sql : DATOS_V3) {
+                conexion.createStatement().executeUpdate(sql);
+            }
+        }
+
+        MigrateResult resultado = Flyway.configure()
+                .dataSource(url, "sa", "")
+                .locations(flyway.getConfiguration().getLocations())
+                .target("4")
+                .load()
+                .migrate();
+
+        assertThat(resultado.success).isTrue();
+        assertThat(resultado.migrationsExecuted).isEqualTo(1);
+        assertThat(resultado.targetSchemaVersion).isEqualTo("4");
+        try (Connection conexion = DriverManager.getConnection(url, "sa", "")) {
+            ResultSet lineas = conexion.createStatement().executeQuery("SELECT p.codigo_producto, "
+                    + "d.costo_unitario_linea FROM detalle_ventas d JOIN productos p ON p.id_producto = d.id_producto "
+                    + "ORDER BY p.codigo_producto");
+            assertThat(lineas.next()).isTrue();
+            assertThat(lineas.getString(1)).isEqualTo("LLA-1");
+            assertThat(lineas.getBigDecimal(2)).isEqualByComparingTo("12000.00");
+            assertThat(lineas.next()).isTrue();
+            assertThat(lineas.getString(1)).isEqualTo("SRV-1");
+            assertThat(lineas.getBigDecimal(2)).isEqualByComparingTo("0.00");
+            assertThat(lineas.next()).isFalse();
+
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> conexion.createStatement().executeUpdate(
+                            "UPDATE detalle_ventas SET costo_unitario_linea = -1"))
+                    .isInstanceOf(SQLException.class)
+                    .hasMessageContaining("CK_DETALLE_VENTA_COSTO");
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> conexion.createStatement().executeUpdate(
+                            "UPDATE detalle_ventas SET costo_unitario_linea = NULL"))
+                    .isInstanceOf(SQLException.class);
         }
     }
 
