@@ -5,6 +5,8 @@ import com.servibox.backend.purchases.service.InsufficientBalanceException;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.shared.ResourceNotFoundException;
 import com.servibox.backend.tenant.TenantContext;
+import com.servibox.backend.shared.Moneda;
+import com.servibox.backend.treasury.dto.AccountUpdateRequest;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
 import com.servibox.backend.treasury.entity.MovementCategory;
@@ -73,7 +75,7 @@ public class TreasuryService {
      */
     @Transactional
     public Account saveAccount(Account account) {
-        validarNombreUnico(account);
+        validarNombreUnico(account.getId(), account.getName());
         if (account.getInitialBalance() == null) {
             account.setInitialBalance(0.0);
         }
@@ -81,6 +83,30 @@ public class TreasuryService {
             account.setCurrentBalance(account.getInitialBalance());
         }
         return accountRepository.save(account);
+    }
+
+    @Transactional
+    public Account editarCuenta(Long id, AccountUpdateRequest request) {
+        bloquearCuentas(List.of(id));
+        Account cuenta = findAccountById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Cuenta no encontrada: " + id));
+        if (request.type() != null && request.type() != cuenta.getType()) {
+            throw new IllegalArgumentException("El tipo de una cuenta no se puede cambiar");
+        }
+        validarNombreUnico(cuenta.getId(), request.name());
+        double diferencia = request.initialBalance() - cuenta.getInitialBalance();
+        if (diferencia != 0.0) {
+            double saldoNuevo = saldoDe(cuenta) + diferencia;
+            if (saldoNuevo < 0) {
+                throw new InsufficientBalanceException("Saldo insuficiente en " + cuenta.getName()
+                        + ": faltan " + Moneda.formatear(-saldoNuevo)
+                        + " para cambiar el saldo inicial");
+            }
+            cuenta.setCurrentBalance(saldoNuevo);
+            cuenta.setInitialBalance(request.initialBalance());
+        }
+        cuenta.setName(request.name());
+        return accountRepository.save(cuenta);
     }
 
     /**
@@ -91,18 +117,18 @@ public class TreasuryService {
      * Al editar hay que excluir el propio registro: guardar una cuenta sin cambiarle el
      * nombre no es un duplicado.
      */
-    private void validarNombreUnico(Account account) {
-        if (account.getName() == null || account.getName().isBlank()) {
+    private void validarNombreUnico(Long id, String name) {
+        if (name == null || name.isBlank()) {
             return;
         }
         Long tenantId = TenantContext.getTenantId();
         if (tenantId == null) {
             return;
         }
-        accountRepository.findByNameAndTenantId(account.getName(), tenantId)
-                .filter(existente -> !existente.getId().equals(account.getId()))
+        accountRepository.findByNameAndTenantId(name, tenantId)
+                .filter(existente -> !existente.getId().equals(id))
                 .ifPresent(existente -> {
-                    throw new DuplicateAccountNameException(account.getName());
+                    throw new DuplicateAccountNameException(name);
                 });
     }
 

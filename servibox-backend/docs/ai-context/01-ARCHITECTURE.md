@@ -534,7 +534,8 @@ Todas sus entidades extienden `TenantAwareEntity`.
 * `aplicarMovimiento(movimiento)` (privado): **el unico sitio donde se guarda un
   `Movement`**, nuevo o editado, junto con su efecto sobre el `currentBalance` de su
   cuenta. Antes valida la coherencia entre tipo, categoria y factura. El saldo solo lo
-  escriben dos metodos privados: `aplicarEfecto` (suma un `INGRESO`, resta un `EGRESO`),
+  escriben `editarCuenta` (diferencia del saldo inicial) y dos metodos privados:
+  `aplicarEfecto` (suma un `INGRESO`, resta un `EGRESO`),
   que usan `aplicarMovimiento` y restaurar una factura, y `deshacerEfecto` (al reves), que
   usan editar o eliminar un movimiento manual y anular una factura.
 * `registrarIngresoOcasional(cuenta, concepto, monto, fecha, notas)` y
@@ -596,6 +597,16 @@ historia en [03-DECISIONS.md](03-DECISIONS.md).
 **Endpoints** (todos requieren JWT)
 
 * `GET` y `POST` `/api/treasury/accounts`
+* `PUT /api/treasury/accounts/{id}`: `AccountUpdateRequest`, `name` no blanco hasta 100,
+  `initialBalance` obligatorio no negativo y `type` opcional e inmutable. Responde 200
+  con `AccountResponse`; 400 por validacion o tipo distinto, 404 inexistente o ajena,
+  409 nombre duplicado o saldo resultante negativo al cambiar el inicial. Cualquier rol
+  autenticado, igual que crear. Ignora `currentBalance` y propiedades desconocidas.
+  `editarCuenta` bloquea y refresca la cuenta con tenant explicito, aplica la diferencia
+  del inicial sin movimientos ni KPIs. Solo nombre no revalida saldo; no revisa historico.
+  No hay historial del saldo inicial, por lo que `saldoAl` y las aperturas de PDF/XLSX
+  usan el valor vigente tambien para fechas anteriores. Detalle y limite con gastos
+  negativos en la decision "Edicion de nombre y saldo inicial de cuentas".
 * `GET /api/treasury/accounts/{id}/movements`: el extracto (movimientos activos). 404 si
   la cuenta no es del tenant
 * `GET /api/treasury/movements?accountId=&category=&desde=&hasta=&saleId=&purchaseId=`:

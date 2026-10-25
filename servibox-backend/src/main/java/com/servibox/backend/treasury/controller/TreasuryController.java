@@ -3,6 +3,7 @@ package com.servibox.backend.treasury.controller;
 import com.servibox.backend.shared.ResourceNotFoundException;
 import com.servibox.backend.treasury.dto.AccountRequest;
 import com.servibox.backend.treasury.dto.AccountResponse;
+import com.servibox.backend.treasury.dto.AccountUpdateRequest;
 import com.servibox.backend.treasury.dto.BalanceResponse;
 import com.servibox.backend.treasury.dto.MovementRequest;
 import com.servibox.backend.treasury.dto.MovementResponse;
@@ -51,6 +52,11 @@ public class TreasuryController {
         account.setInitialBalance(request.initialBalance());
         account.setType(request.type());
         return AccountResponse.from(treasuryService.saveAccount(account));
+    }
+
+    @PutMapping("/accounts/{id}")
+    public AccountResponse editarCuenta(@PathVariable Long id, @Valid @RequestBody AccountUpdateRequest request) {
+        return AccountResponse.from(treasuryService.editarCuenta(id, request));
     }
 
     @GetMapping("/accounts/{id}/movements")

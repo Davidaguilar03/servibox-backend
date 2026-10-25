@@ -34,12 +34,12 @@ public class Account extends TenantAwareEntity {
     @Column(name = "nombre_cuenta", length = 100, nullable = false)
     private String name;
 
-    /** Saldo con el que arranca la cuenta. No se mueve despues de creada. */
+    /** Saldo de apertura editable por TreasuryService, sin crear movimientos. */
     @JdbcTypeCode(SqlTypes.NUMERIC)
     @Column(name = "balance_inicial", precision = 14, scale = 2, nullable = false)
     private Double initialBalance;
 
-    /** Saldo vivo. Solo lo mueve TreasuryService, a traves de los movimientos de la cuenta. */
+    /** Saldo vivo. TreasuryService aplica movimientos y diferencias del saldo inicial. */
     @JdbcTypeCode(SqlTypes.NUMERIC)
     @Column(name = "saldo_actual", precision = 14, scale = 2, nullable = false)
     private Double currentBalance;

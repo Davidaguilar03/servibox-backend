@@ -110,9 +110,9 @@ esta tabla.
 
 | Termino | Significado | Cuidado |
 |-|-|-|
-| `initialBalance` | Saldo de apertura de la cuenta (`balance_inicial`) | No se mueve despues de creada la cuenta |
-| `currentBalance` | Saldo vivo (`saldo_actual`) | Solo lo mueven los movimientos, siempre por `TreasuryService`. Es el que suma el balance global |
-| **Movimiento** | Un ingreso o egreso sobre una cuenta (`Movement`, tabla `MOVIMIENTOS`) | Es **el libro** de tesoreria: todo cambio de saldo es un movimiento. No hay otras tablas de dinero en `treasury` |
+| `initialBalance` | Saldo de apertura de la cuenta (`balance_inicial`) | Editable por PUT de cuenta, sin historial; mueve el saldo vivo en la diferencia sin crear movimientos |
+| `currentBalance` | Saldo vivo (`saldo_actual`) | Lo cambian movimientos y edicion del saldo inicial, siempre por `TreasuryService` con bloqueo. Es el que suma el balance global; no se edita desde el cuerpo JSON |
+| **Movimiento** | Un ingreso o egreso sobre una cuenta (`Movement`, tabla `MOVIMIENTOS`) | Es **el libro** de tesoreria. El saldo inicial no es ingreso ni movimiento. No hay otras tablas de dinero en `treasury` |
 | `INGRESO` / `EGRESO` | Tipo del movimiento: entrada o salida de dinero | **Solo esos dos valores**: el tipo es lo que da el signo sobre el saldo. En Autollantas son los literales `String` `"Ingreso"` y `"Egreso"`; aqui enum, ver [03-DECISIONS.md](03-DECISIONS.md) |
 | **Categoria de movimiento** | De donde viene el movimiento (`category`, `categoria_movimiento`) | `GASTO_OPERATIVO`, `INGRESO_OCASIONAL`, `TRANSFERENCIA`, `PAGO_COMPRA`, `RECAUDO_VENTA`. Obligatoria. **TRANSFERENCIA es una categoria, no un tipo**. Cada categoria fija su tipo, salvo TRANSFERENCIA, que tiene una pata de cada uno |
 | **Movimiento manual** | Movimiento que el usuario crea, edita y elimina directamente | Solo `GASTO_OPERATIVO` e `INGRESO_OCASIONAL`. Los demas **se gestionan desde su operacion** (transferencia, venta, compra): editarlos o eliminarlos a mano es 400 |

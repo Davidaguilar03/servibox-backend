@@ -54,6 +54,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -518,6 +519,29 @@ class ReportExportTest {
         assertThat(texto).contains("Todas las cuentas", "Bancolombia", "Ingresos", "$ 369.000",
                 "Egresos", "-$ 189.500", "Neto", "$ 179.500");
         assertThat(texto).doesNotContain("Saldo inicial del período", "Saldo final", "Ingreso ajeno");
+    }
+
+    @Test
+    void editarSaldoInicialActualizaPdfYExcelSinCambiarKpis() throws Exception {
+        escenario();
+        String antes = kpisJson(RANGO);
+        mockMvc.perform(put("/api/treasury/accounts/" + caja.getId())
+                        .header("Authorization", "Bearer " + tokenUno).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Caja editada\",\"initialBalance\":1100000}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.currentBalance").value(1369500.0));
+        assertThat(kpisJson(RANGO)).isEqualTo(antes);
+        Sheet hoja = hoja(descargar("type=MOVIMIENTOS&format=XLSX&accountId=" + caja.getId() + RANGO,
+                XLSX, "movimientos-cuentas_2026-09-01_2026-09-30.xlsx"));
+        assertThat(monto(hoja, "Saldo inicial del período")).isEqualTo(1300000);
+        assertThat(monto(hoja, "Ingresos")).isEqualTo(269000);
+        assertThat(monto(hoja, "Egresos")).isEqualTo(-189500);
+        assertThat(monto(hoja, "Neto")).isEqualTo(79500);
+        assertThat(monto(hoja, "Saldo final")).isEqualTo(1379500);
+        String pdf = textoPdf(descargar("type=MOVIMIENTOS&format=PDF&accountId=" + caja.getId() + RANGO,
+                "application/pdf", "movimientos-cuentas_2026-09-01_2026-09-30.pdf"));
+        enOrden(pdf, "Saldo inicial del período", "$ 1.300.000", "Ingresos", "$ 269.000",
+                "Egresos", "-$ 189.500", "Neto", "$ 79.500", "Saldo final", "$ 1.379.500");
+        assertThat(pdf).contains("Cuenta: Caja editada");
     }
 
     // ---- Sin datos ----
