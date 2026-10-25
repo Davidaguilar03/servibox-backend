@@ -302,8 +302,9 @@ class TenantRegistrationTest {
         String demo = login("demo", "admin", "admin123");
 
         assertThat(getJson("/api/inventory/products", nuevo)).isEqualTo("[]");
-        assertThat(JsonPath.<List<String>>read(getJson("/api/inventory/categories", nuevo), "$[*].name"))
-                .doesNotContain("REPUESTOS DEMO", "FILTROS DE AIRE");
+        // Mismos nombres que las del demo, pero las suyas: sin el margen que configura la siembra.
+        assertThat(JsonPath.<List<Double>>read(getJson("/api/inventory/categories", nuevo), "$[*].targetMargin"))
+                .hasSize(3).containsOnly(0.0);
         assertThat(JsonPath.<List<String>>read(getJson("/api/treasury/accounts", nuevo), "$[*].name"))
                 .containsExactly("Caja General");
         assertThat(getJson("/api/sales", nuevo)).isEqualTo("[]");
@@ -312,11 +313,12 @@ class TenantRegistrationTest {
                 .containsExactly("Consumidor final");
 
         String productosDemo = getJson("/api/inventory/products", demo);
-        assertThat(JsonPath.<List<String>>read(productosDemo, "$[*].code")).containsOnly("DEMO-001", "DEMO-002", "DEMO-003");
-        assertThat(JsonPath.<List<String>>read(getJson("/api/inventory/categories", demo), "$[*].name"))
-                .doesNotContain("LUBRICANTES");
+        assertThat(JsonPath.<List<String>>read(productosDemo, "$[*].code")).isNotEmpty()
+                .allMatch(codigo -> codigo.matches("(LL|LU|BA)-\\d{3}"));
+        assertThat(JsonPath.<List<Double>>read(getJson("/api/inventory/categories", demo), "$[*].targetMargin"))
+                .doesNotContain(0.0);
         assertThat(JsonPath.<List<String>>read(getJson("/api/treasury/accounts", demo), "$[*].name"))
-                .containsExactlyInAnyOrder("Caja General", "Bancolombia");
+                .containsExactlyInAnyOrder("Caja General", "Bancolombia", "Nequi");
         // El tenant nuevo solo tiene un impuesto: el suyo.
         mockMvc.perform(get("/api/inventory/tax-types").header("Authorization", "Bearer " + nuevo))
                 .andExpect(jsonPath("$", hasSize(1)));

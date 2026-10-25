@@ -12,6 +12,36 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-24: Datos de demostracion realistas en el perfil dev
+
+* Decision: la siembra de demostracion de `DevDataInitializer` pasa de 3 productos y 5
+  ventas a un almacen de llantas, lubricantes y baterias de Tunja con tres meses de
+  operacion (el mes actual y los dos anteriores): 27 productos con referencias comerciales
+  reales, 3 cuentas (Caja General, Bancolombia y Nequi, con saldo inicial fijado en la
+  cuenta), 8 clientes, 5 proveedores y el Consumidor final (todos inventados, NIT con digito
+  de verificacion valido), 40 ventas, 9 compras, gastos operativos mensuales, un reintegro de
+  proveedor como ingreso ocasional y 2 transferencias. Sigue pasando por los services, solo
+  en `dev`, con `DEV_DEMO_DATA`, idempotente y con el mismo usuario. Cifras en
+  [02-CONVENTIONS.md](02-CONVENTIONS.md), "Datos de demostracion en dev".
+  * **Siembra base con las 3 categorias del registro** (LLANTAS, LUBRICANTES, BATERIAS) en
+    vez de las 8 de Autollantas, para que el demo se vea como un tenant registrado. La
+    demostracion les fija umbrales y margen con `actualizarCategoria` (LLANTAS 8/3 y 0.22,
+    LUBRICANTES 12/4 y 0.30, BATERIAS 5/2 y 0.25); con `DEV_DEMO_DATA=false` quedan en 0.
+  * **Precios de las reglas reales**: cada venta usa el precio sugerido del momento
+    redondeado al millar; las compras usan el costo vigente (una sube el costo de LL-001).
+  * **Fechas**: `fecha(mesesAtras, dia)` sale del `Clock` de negocio; un dia que el mes no
+    tiene pasa al ultimo y una fecha posterior a hoy pasa a hoy. Asi el mes actual siempre
+    tiene datos, nada queda en el futuro y las cifras por mes no dependen del dia en que se
+    arranca (solo cambian las fechas). Los vencimientos de credito son a 30 dias y pueden
+    quedar despues de hoy, como en una factura real.
+* Alternativas consideradas: fechas fijas (el panel del mes en curso quedaria vacio);
+  generar ventas al azar (cifras distintas en cada arranque, imposibles de documentar y de
+  probar); dejar las 8 categorias base y renombrar ACEITES a LUBRICANTES (quedaban 5
+  categorias vacias que el registro ya no crea).
+* Motivo: probar y mostrar el frontend con datos que parecen de un negocio real (estados de
+  stock, cartera con abonos parciales, compras a credito, anulaciones, panel con utilidad)
+  sin cargar nada a mano y con cifras que siguen cuadrando con las reglas de la API.
+
 ## 2026-10-24: Costo del producto al anular y recuperar una compra
 
 * Problema: al anular una compra el stock se revertia pero el costo no: el producto quedaba

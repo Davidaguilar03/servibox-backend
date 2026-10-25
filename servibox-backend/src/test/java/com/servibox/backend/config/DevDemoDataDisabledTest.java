@@ -49,8 +49,9 @@ class DevDemoDataDisabledTest {
     void conLaPropiedadEnFalseNoSiembraDatosDeDemostracion() {
         TenantContext.setTenantId(tenantRepository.findBySlug("demo").orElseThrow().getId());
 
-        // La siembra base sigue: 8 categorias y 2 cuentas en cero.
-        assertThat(inventoryService.findAllCategories()).hasSize(8);
+        // La siembra base sigue: 3 categorias sin umbrales ni margen y 2 cuentas en cero.
+        assertThat(inventoryService.findAllCategories()).hasSize(3)
+                .allMatch(c -> c.getTargetMargin() == 0.0 && c.getYellowStockMin() == 0);
         assertThat(treasuryService.findAllAccounts()).hasSize(2);
         assertThat(treasuryService.balanceGlobal()).isZero();
 

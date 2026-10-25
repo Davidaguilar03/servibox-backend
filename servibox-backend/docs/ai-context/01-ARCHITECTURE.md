@@ -334,8 +334,10 @@ el username, por eso `LoginRequest` lleva `tenantSlug` ademas de usuario y contr
 
 `config.DevDataInitializer` es un `CommandLineRunner` con `@Profile("dev")`: si la tabla
 de tenants esta vacia crea el tenant `demo` y el usuario `admin` (`admin123`), y para ese
-tenant el `TaxType` IVA (0.19, `isVat` true), las 8 categorias por defecto de Autollantas
-con IVA y las 2 cuentas por defecto (ver Modulo Treasury). Solo para probar en local.
+tenant el `TaxType` IVA (0.19, `isVat` true), las 3 categorias base del registro publico
+(LLANTAS, LUBRICANTES, BATERIAS) con IVA y las 2 cuentas por defecto (ver Modulo Treasury).
+Solo para probar en local. Datos de demostracion en
+[02-CONVENTIONS.md](02-CONVENTIONS.md).
 
 ## Estructura de paquetes
 

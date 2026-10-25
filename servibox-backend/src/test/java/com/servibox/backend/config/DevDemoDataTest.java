@@ -18,32 +18,40 @@ import com.servibox.backend.sales.service.SalesService;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.tenant.TenantRepository;
 import com.servibox.backend.treasury.entity.Account;
+import com.servibox.backend.treasury.entity.AccountType;
+import com.servibox.backend.treasury.entity.Movement;
+import com.servibox.backend.treasury.entity.MovementCategory;
+import com.servibox.backend.treasury.entity.MovementType;
 import com.servibox.backend.treasury.service.TreasuryService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
-import java.util.Comparator;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
-import static org.hamcrest.Matchers.closeTo;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -51,22 +59,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * contexto activa test (H2 propia) y dev (servibox.dev.demo-data=true); el runner siembra al
  * arrancar el contexto.
  *
- * Cifras a mano, IVA 19 por ciento (M-1 es el mes anterior, M el actual):
- * compra M-1 contado Caja: 10 aceites a 30000 -> 300000 + 57000 = 357000.
- * venta FV-0001 M-1 contado Caja: 5 aceites a 45000 + 1 bateria a 360000 -> 585000 + 111150 = 696150.
- * venta FV-0002 M-1 credito: 2 filtros a 22000 -> 44000 + 8360 = 52360; abono M de 20000 a Banco.
- * venta FV-0003 M contado Banco: 3 aceites a 45000 -> 135000 + 25650 = 160650.
- * venta FV-0004 M contado Caja: 1 bateria a 360000 -> 428400, ANULADA.
- * venta FV-0005 M contado Caja: 2 aceites a 45000 -> 90000 + 17100 = 107100.
- * gasto M Banco 450000; transferencia M-1 Caja -> Banco 500000; ingreso ocasional M Caja 50000.
- * Saldos iniciales: Caja 1950000 y Banco 2000000, en la cuenta y no como ingreso ocasional.
- *
- * KPIs M-1: ventas 748510, compras 357000, gastos 0, otros ingresos 0, utilidad bruta y neta 391510.
- * KPIs M: ventas 267750, compras 0, gastos 450000, otros ingresos 50000, utilidad bruta 267750,
- * neta 267750 + 50000 - 450000 = -132250.
- * Caja: 1950000 - 357000 + 696150 - 500000 + 107100 + 50000 = 1946250.
- * Banco: 2000000 + 500000 + 20000 + 160650 - 450000 = 2230650.
- * Stock: aceite 50 - 5 + 10 - 3 - 2 = 50, filtro 12 - 2 = 10, bateria 4 - 1 = 3.
+ * El Clock de negocio queda fijo en el 2026-10-24 (agosto, septiembre y octubre) para que las
+ * cifras de kpisDeLosTresMesesConLasCifrasDocumentadas no dependan del dia en que se corre. Las
+ * demas pruebas comparan contra los propios datos, no contra cifras: valen con cualquier fecha.
+ * DevDemoDataFirstDayTest siembra con el Clock en un primer dia de mes.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -74,6 +70,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class DevDemoDataTest {
 
     private static final double DELTA = 0.001;
+
+    @TestConfiguration
+    static class RelojFijo {
+
+        @Bean
+        @Primary
+        Clock relojFijo(@Value("${servibox.business.time-zone}") ZoneId zona) {
+            return Clock.fixed(Instant.parse("2026-10-24T17:00:00Z"), zona);
+        }
+    }
 
     @Autowired
     private MockMvc mockMvc;
@@ -105,13 +111,13 @@ class DevDemoDataTest {
     @Autowired
     private SalesFixture fixture;
 
-    private YearMonth mesActual;
-    private YearMonth mesAnterior;
+    private LocalDate hoy;
+    private LocalDate inicio;
 
     @BeforeEach
     void usarTenantDemo() {
-        mesActual = YearMonth.now(clock);
-        mesAnterior = mesActual.minusMonths(1);
+        hoy = LocalDate.now(clock);
+        inicio = YearMonth.now(clock).minusMonths(2).atDay(1);
         fixture.usarTenant(tenantRepository.findBySlug("demo").orElseThrow().getId());
     }
 
@@ -121,86 +127,180 @@ class DevDemoDataTest {
     }
 
     @Test
-    void siembraCategoriaProductosEnCadaEstadoYSaldos() {
-        ProductCategory categoria = inventoryService.findAllCategories().stream()
-                .filter(c -> c.getName().equals("REPUESTOS DEMO"))
-                .findFirst().orElseThrow();
-        assertThat(categoria.getYellowStockMin()).isEqualTo(10);
-        assertThat(categoria.getRedStockMin()).isEqualTo(3);
-        assertThat(categoria.getTargetMargin()).isCloseTo(0.30, within(DELTA));
-        assertThat(categoria.getTaxTypes()).extracting(t -> t.getRate()).containsExactly(0.19);
+    void siembraTresCategoriasConSusUmbralesYProductosEnCadaEstado() {
+        Map<String, ProductCategory> categorias = inventoryService.findAllCategories().stream()
+                .collect(Collectors.toMap(ProductCategory::getName, Function.identity()));
+        assertThat(categorias).containsOnlyKeys("LLANTAS", "LUBRICANTES", "BATERIAS");
+        categorias.values().forEach(c -> {
+            assertThat(c.getTargetMargin()).isBetween(0.18, 0.35);
+            assertThat(c.getRedStockMin()).isPositive().isLessThan(c.getYellowStockMin());
+            assertThat(c.getTaxTypes()).extracting(t -> t.getRate()).containsExactly(0.19);
+        });
 
-        List<Product> productos = inventoryService.findAllProducts().stream()
-                .sorted(Comparator.comparing(Product::getCode)).toList();
-        assertThat(productos).extracting(Product::getQuantity).containsExactly(50, 10, 3);
-        assertThat(productos).extracting(p -> p.getCategory().getId()).containsOnly(categoria.getId());
+        List<Product> productos = inventoryService.findAllProducts();
+        assertThat(productos).hasSizeBetween(24, 30);
+        assertThat(productos).extracting(Product::getCode).doesNotHaveDuplicates()
+                .allMatch(codigo -> codigo.matches("(LL|LU|BA)-\\d{3}"));
+        assertThat(productos).extracting(Product::getQuantity).allMatch(q -> q >= 0);
+        // Con FinancialSettings en cero, precio sugerido = costo / (1 - margen), guardado a 2 decimales.
+        productos.forEach(p -> assertThat(p.getSuggestedPrice())
+                .isCloseTo(p.getPurchaseCost() / (1 - p.getCategory().getTargetMargin()), within(0.01)));
+
         // Regla del frontend (src/lib/stock.ts): critico si <= rojo, bajo si <= amarillo.
-        assertThat(productos).extracting(p -> estado(p.getQuantity(), categoria))
-                .containsExactly("NORMAL", "BAJO", "CRITICO");
-        // Costos distintos; la compra repite el del aceite.
-        assertThat(productos).extracting(Product::getPurchaseCost).containsExactly(30000.0, 15000.0, 250000.0);
+        Map<String, Long> porEstado = productos.stream()
+                .collect(Collectors.groupingBy(DevDemoDataTest::estado, Collectors.counting()));
+        assertThat(porEstado.get("SIN_STOCK")).isGreaterThanOrEqualTo(1);
+        assertThat(porEstado.get("CRITICO")).isGreaterThanOrEqualTo(1);
+        assertThat(porEstado.get("BAJO")).isBetween(2L, 3L);
+        assertThat(porEstado.get("NORMAL")).isGreaterThan(productos.size() / 2L);
+    }
 
-        Map<String, Double> saldos = treasuryService.findAllAccounts().stream()
-                .collect(Collectors.toMap(Account::getName, Account::getCurrentBalance));
-        assertThat(saldos.get("Caja General")).isCloseTo(1946250.0, within(DELTA));
-        assertThat(saldos.get("Bancolombia")).isCloseTo(2230650.0, within(DELTA));
-        Map<String, Double> iniciales = treasuryService.findAllAccounts().stream()
-                .collect(Collectors.toMap(Account::getName, Account::getInitialBalance));
-        assertThat(iniciales.get("Caja General")).isCloseTo(1950000.0, within(DELTA));
-        assertThat(iniciales.get("Bancolombia")).isCloseTo(2000000.0, within(DELTA));
+    @Test
+    void cadaCuentaCuadraConSuSaldoInicialYNuncaQuedaEnNegativo() {
+        List<Account> cuentas = treasuryService.findAllAccounts();
+        assertThat(cuentas).extracting(Account::getType)
+                .containsExactlyInAnyOrder(AccountType.EFECTIVO, AccountType.BANCO, AccountType.DIGITAL);
+        assertThat(cuentas).extracting(Account::getInitialBalance).allMatch(saldo -> saldo > 0);
+        // Saldo inicial fijado en la cuenta: ningun ingreso ocasional hace de aporte.
+        assertThat(treasuryService.buscarMovimientos(null, MovementCategory.INGRESO_OCASIONAL, null, null))
+                .hasSize(1);
+
+        for (Account cuenta : cuentas) {
+            double neto = treasuryService.findMovementsByAccountId(cuenta.getId()).stream()
+                    .mapToDouble(m -> m.getType() == MovementType.INGRESO ? m.getAmount() : -m.getAmount())
+                    .sum();
+            assertThat(cuenta.getCurrentBalance()).as(cuenta.getName())
+                    .isCloseTo(cuenta.getInitialBalance() + neto, within(DELTA));
+            for (LocalDate dia = inicio; !dia.isAfter(hoy); dia = dia.plusDays(1)) {
+                assertThat(treasuryService.saldoAl(cuenta, dia)).as(cuenta.getName() + " al " + dia)
+                        .isGreaterThanOrEqualTo(0.0);
+            }
+        }
         fixture.verificarInvariante();
     }
 
     @Test
-    void siembraTercerosVentasEnLosDosPeriodosYUnaCompra() {
+    void siembraTresMesesDeVentasComprasYGastosSinFechasFuturas() {
         List<Counterparty> terceros = counterpartyService.findAll();
-        assertThat(terceros).extracting(Counterparty::getRole).containsExactlyInAnyOrder(
-                CounterpartyRole.CLIENTE, CounterpartyRole.CLIENTE, CounterpartyRole.PROVEEDOR);
+        assertThat(terceros).filteredOn(t -> t.getRole() == CounterpartyRole.CLIENTE).hasSize(9)
+                .extracting(Counterparty::getName).contains(CounterpartyService.NOMBRE_CONSUMIDOR_FINAL);
+        assertThat(terceros).filteredOn(t -> t.getRole() == CounterpartyRole.PROVEEDOR).hasSize(5);
+        assertThat(terceros).extracting(Counterparty::getDocumentNumber).doesNotHaveDuplicates();
 
-        List<Sale> ventas = salesService.findAllSales().stream()
-                .sorted(Comparator.comparing(Sale::getInvoiceNumber)).toList();
-        assertThat(ventas).extracting(Sale::getInvoiceNumber)
-                .containsExactly("FV-0001", "FV-0002", "FV-0003", "FV-0004", "FV-0005");
-        assertThat(ventas).extracting(Sale::getStatus).containsExactly(SaleStatus.PAGADA, SaleStatus.PENDIENTE,
-                SaleStatus.PAGADA, SaleStatus.ANULADA, SaleStatus.PAGADA);
-        assertThat(ventas).extracting(v -> YearMonth.from(v.getInvoiceDate()))
-                .containsExactly(mesAnterior, mesAnterior, mesActual, mesActual, mesActual);
+        List<Sale> ventas = salesService.findAllSales();
+        assertThat(ventas).hasSizeBetween(35, 45);
+        assertThat(ventas).filteredOn(v -> v.getStatus() == SaleStatus.ANULADA).hasSizeBetween(1, 2);
+        assertThat(ventas).extracting(Sale::getInvoiceDate).allMatch(f -> !f.isBefore(inicio) && !f.isAfter(hoy));
+        assertThat(ventas).extracting(v -> YearMonth.from(v.getInvoiceDate())).containsOnly(
+                YearMonth.now(clock), YearMonth.now(clock).minusMonths(1), YearMonth.now(clock).minusMonths(2));
+        assertThat(ventas).extracting(v -> v.getCustomer().getName())
+                .contains(CounterpartyService.NOMBRE_CONSUMIDOR_FINAL);
 
-        Sale credito = ventas.get(1);
-        assertThat(credito.getPaymentType()).isEqualTo(PaymentType.CREDITO);
-        assertThat(salesService.saldoPendiente(credito)).isCloseTo(52360.0 - 20000.0, within(DELTA));
+        // Contado: los 4 medios de pago, efectivo solo en la cuenta EFECTIVO.
+        List<Sale> contado = ventas.stream().filter(v -> v.getPaymentType() == PaymentType.CONTADO
+                && v.getStatus() != SaleStatus.ANULADA).toList();
+        assertThat(contado).extracting(Sale::getPaymentMethod).containsOnly(
+                "EFECTIVO", "TRANSFERENCIA", "TARJETA_DEBITO", "TARJETA_CREDITO");
+        contado.forEach(v -> {
+            AccountType tipo = treasuryService.movimientosDeVenta(v).get(0).getAccount().getType();
+            assertThat(tipo == AccountType.EFECTIVO).as(v.getInvoiceNumber())
+                    .isEqualTo("EFECTIVO".equals(v.getPaymentMethod()));
+        });
+
+        // Credito: pagadas con abonos, pendientes con abono parcial y pendientes sin abono.
+        List<Sale> credito = ventas.stream().filter(v -> v.getPaymentType() == PaymentType.CREDITO).toList();
+        assertThat(credito).filteredOn(v -> v.getStatus() == SaleStatus.PAGADA).isNotEmpty();
+        assertThat(credito).filteredOn(v -> v.getStatus() == SaleStatus.PENDIENTE)
+                .anyMatch(v -> salesService.saldoPendiente(v) < v.getTotal() - DELTA)
+                .anyMatch(v -> Math.abs(salesService.saldoPendiente(v) - v.getTotal()) < DELTA);
 
         List<Purchase> compras = purchasesService.findAllPurchases();
-        assertThat(compras).hasSize(1);
-        assertThat(compras.get(0).getStatus()).isEqualTo(PurchaseStatus.PAGADA);
-        assertThat(compras.get(0).getTotal()).isCloseTo(357000.0, within(DELTA));
-        assertThat(YearMonth.from(compras.get(0).getInvoiceDate())).isEqualTo(mesAnterior);
+        assertThat(compras).hasSizeBetween(8, 10);
+        assertThat(compras).filteredOn(c -> c.getStatus() == PurchaseStatus.ANULADA).hasSize(1);
+        assertThat(compras).extracting(Purchase::getPaymentType).contains(
+                com.servibox.backend.purchases.entity.PaymentType.CONTADO,
+                com.servibox.backend.purchases.entity.PaymentType.CREDITO);
+        assertThat(compras).filteredOn(c -> c.getStatus() == PurchaseStatus.PENDIENTE)
+                .anyMatch(c -> purchasesService.saldoPendiente(c) < c.getTotal() - DELTA);
+        assertThat(compras).extracting(Purchase::getInvoiceDate).allMatch(f -> !f.isBefore(inicio) && !f.isAfter(hoy));
+
+        List<Movement> movimientos = treasuryService.buscarMovimientos(null, null, null, null);
+        assertThat(movimientos).extracting(Movement::getDate).allMatch(f -> !f.isBefore(inicio) && !f.isAfter(hoy));
+        assertThat(movimientos).filteredOn(m -> m.getCategory() == MovementCategory.GASTO_OPERATIVO)
+                .extracting(Movement::getConcept)
+                .contains("Arriendo del local", "Energia electrica", "Nomina primera quincena",
+                        "Internet y telefonia", "Insumos de aseo y cafeteria");
+        // Dos transferencias, cada una con sus dos patas.
+        assertThat(movimientos).filteredOn(m -> m.getCategory() == MovementCategory.TRANSFERENCIA).hasSize(4);
     }
 
     @Test
-    void kpisDelMesActualYDelAnteriorCuadranConLaSiembra() throws Exception {
+    void kpisDeCadaMesCoincidenConLasFacturasActivasYNoTodoEstaEnRojo() throws Exception {
         String token = login();
-        kpis(token, mesAnterior, 748510.0, 357000.0, 0.0, 0.0);
-        kpis(token, mesActual, 267750.0, 0.0, 450000.0, 50000.0);
+        double[] netas = new double[3];
+        for (int atras = 0; atras < 3; atras++) {
+            YearMonth mes = YearMonth.now(clock).minusMonths(atras);
+            LocalDate desde = mes.atDay(1);
+            LocalDate hasta = mes.atEndOfMonth();
+            double ventas = salesService.findAllSales().stream()
+                    .filter(v -> v.getStatus() != SaleStatus.ANULADA && enRango(v.getInvoiceDate(), desde, hasta))
+                    .mapToDouble(Sale::getTotal).sum();
+            double compras = purchasesService.findAllPurchases().stream()
+                    .filter(c -> c.getStatus() != PurchaseStatus.ANULADA && enRango(c.getInvoiceDate(), desde, hasta))
+                    .mapToDouble(Purchase::getTotal).sum();
+            double gastos = suma(MovementCategory.GASTO_OPERATIVO, desde, hasta);
+            double otros = suma(MovementCategory.INGRESO_OCASIONAL, desde, hasta);
+
+            String kpis = kpis(token, desde, hasta);
+            assertThat(numero(kpis, "$.totalSales")).as("ventas " + mes).isCloseTo(ventas, within(DELTA));
+            assertThat(numero(kpis, "$.totalPurchases")).as("compras " + mes).isCloseTo(compras, within(DELTA));
+            assertThat(numero(kpis, "$.operatingExpenses")).as("gastos " + mes).isCloseTo(gastos, within(DELTA));
+            assertThat(numero(kpis, "$.otherIncome")).as("otros " + mes).isCloseTo(otros, within(DELTA));
+            assertThat(numero(kpis, "$.grossProfit")).as("bruta " + mes).isCloseTo(ventas - compras, within(DELTA))
+                    .isPositive();
+            assertThat(ventas).isPositive();
+            netas[atras] = numero(kpis, "$.netProfit");
+            assertThat(netas[atras]).isCloseTo(ventas - compras + otros - gastos, within(DELTA));
+        }
+        assertThat(Math.max(netas[0], netas[1])).as("neta del mes actual o del anterior").isPositive();
+    }
+
+    @Test
+    void kpisDeLosTresMesesConLasCifrasDocumentadas() throws Exception {
+        String token = login();
+        // Agosto, septiembre y octubre de 2026: cifras de 02-CONVENTIONS.md.
+        kpisEsperados(token, YearMonth.of(2026, 8), 21429520.0, 14518000.0, 7294000.0, 0.0);
+        kpisEsperados(token, YearMonth.of(2026, 9), 24552080.0, 10595760.0, 7221800.0, 310000.0);
+        kpisEsperados(token, YearMonth.of(2026, 10), 15234380.0, 7097160.0, 5192200.0, 0.0);
     }
 
     @Test
     void ejecutarElInicializadorDosVecesNoDuplicaNada() throws Exception {
+        int productos = inventoryService.findAllProducts().size();
+        int terceros = counterpartyService.findAll().size();
+        int ventas = salesService.findAllSales().size();
+        int compras = purchasesService.findAllPurchases().size();
+        int movimientos = treasuryService.buscarMovimientos(null, null, null, null).size();
+        double balance = treasuryService.balanceGlobal();
+
         initializer.run();
         initializer.run();
 
         fixture.usarTenant(tenantRepository.findBySlug("demo").orElseThrow().getId());
         assertThat(tenantRepository.count()).isEqualTo(1);
-        assertThat(inventoryService.findAllProducts()).hasSize(3);
-        assertThat(counterpartyService.findAll()).hasSize(3);
-        assertThat(salesService.findAllSales()).hasSize(5);
-        assertThat(purchasesService.findAllPurchases()).hasSize(1);
-        // Activos: compra, 3 ventas de contado, 2 patas de transferencia, abono, gasto e ingreso.
-        assertThat(treasuryService.buscarMovimientos(null, null, null, null)).hasSize(9);
-        assertThat(treasuryService.balanceGlobal()).isCloseTo(1946250.0 + 2230650.0, within(DELTA));
+        assertThat(inventoryService.findAllCategories()).hasSize(3);
+        assertThat(treasuryService.findAllAccounts()).hasSize(3);
+        assertThat(inventoryService.findAllProducts()).hasSize(productos);
+        assertThat(counterpartyService.findAll()).hasSize(terceros);
+        assertThat(salesService.findAllSales()).hasSize(ventas);
+        assertThat(purchasesService.findAllPurchases()).hasSize(compras);
+        assertThat(treasuryService.buscarMovimientos(null, null, null, null)).hasSize(movimientos);
+        assertThat(treasuryService.balanceGlobal()).isCloseTo(balance, within(DELTA));
     }
 
-    private static String estado(int stock, ProductCategory categoria) {
+    static String estado(Product producto) {
+        ProductCategory categoria = producto.getCategory();
+        int stock = producto.getQuantity();
         if (stock <= 0) {
             return "SIN_STOCK";
         }
@@ -210,21 +310,37 @@ class DevDemoDataTest {
         return stock <= categoria.getYellowStockMin() ? "BAJO" : "NORMAL";
     }
 
-    private void kpis(String token, YearMonth mes, double ventas, double compras, double gastos,
-                      double otrosIngresos) throws Exception {
-        LocalDate desde = mes.atDay(1);
-        LocalDate hasta = mes.atEndOfMonth();
-        mockMvc.perform(get("/api/reporting/kpis")
+    private static boolean enRango(LocalDate fecha, LocalDate desde, LocalDate hasta) {
+        return !fecha.isBefore(desde) && !fecha.isAfter(hasta);
+    }
+
+    private double suma(MovementCategory categoria, LocalDate desde, LocalDate hasta) {
+        return treasuryService.buscarMovimientos(null, categoria, desde, hasta).stream()
+                .mapToDouble(Movement::getAmount).sum();
+    }
+
+    private void kpisEsperados(String token, YearMonth mes, double ventas, double compras, double gastos,
+                               double otros) throws Exception {
+        String kpis = kpis(token, mes.atDay(1), mes.atEndOfMonth());
+        assertThat(numero(kpis, "$.totalSales")).as("ventas " + mes).isCloseTo(ventas, within(DELTA));
+        assertThat(numero(kpis, "$.totalPurchases")).as("compras " + mes).isCloseTo(compras, within(DELTA));
+        assertThat(numero(kpis, "$.operatingExpenses")).as("gastos " + mes).isCloseTo(gastos, within(DELTA));
+        assertThat(numero(kpis, "$.otherIncome")).as("otros " + mes).isCloseTo(otros, within(DELTA));
+        assertThat(numero(kpis, "$.netProfit")).as("neta " + mes)
+                .isCloseTo(ventas - compras + otros - gastos, within(DELTA));
+    }
+
+    private String kpis(String token, LocalDate desde, LocalDate hasta) throws Exception {
+        return mockMvc.perform(get("/api/reporting/kpis")
                         .param("desde", desde.toString())
                         .param("hasta", hasta.toString())
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalSales", closeTo(ventas, DELTA)))
-                .andExpect(jsonPath("$.totalPurchases", closeTo(compras, DELTA)))
-                .andExpect(jsonPath("$.grossProfit", closeTo(ventas - compras, DELTA)))
-                .andExpect(jsonPath("$.operatingExpenses", closeTo(gastos, DELTA)))
-                .andExpect(jsonPath("$.otherIncome", closeTo(otrosIngresos, DELTA)))
-                .andExpect(jsonPath("$.netProfit", closeTo(ventas - compras + otrosIngresos - gastos, DELTA)));
+                .andReturn().getResponse().getContentAsString();
+    }
+
+    private static double numero(String json, String ruta) {
+        return JsonPath.<Number>read(json, ruta).doubleValue();
     }
 
     private String login() throws Exception {
