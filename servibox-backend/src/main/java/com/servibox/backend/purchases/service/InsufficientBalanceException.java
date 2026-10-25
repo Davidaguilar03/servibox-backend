@@ -9,6 +9,10 @@ import com.servibox.backend.shared.Moneda;
  */
 public class InsufficientBalanceException extends RuntimeException {
 
+    public InsufficientBalanceException(String mensaje) {
+        super(mensaje);
+    }
+
     public InsufficientBalanceException(String cuenta, double saldo, double requerido) {
         super("Saldo insuficiente en " + cuenta + ": hay " + Moneda.formatear(saldo)
                 + " y se requieren " + Moneda.formatear(requerido));

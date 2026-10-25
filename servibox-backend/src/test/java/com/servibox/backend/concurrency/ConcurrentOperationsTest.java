@@ -37,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -383,6 +384,33 @@ class ConcurrentOperationsTest {
     }
 
     // ---- Ayudas ----
+
+    @Test
+    void editarSaldoInicialConGastoRespetaUnOrdenValido() throws Exception {
+        for (int ronda = 0; ronda < 10; ronda++) {
+            long cuenta = cuenta("Banco edicion " + ronda, 100);
+            List<MvcResult> resultados = simultaneas(2, i -> i == 0
+                    ? put("/api/treasury/accounts/" + cuenta)
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Banco editado " + cuenta + "\",\"initialBalance\":70}")
+                    : json("/api/treasury/movements", """
+                            {"accountId":%d,"category":"GASTO_OPERATIVO","concept":"Gasto simultaneo","amount":80}
+                            """.formatted(cuenta)));
+            assertThat(resultados.get(1).getResponse().getStatus()).isEqualTo(201);
+            int edicion = resultados.getFirst().getResponse().getStatus();
+            assertThat(edicion).isIn(200, 409);
+            if (edicion == 200) {
+                // Edicion primero: 100 pasa a 70 y el gasto permitido deja -10.
+                assertThat(saldo(cuenta)).isEqualTo(-10);
+            } else {
+                // Gasto primero: quedan 20 y la reduccion de 30 se rechaza.
+                assertThat(error(resultados.getFirst())).contains("faltan $ 10");
+                assertThat(saldo(cuenta)).isEqualTo(20);
+            }
+            verificarInvariante();
+        }
+    }
 
     /** Lanza n peticiones a la vez y devuelve sus resultados en el orden de i. */
     private List<MvcResult> simultaneas(int n, IntFunction<RequestBuilder> peticion) throws Exception {

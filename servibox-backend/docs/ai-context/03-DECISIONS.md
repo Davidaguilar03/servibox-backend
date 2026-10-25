@@ -12,6 +12,41 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-25: Edicion de nombre y saldo inicial de cuentas
+
+* Decision: `PUT /api/treasury/accounts/{id}` recibe `name` obligatorio, no blanco,
+  hasta 100 caracteres (limite de la columna del alta), e `initialBalance` obligatorio
+  y no negativo. `type` opcional: igual al actual se acepta, distinto es 400
+  "El tipo de una cuenta no se puede cambiar". `currentBalance` y propiedades
+  desconocidas se ignoran. Responde 200 con `AccountResponse`.
+* El nombre se guarda sin recortar y se compara de forma exacta por tenant como el alta;
+  duplicado 409, excluyendo la cuenta editada. Cualquier rol autenticado puede editar,
+  igual que crear. Cuenta inexistente o ajena: 404. No existe estado desactivado.
+* Una sola transaccion: `bloquearCuentas` con tenant explicito, bloqueo pesimista y
+  refresh antes de leer o validar. Solo bloquea la cuenta; conserva el orden existente
+  documento, cuentas por id, productos por id. La validacion de unicidad se hace antes
+  de modificar la entidad gestionada para evitar un flush prematuro.
+* `currentBalance = anterior + (initialBalance nuevo - anterior)`. Si cambia el inicial,
+  saldo resultante negativo es 409 `InsufficientBalanceException`, con mensaje
+  "Saldo insuficiente en {cuenta}: faltan {monto} para cambiar el saldo inicial".
+  Solo nombre no revalida saldos. No hay validacion historica porque las operaciones
+  actuales no la hacen. No crea movimientos ni cambia KPIs.
+* Concurrencia: no pierde actualizaciones y corresponde a un orden valido de ejecucion.
+  Se conserva la regla de gastos que permite negativos: inicial 100, edicion a 70 y
+  gasto 80 puede terminar en -10 si edita primero; si gasta primero, quedan 20 y la
+  edicion se rechaza por faltante 10. No se promete un saldo siempre no negativo.
+* PDF y XLSX usan el inicial vigente en `saldoAl`: apertura del periodo es ese inicial
+  mas movimientos activos anteriores al rango. No hay historial de cambios del saldo
+  inicial: editarlo modifica tambien los saldos calculados para fechas anteriores.
+  Redondeo y migracion de dinero a BigDecimal quedan para otra tarea.
+* Reemplazado: la inmutabilidad del saldo inicial en las convenciones anteriores y el
+  pendiente del PUT descrito en "Los ingresos ocasionales suman a la utilidad neta".
+  El alta conserva sus reglas: saldo omitido 0, admite negativos, nombre hasta 100 solo
+  en base, tipo obligatorio; no se endurece en esta tarea.
+* Alternativas consideradas: movimiento de aporte (afectaria ingresos y ensuciaria el
+  libro), revision historica nueva o prohibir gastos negativos (fuera de alcance).
+* Motivo: corregir el saldo de apertura manteniendo la invariante y los bloqueos actuales.
+
 ## 2026-10-25: Reglas de trabajo compartidas entre repos
 
 * Decision: `AGENTS.md` en la raiz Git contiene las reglas compartidas y `CLAUDE.md`
