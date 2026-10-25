@@ -142,9 +142,13 @@ class DevDemoDataTest {
         assertThat(productos).extracting(Product::getCode).doesNotHaveDuplicates()
                 .allMatch(codigo -> codigo.matches("(LL|LU|BA)-\\d{3}"));
         assertThat(productos).extracting(Product::getQuantity).allMatch(q -> q >= 0);
-        // Con FinancialSettings en cero, precio sugerido = costo / (1 - margen), guardado a 2 decimales.
-        productos.forEach(p -> assertThat(p.getSuggestedPrice())
-                .isCloseTo(p.getPurchaseCost() / (1 - p.getCategory().getTargetMargin()), within(0.01)));
+        // Con FinancialSettings en cero, precio sugerido = costo / (1 - margen), en pesos enteros.
+        productos.forEach(p -> {
+            assertThat(p.getSuggestedPrice()).as(p.getCode())
+                    .isCloseTo(p.getPurchaseCost() / (1 - p.getCategory().getTargetMargin()), within(0.5));
+            assertThat(p.getSuggestedPrice() % 1).as(p.getCode()).isZero();
+            assertThat(p.getTaxAmount() % 1).as(p.getCode()).isZero();
+        });
 
         // Regla del frontend (src/lib/stock.ts): critico si <= rojo, bajo si <= amarillo.
         Map<String, Long> porEstado = productos.stream()
@@ -242,6 +246,11 @@ class DevDemoDataTest {
             YearMonth mes = YearMonth.now(clock).minusMonths(atras);
             LocalDate desde = mes.atDay(1);
             LocalDate hasta = mes.atEndOfMonth();
+            List<Sale> delMes = salesService.findAllSales().stream()
+                    .filter(v -> enRango(v.getInvoiceDate(), desde, hasta)).toList();
+            // Las lineas de venta de la siembra van en pesos enteros, anuladas incluidas.
+            delMes.forEach(v -> assertThat(salesService.detallesDe(v))
+                    .allMatch(d -> d.getPrice() % 1 == 0, v.getInvoiceNumber()));
             List<Sale> activas = salesService.findAllSales().stream()
                     .filter(v -> v.getStatus() != SaleStatus.ANULADA && enRango(v.getInvoiceDate(), desde, hasta))
                     .toList();
@@ -265,22 +274,26 @@ class DevDemoDataTest {
             double bruta = numero(kpis, "$.grossProfit");
             assertThat(bruta).as("bruta " + mes).isCloseTo(ventasSinIva - costo, within(DELTA)).isPositive();
             // Margen bruto plausible sobre ventas sin IVA.
-            assertThat(bruta / ventasSinIva).as("margen " + mes).isBetween(0.10, 0.45);
+            assertThat(bruta / ventasSinIva).as("margen " + mes).isBetween(0.28, 0.38);
             assertThat(ventas).isPositive();
             netas[atras] = numero(kpis, "$.netProfit");
             assertThat(netas[atras]).isCloseTo(bruta + otros - gastos, within(DELTA));
         }
-        assertThat(Math.max(netas[0], netas[1])).as("neta del mes actual o del anterior").isPositive();
+        assertThat(netas[0]).as("neta del mes actual").isPositive();
+        assertThat(netas[1]).as("neta del mes anterior").isPositive();
     }
 
     @Test
     void kpisDeLosTresMesesConLasCifrasDocumentadas() throws Exception {
         String token = login();
         // Agosto, septiembre y octubre de 2026: cifras de 02-CONVENTIONS.md.
-        kpisEsperados(token, YearMonth.of(2026, 8), 23985640.0, 14518000.0, 20156000.0, 13572000.0, 7294000.0, 0.0);
-        kpisEsperados(token, YearMonth.of(2026, 9), 27494950.0, 10595760.0, 23105000.0, 15636000.0, 7221800.0,
+        kpisEsperados(token, YearMonth.of(2026, 8), 23990595.16, 14518000.0, 20160164.0, 13572000.0, 7294000.0, 0.0);
+        kpisEsperados(token, YearMonth.of(2026, 9), 27488878.62, 10595760.0, 23099898.0, 15636000.0, 7221800.0,
                 310000.0);
-        kpisEsperados(token, YearMonth.of(2026, 10), 17053890.0, 7097160.0, 14331000.0, 9606000.0, 5192200.0, 0.0);
+        kpisEsperados(token, YearMonth.of(2026, 10), 24730469.33, 7097160.0, 20781907.0, 14055000.0, 5192200.0, 0.0);
+        // Octubre: neta 20781907 - 14055000 - 5192200 = 1534707, el 7,4 por ciento de las ventas sin IVA.
+        double neta = numero(kpis(token, LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 31)), "$.netProfit");
+        assertThat(neta / 20781907.0).as("margen neto de octubre").isBetween(0.05, 0.20);
     }
 
     @Test

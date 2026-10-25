@@ -10,6 +10,7 @@ import com.servibox.backend.inventory.repository.ProductRepository;
 import com.servibox.backend.inventory.repository.TaxTypeRepository;
 import com.servibox.backend.purchases.repository.PurchaseDetailRepository;
 import com.servibox.backend.sales.repository.SaleDetailRepository;
+import com.servibox.backend.shared.Moneda;
 import com.servibox.backend.tenant.TenantContext;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -18,6 +19,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.MathContext;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -217,9 +220,12 @@ public class InventoryService {
         if (product.getPurchaseCost() == null) {
             return;
         }
-        double purchaseCost = product.getPurchaseCost();
+        // En BigDecimal desde los valores guardados: el unico redondeo es el del resultado
+        // final, al peso entero (Moneda.aPesosEnteros).
+        BigDecimal purchaseCost = BigDecimal.valueOf(product.getPurchaseCost());
 
-        product.setTaxAmount(purchaseCost * getIvaRateForProduct(product));
+        product.setTaxAmount(Moneda.aPesosEnteros(
+                purchaseCost.multiply(BigDecimal.valueOf(getIvaRateForProduct(product)))));
 
         double margin = (product.getCategory() != null && product.getCategory().getTargetMargin() != null)
                 ? product.getCategory().getTargetMargin()
@@ -233,18 +239,21 @@ public class InventoryService {
         // exactamente margin% del PRECIO DE VENTA. Derivacion: utilidadNeta =
         // (P - costo) * (1-gastos) * (1-dian) - P*ica, despejando P para que
         // utilidadNeta = margin * P.
-        double k = (1 - gastosRate) * (1 - dianRate);
-        double divisor = k - icaRate - margin;
+        BigDecimal k = BigDecimal.ONE.subtract(BigDecimal.valueOf(gastosRate))
+                .multiply(BigDecimal.ONE.subtract(BigDecimal.valueOf(dianRate)));
+        BigDecimal divisor = k.subtract(BigDecimal.valueOf(icaRate)).subtract(BigDecimal.valueOf(margin));
 
-        double suggestedPrice;
-        if (divisor <= 0) {
+        BigDecimal suggestedPrice;
+        if (divisor.signum() <= 0) {
             // margen + ICA superan lo que dejan Gastos/DIAN: no existe precio finito que
             // garantice ese margen sobre venta. Usamos el costo como piso.
             suggestedPrice = purchaseCost;
         } else {
-            suggestedPrice = purchaseCost * k / divisor;
+            // 34 digitos significativos: la division no es exacta, pero el error queda muy
+            // por debajo del peso que redondea despues.
+            suggestedPrice = purchaseCost.multiply(k).divide(divisor, MathContext.DECIMAL128);
         }
-        product.setSuggestedPrice(suggestedPrice);
+        product.setSuggestedPrice(Moneda.aPesosEnteros(suggestedPrice));
     }
 
     /**

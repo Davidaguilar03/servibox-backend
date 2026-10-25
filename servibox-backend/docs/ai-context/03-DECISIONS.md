@@ -12,6 +12,40 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-24: Precio sugerido e IVA del costo en pesos enteros
+
+* Decision: `Product.suggestedPrice` y `Product.taxAmount` se guardan y se devuelven en
+  pesos enteros, redondeados al peso mas cercano con la mitad hacia arriba (HALF_UP): un
+  IVA de 1966,5 es 1967. **Sin** redondeo a multiplos de 500 ni de 1.000. La formula no
+  cambia y solo se redondea el resultado final, nunca valores intermedios.
+  * Una sola funcion, `shared.Moneda.aPesosEnteros(BigDecimal)`
+    (`setScale(0, RoundingMode.HALF_UP)`). `InventoryService.aplicarPrecios` calcula en
+    `BigDecimal` desde los valores guardados (division con `MathContext.DECIMAL128`) y la
+    llama una vez por valor. Es el unico punto que calcula los dos precios: crear y editar
+    producto, compras que cambian el costo, la reversion y recuperacion de costo de fix/35,
+    categoria, margen de categoria y configuracion financiera pasan por ahi. Con divisor
+    menor o igual a 0 el precio sigue siendo el costo, redondeado al peso.
+  * Migracion V5: `ROUND(precio_sugerido, 0)` y `ROUND(iva_producto, 0)` en PRODUCTOS. Las
+    columnas siguen NUMERIC(14,2), ahora con .00.
+  * Los endpoints de producto devuelven los dos valores enteros, como numero; el contrato
+    no cambia.
+  * No cambian el IVA por linea de ventas y compras, los totales, los abonos ni los saldos:
+    siguen con centavos.
+* Siembra de demostracion: las ventas usan el sugerido por `RECARGO_VENTA` redondeado al
+  peso con la misma funcion (antes al millar). El mes actual terminaba con utilidad neta
+  negativa (-464580 con los precios al peso). Sus gastos (arriendo del dia 1, primera
+  quincena, servicios del mes) ya corresponden al mes y recortarlos seria inventar un mes
+  distinto a los anteriores, asi que se agregaron 5 ventas entre el 20 y el 24 del mes
+  actual, con productos que siguen en stock NORMAL: neta 1534707, el 7,4 por ciento de las
+  ventas sin IVA. Costos, saldos iniciales, cuentas y los meses anteriores no cambian.
+* Alternativas consideradas: redondear a 100, 500 o 1.000 (cambia el precio mas de lo que
+  pide la regla); `Math.round` sobre double (un resultado como 1966,5 puede llegar como
+  1966,4999 y bajar); cambiar la escala de las columnas a 0 (cambio de tipo y de
+  SchemaConformanceTest sin necesidad); recortar gastos del mes actual (no habia ninguno que
+  no correspondiera).
+* Motivo: en Colombia los precios se manejan en pesos enteros; un precio sugerido con
+  centavos no se puede cobrar.
+
 ## 2026-10-24: Utilidad bruta con costo de lo vendido congelado por linea
 
 * Decision de producto: utilidad bruta = ventas sin IVA menos costo de lo vendido.

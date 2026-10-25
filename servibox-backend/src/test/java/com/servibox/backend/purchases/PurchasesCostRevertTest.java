@@ -12,6 +12,7 @@ import com.servibox.backend.sales.SalesFixture;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.sales.entity.SaleDetail;
 import com.servibox.backend.sales.service.SalesService;
+import com.servibox.backend.shared.Moneda;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.service.TreasuryService;
@@ -22,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
@@ -118,13 +120,15 @@ class PurchasesCostRevertTest {
 
     /**
      * Costo, IVA y precio sugerido del producto, y que IVA y precio salen del costo. IVA y
-     * precio se guardan con dos decimales: tolerancia de un centavo.
+     * precio se guardan en pesos enteros, redondeados con la mitad hacia arriba.
      */
     private void costo(Product producto, double esperado) {
         Product actual = recargar(producto);
         assertThat(actual.getPurchaseCost()).isCloseTo(esperado, within(DELTA));
-        assertThat(actual.getTaxAmount()).isCloseTo(esperado * SalesFixture.IVA, within(0.01));
-        assertThat(actual.getSuggestedPrice()).isCloseTo(esperado / 0.50, within(0.01));
+        assertThat(actual.getTaxAmount()).isEqualTo(Moneda.aPesosEnteros(
+                BigDecimal.valueOf(esperado).multiply(BigDecimal.valueOf(SalesFixture.IVA))));
+        assertThat(actual.getSuggestedPrice()).isEqualTo(Moneda.aPesosEnteros(
+                BigDecimal.valueOf(esperado).multiply(BigDecimal.valueOf(2))));
     }
 
     // ---- (a), (b) y (c) ----

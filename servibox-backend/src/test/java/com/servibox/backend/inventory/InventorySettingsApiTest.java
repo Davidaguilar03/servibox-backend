@@ -207,8 +207,8 @@ class InventorySettingsApiTest {
     }
 
     /**
-     * Costo 100, margen 0.30: sin configuracion 100 / 0.70 = 142.86 (precio_sugerido tiene
-     * 2 decimales en la base). Con gastos 0.10,
+     * Costo 100, margen 0.30: sin configuracion 100 / 0.70 = 142.857..., que se guarda en
+     * pesos enteros: 143. Con gastos 0.10,
      * k = 0.90 y precio = 100 * 0.90 / (0.90 - 0.30) = 150. Solo cambian los del tenant.
      */
     @Test
@@ -226,7 +226,7 @@ class InventorySettingsApiTest {
                 .isCloseTo(150.0, within(DELTA));
         fixture.usarTenant(tenantDos);
         assertThat(inventoryService.findProductById(deDos.getId()).orElseThrow().getSuggestedPrice())
-                .isCloseTo(142.86, within(DELTA));
+                .isCloseTo(143.0, within(DELTA));
     }
 
     // ---- Semilla y llamadas ----

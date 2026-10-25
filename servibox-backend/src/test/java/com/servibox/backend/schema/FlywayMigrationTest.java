@@ -263,6 +263,63 @@ class FlywayMigrationTest {
         }
     }
 
+    /**
+     * V5 sobre una base en V4 con precios con decimales: precio sugerido e IVA del producto
+     * quedan en pesos enteros (la mitad hacia arriba) y el costo del producto y las lineas de
+     * venta no cambian.
+     */
+    @Test
+    void v5AplicaSobreV4YRedondeaLosPreciosDelProductoAlPeso() throws SQLException {
+        String url = "jdbc:h2:mem:flyway-v4-" + UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1";
+        Flyway.configure().dataSource(url, "sa", "").locations(flyway.getConfiguration().getLocations())
+                .target("3").load().migrate();
+        try (Connection conexion = DriverManager.getConnection(url, "sa", "")) {
+            for (String sql : DATOS_V3) {
+                conexion.createStatement().executeUpdate(sql);
+            }
+        }
+        Flyway.configure().dataSource(url, "sa", "").locations(flyway.getConfiguration().getLocations())
+                .target("4").load().migrate();
+        try (Connection conexion = DriverManager.getConnection(url, "sa", "")) {
+            // Como quedaban antes de V5: 12345.67 / 0.7 y 12345.67 * 0.19 a dos decimales.
+            conexion.createStatement().executeUpdate("UPDATE productos SET costo_compra = 12345.67, "
+                    + "precio_sugerido = 17636.67, iva_producto = 2345.68 WHERE codigo_producto = 'LLA-1'");
+            conexion.createStatement().executeUpdate("UPDATE productos SET costo_compra = 10350, "
+                    + "precio_sugerido = 14785.50, iva_producto = 1966.50 WHERE codigo_producto = 'SRV-1'");
+            conexion.createStatement().executeUpdate("UPDATE detalle_ventas SET iva_generado_linea = 5700.45");
+        }
+
+        MigrateResult resultado = Flyway.configure()
+                .dataSource(url, "sa", "")
+                .locations(flyway.getConfiguration().getLocations())
+                .target("5")
+                .load()
+                .migrate();
+
+        assertThat(resultado.success).isTrue();
+        assertThat(resultado.migrationsExecuted).isEqualTo(1);
+        assertThat(resultado.targetSchemaVersion).isEqualTo("5");
+        try (Connection conexion = DriverManager.getConnection(url, "sa", "")) {
+            ResultSet productos = conexion.createStatement().executeQuery("SELECT codigo_producto, costo_compra, "
+                    + "precio_sugerido, iva_producto FROM productos ORDER BY codigo_producto");
+            assertThat(productos.next()).isTrue();
+            assertThat(productos.getBigDecimal(2)).isEqualByComparingTo("12345.67");
+            assertThat(productos.getBigDecimal(3)).isEqualByComparingTo("17637.00");
+            assertThat(productos.getBigDecimal(4)).isEqualByComparingTo("2346.00");
+            assertThat(productos.next()).isTrue();
+            // La mitad sube: 14785.50 -> 14786 y 1966.50 -> 1967.
+            assertThat(productos.getBigDecimal(2)).isEqualByComparingTo("10350.00");
+            assertThat(productos.getBigDecimal(3)).isEqualByComparingTo("14786.00");
+            assertThat(productos.getBigDecimal(4)).isEqualByComparingTo("1967.00");
+
+            ResultSet lineas = conexion.createStatement().executeQuery(
+                    "SELECT iva_generado_linea, costo_unitario_linea FROM detalle_ventas ORDER BY id_detalle_venta");
+            assertThat(lineas.next()).isTrue();
+            assertThat(lineas.getBigDecimal(1)).isEqualByComparingTo("5700.45");
+            assertThat(lineas.getBigDecimal(2)).isEqualByComparingTo("12000.00");
+        }
+    }
+
     private static void insertarCompra(Connection conexion, String documentoProveedor, String numero)
             throws SQLException {
         conexion.createStatement().executeUpdate("INSERT INTO compras (id_tenant, id_tercero, numero_factura_compra, "

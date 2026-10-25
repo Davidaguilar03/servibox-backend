@@ -16,6 +16,7 @@ import com.servibox.backend.purchases.service.PurchasesService;
 import com.servibox.backend.sales.entity.PaymentType;
 import com.servibox.backend.sales.entity.Sale;
 import com.servibox.backend.sales.service.SalesService;
+import com.servibox.backend.shared.Moneda;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.AccountType;
 import com.servibox.backend.treasury.service.TreasuryService;
@@ -30,6 +31,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.YearMonth;
@@ -381,6 +383,12 @@ public class DevDataInitializer implements CommandLineRunner {
             gasto(banco, "Nomina primera quincena", 1850000.0, fecha(0, 15));
             vender(fecha(0, 17), null, caja, "EFECTIVO", "LL-003:2");
             vender(fecha(0, 19), luis, nequi, "TRANSFERENCIA", "LU-001:4", "BA-004:1");
+            // Ultima semana: cambio de llantas de flota y ventas de mostrador.
+            vender(fecha(0, 20), taxis, null, null, "LL-006:4");
+            vender(fecha(0, 21), null, caja, "EFECTIVO", "BA-006:1");
+            vender(fecha(0, 22), chicamocha, null, null, "LL-005:3", "LU-001:8");
+            vender(fecha(0, 23), jorge, banco, "TARJETA_DEBITO", "LL-008:1");
+            vender(fecha(0, 24), hunza, banco, "TRANSFERENCIA", "LL-009:1", "LL-001:3");
 
             log.info("Perfil dev: datos de demostracion en [{}]: 3 categorias, {} productos, {} terceros, "
                             + "{} ventas, {} compras y {} movimientos en tres meses", TENANT_SLUG,
@@ -418,7 +426,7 @@ public class DevDataInitializer implements CommandLineRunner {
     }
 
     /**
-     * Venta al precio sugerido del momento con RECARGO_VENTA, redondeado al millar. El costo de
+     * Venta al precio sugerido del momento con RECARGO_VENTA, redondeado al peso entero. El costo de
      * cada linea lo congela SalesService con el costo vigente: por eso las operaciones van en
      * orden de fecha. Sin cuenta es a credito, con
      * vencimiento a 30 dias; sin cliente, al Consumidor final.
@@ -427,7 +435,8 @@ public class DevDataInitializer implements CommandLineRunner {
         List<SalesService.LineaFactura> detalle = Arrays.stream(lineas).map(linea -> {
             String[] partes = linea.split(":");
             Product producto = inventoryService.findProductById(productosPorCodigo.get(partes[0])).orElseThrow();
-            double precio = Math.round(producto.getSuggestedPrice() * RECARGO_VENTA / 1000.0) * 1000.0;
+            double precio = Moneda.aPesosEnteros(
+                    BigDecimal.valueOf(producto.getSuggestedPrice()).multiply(BigDecimal.valueOf(RECARGO_VENTA)));
             return new SalesService.LineaFactura(producto.getId(), Integer.parseInt(partes[1]), precio);
         }).toList();
         if (cuenta == null) {

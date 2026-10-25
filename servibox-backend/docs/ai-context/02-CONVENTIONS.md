@@ -69,6 +69,10 @@ valores permitidos. Un campo NOT NULL en la base es `@NotNull` / `@NotBlank` en 
   y `POST` y `PUT /api/inventory/categories`.
 * **Montos en mensajes**: siempre con `shared.Moneda.formatear` (pesos es-CO sin decimales,
   "$ 3.250.000"), nunca concatenando un `double`.
+* **Precio sugerido e IVA del costo en pesos enteros**: `shared.Moneda.aPesosEnteros`
+  redondea un `BigDecimal` al peso con HALF_UP (1966,5 es 1967), sin multiplos de 500 ni de
+  1.000, y solo sobre el resultado final. El IVA por linea, los totales y los saldos siguen
+  con centavos.
 
 ## Formato de respuestas API (DTOs)
 
@@ -97,7 +101,7 @@ esta tabla.
 | `quantity` | Nivel de stock de un producto | **Se llama `quantity`, NO `stock`.** Es el nombre en Autollantas y se conserva. No renombrar. |
 | `purchaseCost` | Costo de compra **sin IVA** | Es la base de todos los calculos de precio |
 | `taxAmount` | IVA del producto | En ServiBox suma solo los impuestos con `isVat` true, a diferencia de Autollantas. Ver [03-DECISIONS.md](03-DECISIONS.md) |
-| `suggestedPrice` | Precio de venta sugerido | El margen es sobre el **precio de venta**, no sobre el costo |
+| `suggestedPrice` | Precio de venta sugerido | El margen es sobre el **precio de venta**, no sobre el costo. En pesos enteros, igual que `taxAmount` |
 | `targetMargin` | Margen objetivo de la categoria | Fraccion, no porcentaje: `0.30` es 30 por ciento |
 | `isVat` | Marca que un `TaxType` es IVA recuperable | Distingue el IVA de retenciones como ReteICA |
 | `yellowStockMin` / `redStockMin` | Umbrales de alerta de stock | Amarillo es advertencia, rojo es critico |
@@ -291,27 +295,28 @@ Reportes sin cargar nada a mano. Todo pasa por los services.
   y 5W-30: Terpel, Mobil, Castrol, Shell, Chevron) y `BA-001` a `BA-007` (MAC, Willard,
   Tudor, Bosch, con su grupo). Stock final: `BA-007` en 0, `LL-010` (2) y `BA-004` (1)
   criticos, `LL-007` (6) y `LU-010` (9) bajos, el resto normal. Valor del inventario a costo
-  53734000.
+  49285000.
 * Cuentas con saldo inicial fijado en la cuenta (no como ingreso ocasional): Caja General
-  2500000, Bancolombia 15000000 y Nequi (DIGITAL) 600000. Saldos finales 3618650,
-  14051220 y 6808920.
+  2500000, Bancolombia 15000000 y Nequi (DIGITAL) 600000. Saldos finales 4406852,45,
+  16963933,02 y 6807530,08 (los centavos vienen del IVA por linea).
 * Terceros inventados: 8 clientes (3 personas, una empresa de taxis, dos flotas, dos
   talleres), 5 proveedores y el Consumidor final. NIT con digito de verificacion valido.
-* 40 ventas (29 de contado con EFECTIVO en Caja y TRANSFERENCIA, TARJETA_DEBITO o
-  TARJETA_CREDITO en Bancolombia o Nequi; 11 a credito a 30 dias, 6 pagadas con abonos y 5
-  PENDIENTE, 3 de ellas con abono parcial; 2 ANULADA) al precio sugerido, redondeado al
-  millar con un recargo del 12 por ciento (`RECARGO_VENTA`). 9 compras con numero del proveedor (6 de contado, 3 a credito con pagos parciales,
+* 45 ventas (32 de contado con EFECTIVO en Caja y TRANSFERENCIA, TARJETA_DEBITO o
+  TARJETA_CREDITO en Bancolombia o Nequi; 13 a credito a 30 dias, 6 pagadas con abonos y 7
+  PENDIENTE, 3 de ellas con abono parcial; 2 ANULADA) al precio sugerido con un recargo del
+  12 por ciento (`RECARGO_VENTA`), redondeado al peso entero. Las 5 del 20 al 24 del mes
+  actual (fix/38) ponen ese mes en utilidad neta positiva. 9 compras con numero del proveedor (6 de contado, 3 a credito con pagos parciales,
   1 ANULADA por duplicada). 22 gastos operativos (arriendo, energia, acueducto, internet,
   nomina por quincena, aseo, publicidad), el ingreso ocasional "Reintegro de Distrillantas
   del Oriente por garantia" de 310000 en el mes anterior y 2 transferencias de Caja a
   Bancolombia ("Consignacion de efectivo").
-* `/kpis` por mes (hace dos meses / mes anterior / mes actual): ventas con IVA 23985640 /
-  27494950 / 17053890; compras 14518000 / 10595760 / 7097160; ventas sin IVA 20156000 /
-  23105000 / 14331000; costo de lo vendido 13572000 / 15636000 / 9606000; utilidad bruta
-  6584000 / 7469000 / 4725000 (margen 32,7 / 32,3 / 33,0 por ciento); gastos 7294000 /
-  7221800 / 5192200; otros ingresos 0 / 310000 / 0; utilidad neta -710000 / 557200 /
-  -467200. Cada venta congela el costo vigente de su momento: las operaciones van en orden de
-  fecha.
+* `/kpis` por mes (hace dos meses / mes anterior / mes actual): ventas con IVA 23990595,16 /
+  27488878,62 / 24730469,33; compras 14518000 / 10595760 / 7097160; ventas sin IVA 20160164 /
+  23099898 / 20781907; costo de lo vendido 13572000 / 15636000 / 14055000; utilidad bruta
+  6588164 / 7463898 / 6726907 (margen 32,7 / 32,3 / 32,4 por ciento); gastos 7294000 /
+  7221800 / 5192200; otros ingresos 0 / 310000 / 0; utilidad neta -705836 / 552098 /
+  1534707 (7,4 por ciento de las ventas sin IVA del mes actual). Cada venta congela el costo
+  vigente de su momento: las operaciones van en orden de fecha.
 
 Las fechas salen del reloj de negocio (`servibox.business.time-zone`): un dia que el mes no
 tiene pasa al ultimo y una fecha posterior a hoy pasa a hoy, asi que las cifras por mes son

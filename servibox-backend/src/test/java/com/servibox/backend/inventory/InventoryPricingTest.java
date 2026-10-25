@@ -141,8 +141,8 @@ class InventoryPricingTest {
         Product product = producto(25000.0, categoria);
 
         // k = (1 - 0.10) * (1 - 0) = 0.9 ; divisor = 0.9 - 0.0082 - 0.30 = 0.5918
-        double esperado = 25000.0 * 0.9 / 0.5918;
-        assertThat(product.getSuggestedPrice()).isCloseTo(esperado, within(0.001));
+        // 25000 * 0.9 / 0.5918 = 38019.60..., al peso entero 38020.
+        assertThat(product.getSuggestedPrice()).isEqualTo(38020.0);
     }
 
     @Test

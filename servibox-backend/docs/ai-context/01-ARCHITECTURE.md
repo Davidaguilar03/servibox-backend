@@ -404,6 +404,12 @@ divisor       = k - icaRate - targetMargin
 suggestedPrice= divisor > 0 ? purchaseCost * k / divisor : purchaseCost
 ```
 
+Se calcula en `BigDecimal` y solo el resultado final de `taxAmount` y de `suggestedPrice`
+se redondea al peso entero, la mitad hacia arriba, con `Moneda.aPesosEnteros` (desde
+fix/38; V5 redondeo los ya guardados). Todos los puntos que rehacen precios (crear y editar
+producto, compras y su anulacion o recuperacion, categoria, margen y configuracion
+financiera) pasan por `aplicarPrecios`, asi que no hay otro redondeo.
+
 `suggestedPrice` esta portado sin cambios: el margen es sobre el **precio de venta**, no
 sobre el costo, y por eso aparece despejado en el divisor. Cuando el margen mas el ICA
 superan lo que dejan Gastos y DIAN no existe precio finito que cumpla, y se usa el costo
@@ -428,7 +434,7 @@ la categoria y rehace el precio sugerido de todos sus productos.
   rojo no mayor que amarillo, margen en [0, 1), nombre hasta 100.
 * `GET` y `POST` `/api/inventory/products`. Codigo hasta 50, descripcion hasta 255, costo y
   stock no negativos (**400**, tambien en el PUT salvo el stock). POST y PUT devuelven
-  `taxAmount` y `suggestedPrice` a 2 decimales (HALF_UP), como el GET.
+  `taxAmount` y `suggestedPrice` en pesos enteros, como el GET.
 * `GET /api/inventory/products/{id}`
 * `PUT /api/inventory/products/{id}`: `code`, `description`, `purchaseCost`, `categoryId`
   (`ProductUpdateRequest`). `quantity` no se edita: si llega se ignora. Codigo repetido
