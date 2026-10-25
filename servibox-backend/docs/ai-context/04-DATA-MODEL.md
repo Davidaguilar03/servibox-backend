@@ -203,8 +203,8 @@ Modulo: Inventario.
 | descripcion_producto | VARCHAR | 255 | NOT NULL | - | Nombre y especificaciones tecnicas del repuesto o servicio. |
 | costo_compra | NUMERIC | 14,2 | NOT NULL | - | Ultimo costo neto o promedio ponderado de compra en COP. |
 | cantidad | INTEGER (I) | 4 bytes | NOT NULL | - | Saldo de existencias fisicas disponibles en almacen o bodega. |
-| iva_producto | NUMERIC | 14,2 | NOT NULL | - | Monto de IVA por unidad en COP: costo_compra por la suma de las tasas de IVA (es_iva) de la categoria del producto. No es una tarifa. |
-| precio_sugerido | NUMERIC | 14,2 | NOT NULL | - | Precio de venta recomendado calculado a partir de costo y margen. |
+| iva_producto | NUMERIC | 14,2 | NOT NULL | - | Monto de IVA por unidad en COP: costo_compra por la suma de las tasas de IVA (es_iva) de la categoria del producto, en pesos enteros (HALF_UP, .00). No es una tarifa. |
+| precio_sugerido | NUMERIC | 14,2 | NOT NULL | - | Precio de venta recomendado calculado a partir de costo y margen, en pesos enteros (HALF_UP, .00). V5 redondeo los ya guardados. |
 | created_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de registro del producto en el catalogo (UTC). |
 | updated_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de modificacion de existencias o precios (UTC). |
 

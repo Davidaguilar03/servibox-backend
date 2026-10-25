@@ -2,9 +2,11 @@ package com.servibox.backend.shared;
 
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Formato es-CO sin decimales de los montos en mensajes de error. */
+/** Formato es-CO sin decimales de los montos en mensajes de error y redondeo al peso entero. */
 class MonedaTest {
 
     @Test
@@ -21,5 +23,21 @@ class MonedaTest {
         assertThat(Moneda.formatear(1500.5)).isEqualTo("$ 1.501");
         assertThat(Moneda.formatear(1500.4)).isEqualTo("$ 1.500");
         assertThat(Moneda.formatear(-30.0)).isEqualTo("-$ 30");
+    }
+
+    @Test
+    void aPesosEnterosRedondeaLaMitadHaciaArriba() {
+        // IVA del costo de 10350 al 19 por ciento: 1966.5 sube a 1967, no baja a 1966.
+        assertThat(Moneda.aPesosEnteros(BigDecimal.valueOf(10350.0).multiply(BigDecimal.valueOf(0.19))))
+                .isEqualTo(1967.0);
+        assertThat(Moneda.aPesosEnteros(new BigDecimal("2345.55"))).isEqualTo(2346.0);
+        assertThat(Moneda.aPesosEnteros(new BigDecimal("17635.4999"))).isEqualTo(17635.0);
+    }
+
+    @Test
+    void aPesosEnterosNoCambiaUnResultadoExacto() {
+        assertThat(Moneda.aPesosEnteros(BigDecimal.valueOf(10000.0).multiply(BigDecimal.valueOf(0.19))))
+                .isEqualTo(1900.0);
+        assertThat(Moneda.aPesosEnteros(new BigDecimal("50000.00"))).isEqualTo(50000.0);
     }
 }

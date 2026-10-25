@@ -33,7 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Validaciones de categorias y productos, precios a 2 decimales en las respuestas de escritura
+ * Validaciones de categorias y productos, precios en pesos enteros en las respuestas de escritura
  * y rol ADMIN para la configuracion financiera y las categorias.
  */
 @SpringBootTest
@@ -251,31 +251,31 @@ class InventoryValidationTest {
     }
 
     @Test
-    void elPostYElPutDevuelvenLosPreciosConDosDecimalesComoElGet() throws Exception {
+    void elPostYElPutDevuelvenLosPreciosEnPesosEnterosComoElGet() throws Exception {
         enviar("PUT", "/api/inventory/categories/" + llantas.getId(), admin,
                 categoria("LLANTAS", 5, 2, "0.3", "[%d]".formatted(iva.getId())))
                 .andExpect(status().isOk());
 
-        // 33333.33 * 0.19 = 6333.3327; 33333.33 / 0.7 = 47619.0428...
+        // 33333.33 * 0.19 = 6333.3327 -> 6333; 33333.33 / 0.7 = 47619.0428... -> 47619
         MvcResult creado = enviar("POST", "/api/inventory/products", admin,
                 producto("LLA-002", "Llanta", "33333.33", "1", llantas.getId()))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.taxAmount").value(6333.33))
-                .andExpect(jsonPath("$.suggestedPrice").value(47619.04))
+                .andExpect(jsonPath("$.taxAmount").value(6333.0))
+                .andExpect(jsonPath("$.suggestedPrice").value(47619.0))
                 .andReturn();
         int id = JsonPath.read(creado.getResponse().getContentAsString(), "$.id");
         leer("/api/inventory/products/" + id)
-                .andExpect(jsonPath("$.taxAmount").value(6333.33))
-                .andExpect(jsonPath("$.suggestedPrice").value(47619.04));
+                .andExpect(jsonPath("$.taxAmount").value(6333.0))
+                .andExpect(jsonPath("$.suggestedPrice").value(47619.0));
 
-        // 12345.67 * 0.19 = 2345.6773; 12345.67 / 0.7 = 17636.6714...
+        // 12345.67 * 0.19 = 2345.6773 -> 2346; 12345.67 / 0.7 = 17636.6714... -> 17637
         enviar("PUT", "/api/inventory/products/" + id, admin, producto("LLA-002", "Llanta", "12345.67", "1", llantas.getId()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.taxAmount").value(2345.68))
-                .andExpect(jsonPath("$.suggestedPrice").value(17636.67));
+                .andExpect(jsonPath("$.taxAmount").value(2346.0))
+                .andExpect(jsonPath("$.suggestedPrice").value(17637.0));
         leer("/api/inventory/products/" + id)
-                .andExpect(jsonPath("$.taxAmount").value(2345.68))
-                .andExpect(jsonPath("$.suggestedPrice").value(17636.67));
+                .andExpect(jsonPath("$.taxAmount").value(2346.0))
+                .andExpect(jsonPath("$.suggestedPrice").value(17637.0));
     }
 
     // ---- Rol ADMIN ----

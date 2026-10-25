@@ -73,15 +73,15 @@ class DevDemoDataFirstDayTest {
     void elPrimerDiaDelMesLaSiembraTerminaSinFechasFuturasYConDatosHoy() {
         TenantContext.setTenantId(tenantRepository.findBySlug("demo").orElseThrow().getId());
 
-        assertThat(salesService.findAllSales()).hasSize(40)
+        assertThat(salesService.findAllSales()).hasSize(45)
                 .extracting(Sale::getInvoiceDate).allMatch(f -> !f.isAfter(HOY)).contains(HOY);
         assertThat(purchasesService.findAllPurchases()).hasSize(9);
         assertThat(treasuryService.buscarMovimientos(null, null, null, null))
                 .extracting(Movement::getDate).allMatch(f -> !f.isAfter(HOY));
 
-        kpis(YearMonth.of(2026, 1), 23985640.0, 14518000.0, 20156000.0, 13572000.0, 7294000.0, 0.0);
-        kpis(YearMonth.of(2026, 2), 27494950.0, 10595760.0, 23105000.0, 15636000.0, 7221800.0, 310000.0);
-        kpis(YearMonth.of(2026, 3), 17053890.0, 7097160.0, 14331000.0, 9606000.0, 5192200.0, 0.0);
+        kpis(YearMonth.of(2026, 1), 23990595.16, 14518000.0, 20160164.0, 13572000.0, 7294000.0, 0.0);
+        kpis(YearMonth.of(2026, 2), 27488878.62, 10595760.0, 23099898.0, 15636000.0, 7221800.0, 310000.0);
+        kpis(YearMonth.of(2026, 3), 24730469.33, 7097160.0, 20781907.0, 14055000.0, 5192200.0, 0.0);
     }
 
     private void kpis(YearMonth mes, double ventas, double compras, double ventasSinIva, double costo, double gastos,
