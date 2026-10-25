@@ -204,20 +204,58 @@ class TenantProfileTest {
     }
 
     @Test
-    void nitYTelefonoEnBlancoSeGuardanComoNull() throws Exception {
-        editar(tokenUno, cuerpo("Taller Uno", "   ", ""))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.nit").value(nullValue()))
-                .andExpect(jsonPath("$.phone").value(nullValue()));
-        assertThat(enBase(tenantUno).getNit()).isNull();
-        assertThat(enBase(tenantUno).getPhone()).isNull();
+    void sinNitOEnBlancoEs400YNoCambiaNada() throws Exception {
+        for (String cuerpo : List.of(cuerpo("Otro nombre", null, "3001112233"),
+                cuerpo("Otro nombre", "", "3001112233"), cuerpo("Otro nombre", "   ", "3001112233"),
+                "{\"name\":\"Otro nombre\",\"phone\":\"3001112233\"}")) {
+            editar(tokenUno, cuerpo)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("El NIT es obligatorio"))
+                    .andExpect(jsonPath("$.status").value(400));
+        }
+        Tenant tenant = enBase(tenantUno);
+        assertThat(tenant.getName()).isEqualTo("Taller Uno");
+        assertThat(tenant.getNit()).isEqualTo("900123456-7");
+        assertThat(tenant.getPhone()).isEqualTo("+57 300 111 2233");
+    }
 
-        // Ausentes en el cuerpo tambien quedan en null.
-        editar(tokenUno, cuerpo("Taller Uno", "900123456-7", "3001112233")).andExpect(status().isOk());
-        editar(tokenUno, "{\"name\":\"Taller Uno\"}")
+    @Test
+    void sinTelefonoOEnBlancoEs400YNoCambiaNada() throws Exception {
+        for (String cuerpo : List.of(cuerpo("Otro nombre", "800765432-1", null),
+                cuerpo("Otro nombre", "800765432-1", ""), cuerpo("Otro nombre", "800765432-1", "  "),
+                "{\"name\":\"Otro nombre\",\"nit\":\"800765432-1\"}")) {
+            editar(tokenUno, cuerpo)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("El telefono es obligatorio"));
+        }
+        Tenant tenant = enBase(tenantUno);
+        assertThat(tenant.getName()).isEqualTo("Taller Uno");
+        assertThat(tenant.getNit()).isEqualTo("900123456-7");
+        assertThat(tenant.getPhone()).isEqualTo("+57 300 111 2233");
+    }
+
+    /** Taller Dos se creo directo en la base sin NIT ni telefono, como un tenant antiguo. */
+    @Test
+    void unTenantAntiguoSinNitNiTelefonoSeLeePeroParaEditarDebeMandarLosDos() throws Exception {
+        perfil(tokenDos)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.nit").value(nullValue()))
                 .andExpect(jsonPath("$.phone").value(nullValue()));
+
+        editar(tokenDos, cuerpo("Taller Dos", null, null))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("El NIT es obligatorio"));
+        editar(tokenDos, cuerpo("Taller Dos", "800765432-1", null))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("El telefono es obligatorio"));
+        assertThat(enBase(tenantDos).getNit()).isNull();
+
+        editar(tokenDos, cuerpo("Taller Dos", "800765432-1", "3104445566"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nit").value("800765432-1"))
+                .andExpect(jsonPath("$.phone").value("3104445566"));
+        assertThat(enBase(tenantDos).getNit()).isEqualTo("800765432-1");
+        assertThat(enBase(tenantDos).getPhone()).isEqualTo("3104445566");
     }
 
     @Test
@@ -244,7 +282,7 @@ class TenantProfileTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("El nombre comercial no puede superar 150 caracteres"));
         // 150 justos si valen.
-        editar(tokenUno, cuerpo("x".repeat(150), null, null)).andExpect(status().isOk());
+        editar(tokenUno, cuerpo("x".repeat(150), "900123456-7", "3001112233")).andExpect(status().isOk());
     }
 
     @Test
@@ -260,15 +298,15 @@ class TenantProfileTest {
         assertThat(enBase(tenantUno).getName()).isEqualTo("Taller Uno");
         assertThat(enBase(tenantUno).getNit()).isEqualTo("900123456-7");
         // Sin digito de verificacion tambien vale.
-        editar(tokenUno, cuerpo("Taller Uno", "900123456", null)).andExpect(status().isOk());
+        editar(tokenUno, cuerpo("Taller Uno", "900123456", "3001112233")).andExpect(status().isOk());
     }
 
     @Test
     void lasReglasDelTelefonoSonLasDelRegistro() throws Exception {
-        editar(tokenUno, cuerpo("Otro nombre", null, "300-ABC"))
+        editar(tokenUno, cuerpo("Otro nombre", "900123456-7", "300-ABC"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("El telefono solo admite digitos, espacios, +, - y parentesis"));
-        editar(tokenUno, cuerpo("Otro nombre", null, "3".repeat(26)))
+        editar(tokenUno, cuerpo("Otro nombre", "900123456-7", "3".repeat(26)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("El telefono no puede superar 25 caracteres"));
         assertThat(enBase(tenantUno).getName()).isEqualTo("Taller Uno");
@@ -335,7 +373,7 @@ class TenantProfileTest {
 
     @Test
     void elNombreEditadoSaleEnElLoginYEnElReporte() throws Exception {
-        editar(tokenDos, cuerpo("Serviteca Renombrada", null, null)).andExpect(status().isOk());
+        editar(tokenDos, cuerpo("Serviteca Renombrada", "800765432-1", "3104445566")).andExpect(status().isOk());
 
         MvcResult login = loginResult(slugDos, "admin");
         assertThat((String) JsonPath.read(login.getResponse().getContentAsString(), "$.tenant.name"))
@@ -358,6 +396,7 @@ class TenantProfileTest {
                 .containsExactly("Taller Uno", "NIT 900123456-7", "Estado de resultados");
     }
 
+    /** Solo un tenant antiguo queda sin NIT: ya no se puede borrar por PUT. */
     @Test
     void sinNitElEncabezadoQuedaComoAntes() throws Exception {
         List<String> lineas = lineasPdf(exportar(tokenDos, "PDF"));
@@ -368,9 +407,8 @@ class TenantProfileTest {
         assertThat(encabezadoXlsx(exportar(tokenDos, "XLSX")))
                 .containsExactly("Taller Dos", "Estado de resultados", "Período: 01/09/2026 a 30/09/2026");
 
-        // Y si un ADMIN borra el NIT, la linea desaparece.
-        editar(tokenUno, cuerpo("Taller Uno", "", null)).andExpect(status().isOk());
-        assertThat(lineasPdf(exportar(tokenUno, "PDF"))).noneMatch(l -> l.startsWith("NIT"));
-        assertThat(encabezadoXlsx(exportar(tokenUno, "XLSX")).get(1)).isEqualTo("Estado de resultados");
+        // Intentar borrar el NIT es 400 y el encabezado lo sigue mostrando.
+        editar(tokenUno, cuerpo("Taller Uno", "", "3001112233")).andExpect(status().isBadRequest());
+        assertThat(encabezadoXlsx(exportar(tokenUno, "XLSX")).get(1)).isEqualTo("NIT 900123456-7");
     }
 }

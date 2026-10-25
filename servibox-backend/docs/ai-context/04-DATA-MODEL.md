@@ -24,8 +24,8 @@ Modulo: Multi-tenancy y administracion.
 | id_tenant | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico de la empresa o taller registrado. |
 | nombre_tenant | VARCHAR | 150 | NOT NULL | - | Razon social o denominacion comercial de la serviteca. |
 | slug_tenant | VARCHAR | 100 | NOT NULL | UK | Identificador alfanumerico unico para subdominio web y enrutamiento. |
-| nit_tenant | VARCHAR | 25 | NULL | - | NIT de la serviteca, digitos con guion y digito de verificacion opcionales (900123456-7). Lo pide el registro publico; null en los tenants anteriores (V2). |
-| telefono_tenant | VARCHAR | 25 | NULL | - | Telefono de contacto de la serviteca: digitos, espacios, +, - y parentesis. Lo pide el registro publico; null en los tenants anteriores (V2). |
+| nit_tenant | VARCHAR | 25 | NULL | - | NIT de la serviteca, digitos con guion y digito de verificacion opcionales (900123456-7). Obligatorio en el registro y en PUT /api/tenant, pero NULL en la base: null en los tenants anteriores (V2) hasta que editen su perfil. |
+| telefono_tenant | VARCHAR | 25 | NULL | - | Telefono de contacto de la serviteca: digitos, espacios, +, - y parentesis. Obligatorio en el registro y en PUT /api/tenant, pero NULL en la base: null en los tenants anteriores (V2) hasta que editen su perfil. |
 | activo_tenant | BOOLEAN | 1 byte | NOT NULL | - | Estado de la cuenta: true para activa, false para suspendida. |
 | fecha_creacion_tenant | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de registro de la suscripcion (UTC). |
 

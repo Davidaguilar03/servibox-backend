@@ -282,7 +282,8 @@ introducirlo en ServiBox.
 ## Datos de demostracion en dev
 
 Con el perfil `dev` (`./mvnw spring-boot:run -Dspring-boot.run.profiles=dev`),
-`DevDataInitializer` hace la siembra base (tenant `demo`, usuario `admin`, IVA, las 3
+`DevDataInitializer` hace la siembra base (tenant `demo` con NIT 900000000-0 y telefono
+3000000000, inventados con el formato del registro; usuario `admin`, IVA, las 3
 categorias del registro y 2 cuentas; credenciales en [01-ARCHITECTURE.md](01-ARCHITECTURE.md))
 y despues los datos de demostracion: un almacen de llantas, lubricantes y baterias de Tunja
 con tres meses de operacion (el actual y los dos anteriores), para probar el frontend y

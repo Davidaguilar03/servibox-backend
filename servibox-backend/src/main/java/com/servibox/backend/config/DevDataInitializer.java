@@ -111,6 +111,9 @@ public class DevDataInitializer implements CommandLineRunner {
     private void sembrarBase() {
         Tenant tenant = new Tenant();
         tenant.setName("ServiBox Demo");
+        // Inventados, con el formato que exige el registro: no son de ninguna empresa.
+        tenant.setNit("900000000-0");
+        tenant.setPhone("3000000000");
         tenant.setSlug(TENANT_SLUG);
         tenant.setActive(Boolean.TRUE);
         Tenant creado = tenantRepository.save(tenant);
