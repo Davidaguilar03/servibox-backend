@@ -12,6 +12,16 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-25: Reglas de trabajo compartidas entre repos
+
+* Decision: `AGENTS.md` en la raiz Git contiene las reglas compartidas y `CLAUDE.md`
+  lo importa con `@AGENTS.md`. Se copia byte por byte desde la raiz Git del frontend.
+  Cualquier cambio de estas reglas debe mantenerse identico en ambos repos mediante
+  sus propias tareas.
+* Alternativas consideradas: reglas separadas por agente o copias con diferencias.
+* Motivo: mantener una sola version de las reglas compartidas para todos los agentes.
+  El contexto del backend sigue en `servibox-backend/docs/ai-context/`, dentro del repo.
+
 ## 2026-10-24: NIT y telefono del tenant obligatorios en la API
 
 * Decision: NIT y telefono son obligatorios en `POST /api/auth/register` (ya lo eran) y en
