@@ -276,28 +276,44 @@ introducirlo en ServiBox.
 ## Datos de demostracion en dev
 
 Con el perfil `dev` (`./mvnw spring-boot:run -Dspring-boot.run.profiles=dev`),
-`DevDataInitializer` hace la siembra base (tenant `demo`, usuario `admin`, IVA, 8 categorias
-y 2 cuentas; credenciales en [01-ARCHITECTURE.md](01-ARCHITECTURE.md)) y despues los datos
-de demostracion, para probar el frontend y Reportes sin cargar nada a mano:
+`DevDataInitializer` hace la siembra base (tenant `demo`, usuario `admin`, IVA, las 3
+categorias del registro y 2 cuentas; credenciales en [01-ARCHITECTURE.md](01-ARCHITECTURE.md))
+y despues los datos de demostracion: un almacen de llantas, lubricantes y baterias de Tunja
+con tres meses de operacion (el actual y los dos anteriores), para probar el frontend y
+Reportes sin cargar nada a mano. Todo pasa por los services.
 
-* Categoria `REPUESTOS DEMO` (amarillo 10, rojo 3, margen 0.30, IVA 19) con tres productos:
-  aceite (costo 30000, stock final 50, normal), filtro (15000, stock 10, bajo) y bateria
-  (250000, stock 3, critico).
-* Saldo inicial de Caja General 1950000 y de Bancolombia 2000000, fijado en la cuenta (no
-  como ingreso ocasional, que sumaria a la utilidad); dos clientes y un proveedor.
-* Mes anterior: compra de contado `PROV-1001` (357000), venta de contado `FV-0001`
-  (696150), venta a credito `FV-0002` (52360) y transferencia de Caja a Bancolombia
-  (500000).
-* Mes actual: abono de 20000 a `FV-0002` (queda PENDIENTE con 32360), gasto operativo de
-  450000, ingreso ocasional "Reintegro de proveedor" de 50000 a Caja, ventas de contado
-  `FV-0003` (160650) y `FV-0005` (107100) y `FV-0004` (428400) ANULADA.
-* Resultado: `/kpis` del mes anterior ventas 748510, compras 357000, otros ingresos 0,
-  utilidad neta 391510; del mes actual ventas 267750, gastos 450000, otros ingresos 50000,
-  utilidad neta -132250. Caja General 1946250, Bancolombia 2230650.
+* Categorias (IVA 19): LLANTAS amarillo 8, rojo 3, margen 0.22; LUBRICANTES 12, 4 y 0.30;
+  BATERIAS 5, 2 y 0.25.
+* 27 productos con referencias reales: `LL-001` a `LL-010` (rin 13 a 17: Michelin, Pirelli,
+  Goodyear, Hankook, Bridgestone, Continental), `LU-001` a `LU-010` (20W-50, 15W-40, 10W-30
+  y 5W-30: Terpel, Mobil, Castrol, Shell, Chevron) y `BA-001` a `BA-007` (MAC, Willard,
+  Tudor, Bosch, con su grupo). Stock final: `BA-007` en 0, `LL-010` (2) y `BA-004` (1)
+  criticos, `LL-007` (6) y `LU-010` (9) bajos, el resto normal. Valor del inventario a costo
+  53734000.
+* Cuentas con saldo inicial fijado en la cuenta (no como ingreso ocasional): Caja General
+  2500000, Bancolombia 15000000 y Nequi (DIGITAL) 600000. Saldos finales 3011750,
+  10262260 y 6014000.
+* Terceros inventados: 8 clientes (3 personas, una empresa de taxis, dos flotas, dos
+  talleres), 5 proveedores y el Consumidor final. NIT con digito de verificacion valido.
+* 40 ventas (29 de contado con EFECTIVO en Caja y TRANSFERENCIA, TARJETA_DEBITO o
+  TARJETA_CREDITO en Bancolombia o Nequi; 11 a credito a 30 dias, 6 pagadas con abonos y 5
+  PENDIENTE, 3 de ellas con abono parcial; 2 ANULADA) al precio sugerido redondeado al
+  millar. 9 compras con numero del proveedor (6 de contado, 3 a credito con pagos parciales,
+  1 ANULADA por duplicada). 22 gastos operativos (arriendo, energia, acueducto, internet,
+  nomina por quincena, aseo, publicidad), el ingreso ocasional "Reintegro de Distrillantas
+  del Oriente por garantia" de 310000 en el mes anterior y 2 transferencias de Caja a
+  Bancolombia ("Consignacion de efectivo").
+* `/kpis` por mes (hace dos meses / mes anterior / mes actual): ventas 21429520 / 24552080 /
+  15234380; compras 14518000 / 10595760 / 7097160; utilidad bruta 6911520 / 13956320 /
+  8137220; gastos 7294000 / 7221800 / 5192200; otros ingresos 0 / 310000 / 0; utilidad neta
+  -382480 / 7044520 / 2945020.
 
-Las fechas salen del reloj de negocio (`servibox.business.time-zone`). Se desactiva con
-`servibox.dev.demo-data=false` (variable `DEV_DEMO_DATA`, en `application-dev.properties`);
-la siembra base sigue. La base H2 es en memoria y se reinicia en cada arranque, asi que
-cada arranque vuelve a sembrar lo mismo. Si el tenant `demo` ya tiene productos no se
-siembra nada, y si un paso falla queda un aviso en el log y la app arranca igual.
-`config.DevDemoDataTest` comprueba estas cifras.
+Las fechas salen del reloj de negocio (`servibox.business.time-zone`): un dia que el mes no
+tiene pasa al ultimo y una fecha posterior a hoy pasa a hoy, asi que las cifras por mes son
+las mismas cualquier dia que se arranque (vencimientos de credito pueden quedar despues de
+hoy). Se desactiva con `servibox.dev.demo-data=false` (variable `DEV_DEMO_DATA`, en
+`application-dev.properties`); la siembra base sigue. La base H2 es en memoria y se reinicia
+en cada arranque, asi que cada arranque vuelve a sembrar lo mismo. Si el tenant `demo` ya
+tiene productos no se siembra nada, y si un paso falla queda un aviso en el log y la app
+arranca igual. `config.DevDemoDataTest` (Clock fijo en 2026-10-24) y
+`config.DevDemoDataFirstDayTest` (Clock en un primer dia de mes) comprueban estas cifras.
