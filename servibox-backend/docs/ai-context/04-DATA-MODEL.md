@@ -302,4 +302,16 @@ Decididas durante el refactor. Cada una se anota tambien en `03-DECISIONS.md`.
 Lo que sigue abierto despues del refactor (ver `sessions/2026-10-06-refactor-normalizacion.md`, Pendientes):
 
 * `medio_pago_compra` y `medio_pago_venta` son texto libre en el codigo, mientras el diccionario lista valores permitidos (EFECTIVO, TRANSFERENCIA, CHEQUE en compras; EFECTIVO, TARJETA_DEBITO, TARJETA_CREDITO, TRANSFERENCIA en ventas). Todavia no se validan.
-* El dinero es `Double` en el codigo y `NUMERIC(14,2)` en la base (mapeado con `@JdbcTypeCode(SqlTypes.NUMERIC)`): la base redondea a dos decimales al guardar, pero los calculos en memoria son en coma flotante. La migracion a `BigDecimal` queda pendiente, en una rama aparte.
+* El dinero sigue `Double` en las entidades y `NUMERIC(14,2)` en la base (mapeado con `@JdbcTypeCode(SqlTypes.NUMERIC)`). Desde fix/41 los importes definitivos se normalizan en Moneda con aritmetica decimal y HALF_UP a dos decimales antes de guardar y responder. Migrar las entidades a BigDecimal sigue fuera de alcance. Las lineas solo guardan precio unitario, cantidad e IVA: por decision aprobada, los precios nuevos con mas de dos decimales significativos se rechazan con 400 antes de escribir, sin ampliar columnas ni agregar subtotal por linea. Entrada BigDecimal; 0.0100 se acepta como 0.01. No se reinterpretan historicos.
+
+## Indices de consulta desde V6
+
+V6 agrega 18 indices no unicos, sin cambiar columnas, restricciones ni datos. Cubren
+catalogos por tenant/nombre, documentos por tenant/fecha, movimientos por tenant/rango
+y cuenta/rango, detalles por documento y producto, y FK inversas sin prefijo cubierto.
+CUENTAS aprovecha su UNIQUE por tenant/nombre y la tabla puente su PK por categoria;
+no se agregan indices simples redundantes sobre esos prefijos. No se agregan indices
+indiscriminados para toda FK: por ejemplo, movimiento relacionado no tiene consulta
+inversa frecuente ni borrado de transferencias. Columnas y motivo de cada indice en
+[sesion backend polish](sessions/2026-10-25-backend-polish.md). PostgreSQL crea indices
+de PK/UNIQUE, no de FK; H2 puede agregar indices automaticos de FK que no son V6.

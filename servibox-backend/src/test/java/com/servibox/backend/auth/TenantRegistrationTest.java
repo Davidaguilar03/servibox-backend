@@ -379,7 +379,7 @@ class TenantRegistrationTest {
         esperarError(cuerpoCon("nit", "\"\""), 400, "El NIT es obligatorio");
         esperarError(cuerpoCon("nit", "\"   \""), 400, "El NIT es obligatorio");
         esperarError(cuerpoCon("nit", "\"" + "9".repeat(26) + "\""), 400, "El NIT no puede superar 25 caracteres");
-        String formato = "El NIT solo admite digitos y un guion con el digito de verificacion, por ejemplo 900123456-7";
+        String formato = "El NIT solo admite digitos y un guion con el dígito de verificación, por ejemplo 900123456-7";
         esperarError(cuerpoCon("nit", "\"900.123.456\""), 400, formato);
         esperarError(cuerpoCon("nit", "\"900123456-78\""), 400, formato);
         esperarError(cuerpoCon("nit", "\"NIT900123456\""), 400, formato);
@@ -395,12 +395,12 @@ class TenantRegistrationTest {
         esperarError(cuerpoCon("phone", "\"" + "3".repeat(26) + "\""), 400,
                 "El telefono no puede superar 25 caracteres");
         esperarError(cuerpoCon("phone", "\"300-ABC-1234\""), 400,
-                "El telefono solo admite digitos, espacios, +, - y parentesis");
+                "El telefono solo admite digitos, espacios, +, - y paréntesis");
     }
 
     @Test
     void slugInvalidoEs400() throws Exception {
-        String formato = "El identificador debe tener de 3 a 30 caracteres con solo minusculas, numeros y guiones";
+        String formato = "El identificador debe tener de 3 a 30 caracteres con solo minúsculas, números y guiones";
         esperarError(cuerpoCon("slug", "\"Taller-Norte\""), 400, formato);
         esperarError(cuerpoCon("slug", "\"ab\""), 400, formato);
         esperarError(cuerpoCon("slug", "\"" + "a".repeat(31) + "\""), 400, formato);
@@ -429,7 +429,7 @@ class TenantRegistrationTest {
 
     @Test
     void usernameInvalidoEs400() throws Exception {
-        String mensaje = "El usuario debe tener de 3 a 50 caracteres con letras, numeros, punto, guion y guion bajo";
+        String mensaje = "El usuario debe tener de 3 a 50 caracteres con letras, números, punto, guion y guion bajo";
         esperarError(cuerpoCon("adminUsername", "\"ab\""), 400, mensaje);
         esperarError(cuerpoCon("adminUsername", "\"" + "a".repeat(51) + "\""), 400, mensaje);
         esperarError(cuerpoCon("adminUsername", "\"ana rojas\""), 400, mensaje);

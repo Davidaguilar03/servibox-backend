@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.servibox.backend.shared.Moneda;
 
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
@@ -92,9 +93,9 @@ public class ReportExportService {
         for (FilaReporte m : movimientos) {
             boolean ingreso = m.type() == MovementType.INGRESO;
             if (ingreso) {
-                ingresos += m.amount();
+                ingresos = Moneda.sumar(ingresos, m.amount());
             } else {
-                egresos += m.amount();
+                egresos = Moneda.sumar(egresos, m.amount());
             }
             filas.add(List.of(m.date(), m.accountName(), ingreso ? "Ingreso" : "Egreso", m.concept(),
                     origen(m), ingreso ? m.amount() : -m.amount()));
@@ -106,7 +107,7 @@ public class ReportExportService {
         }
         totales.add(new Total("Ingresos", ingresos));
         totales.add(new Total("Egresos", negativo(egresos)));
-        totales.add(new Total("Neto", ingresos - egresos));
+        totales.add(new Total("Neto", Moneda.restar(ingresos, egresos)));
         if (cuenta != null) {
             totales.add(new Total("Saldo final", treasuryService.saldoAl(cuenta, hasta)));
         }

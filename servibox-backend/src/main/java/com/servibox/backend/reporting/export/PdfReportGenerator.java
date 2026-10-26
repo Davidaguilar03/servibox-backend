@@ -26,6 +26,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -167,13 +169,15 @@ public class PdfReportGenerator {
         return celda;
     }
 
-    /** Pesos sin decimales, punto de miles y el signo menos adelante: -$ 29.310.000. */
+    /** Muestra centavos cuando existen; conserva el formato de los importes enteros. */
     static String moneda(double monto) {
         DecimalFormatSymbols simbolos = new DecimalFormatSymbols();
         simbolos.setGroupingSeparator('.');
-        long redondeado = Math.round(Math.abs(monto));
-        String cifra = new DecimalFormat("#,##0", simbolos).format(redondeado);
-        return (monto < 0 && redondeado != 0 ? "-" : "") + "$ " + cifra;
+        simbolos.setDecimalSeparator(',');
+        BigDecimal importe = BigDecimal.valueOf(monto).setScale(2, RoundingMode.HALF_UP);
+        String patron = importe.stripTrailingZeros().scale() > 0 ? "#,##0.00" : "#,##0";
+        String cifra = new DecimalFormat(patron, simbolos).format(importe.abs());
+        return (importe.signum() < 0 ? "-" : "") + "$ " + cifra;
     }
 
     private static Font fuente(float tamano, int estilo, Color color) {

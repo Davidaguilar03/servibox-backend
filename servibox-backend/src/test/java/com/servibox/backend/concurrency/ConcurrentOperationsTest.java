@@ -121,6 +121,17 @@ class ConcurrentOperationsTest {
     // ---- (a) cobros y pagos simultaneos a una misma cuenta ----
 
     @Test
+    void ingresosDecimalesConcurrentesConservanElSaldoExacto() throws Exception {
+        long cuenta = cuenta("Caja decimal", 0.10);
+        List<MvcResult> resultados = simultaneas(HILOS, i -> json("/api/treasury/movements", """
+                {"accountId":%d,"category":"INGRESO_OCASIONAL","concept":"Centavos","amount":0.105}
+                """.formatted(cuenta)));
+        assertThat(codigos(resultados)).containsOnly(201);
+        assertThat(saldo(cuenta)).isEqualTo(2.30);
+        verificarInvariante();
+    }
+
+    @Test
     void abonosYPagosSimultaneosAUnaMismaCuentaNoPierdenSaldo() throws Exception {
         long producto = producto("ABO-1", 1000);
         long cuenta = cuenta("Caja", 1_000_000);

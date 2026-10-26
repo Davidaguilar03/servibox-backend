@@ -1,6 +1,7 @@
 package com.servibox.backend.reporting.dto;
 
 import java.time.LocalDate;
+import com.servibox.backend.shared.Moneda;
 
 /**
  * Los KPIs del dashboard. Un solo DTO para el calculo global y el del periodo: son
@@ -34,12 +35,13 @@ public record KpisResponse(
                                   double operatingExpenses, double otherIncome) {
         double ventasNetas = redondear(netSales);
         double costo = redondear(costOfSales);
-        double grossProfit = redondear(ventasNetas - costo);
-        return new KpisResponse(desde, hasta, totalSales, totalPurchases, ventasNetas, costo, grossProfit,
-                operatingExpenses, otherIncome, redondear(grossProfit + otherIncome - operatingExpenses));
+        double grossProfit = Moneda.restar(ventasNetas, costo);
+        return new KpisResponse(desde, hasta, redondear(totalSales), redondear(totalPurchases), ventasNetas,
+                costo, grossProfit, redondear(operatingExpenses), redondear(otherIncome),
+                Moneda.restar(Moneda.sumar(grossProfit, otherIncome), operatingExpenses));
     }
 
     private static double redondear(double valor) {
-        return Math.round(valor * 100.0) / 100.0;
+        return Moneda.aCentavos(valor);
     }
 }

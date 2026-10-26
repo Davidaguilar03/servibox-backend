@@ -15,6 +15,23 @@ public final class Moneda {
     private Moneda() {
     }
 
+    /** Importe definitivo en COP, coherente con NUMERIC(14,2). */
+    public static double aCentavos(BigDecimal monto) {
+        return monto.setScale(2, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    public static double aCentavos(double monto) {
+        return aCentavos(BigDecimal.valueOf(monto));
+    }
+
+    public static double sumar(double primero, double segundo) {
+        return aCentavos(BigDecimal.valueOf(primero).add(BigDecimal.valueOf(segundo)));
+    }
+
+    public static double restar(double primero, double segundo) {
+        return aCentavos(BigDecimal.valueOf(primero).subtract(BigDecimal.valueOf(segundo)));
+    }
+
     public static String formatear(double monto) {
         DecimalFormatSymbols simbolos = new DecimalFormatSymbols();
         simbolos.setGroupingSeparator('.');

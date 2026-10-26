@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Collection;
@@ -52,7 +53,7 @@ public class TreasuryService {
 
     @Transactional(readOnly = true)
     public List<Account> findAllAccounts() {
-        return accountRepository.findAll();
+        return accountRepository.findAll(Sort.by("name", "id"));
     }
 
     /**
@@ -79,9 +80,11 @@ public class TreasuryService {
         if (account.getInitialBalance() == null) {
             account.setInitialBalance(0.0);
         }
+        account.setInitialBalance(Moneda.aCentavos(account.getInitialBalance()));
         if (account.getCurrentBalance() == null) {
             account.setCurrentBalance(account.getInitialBalance());
         }
+        account.setCurrentBalance(Moneda.aCentavos(account.getCurrentBalance()));
         return accountRepository.save(account);
     }
 
@@ -94,16 +97,17 @@ public class TreasuryService {
             throw new IllegalArgumentException("El tipo de una cuenta no se puede cambiar");
         }
         validarNombreUnico(cuenta.getId(), request.name());
-        double diferencia = request.initialBalance() - cuenta.getInitialBalance();
+        double inicial = Moneda.aCentavos(request.initialBalance());
+        double diferencia = Moneda.restar(inicial, cuenta.getInitialBalance());
         if (diferencia != 0.0) {
-            double saldoNuevo = saldoDe(cuenta) + diferencia;
+            double saldoNuevo = Moneda.sumar(saldoDe(cuenta), diferencia);
             if (saldoNuevo < 0) {
                 throw new InsufficientBalanceException("Saldo insuficiente en " + cuenta.getName()
                         + ": faltan " + Moneda.formatear(-saldoNuevo)
                         + " para cambiar el saldo inicial");
             }
             cuenta.setCurrentBalance(saldoNuevo);
-            cuenta.setInitialBalance(request.initialBalance());
+            cuenta.setInitialBalance(inicial);
         }
         cuenta.setName(request.name());
         return accountRepository.save(cuenta);
@@ -195,7 +199,8 @@ public class TreasuryService {
         double egresos = movementRepository.sumarMonto(hastaElDia.and(
                 (raiz, consulta, cb) -> cb.equal(raiz.get("type"), MovementType.EGRESO)));
         double inicial = cuenta.getInitialBalance() != null ? cuenta.getInitialBalance() : 0.0;
-        return inicial + ingresos - egresos;
+        return Moneda.aCentavos(BigDecimal.valueOf(inicial).add(BigDecimal.valueOf(ingresos))
+                .subtract(BigDecimal.valueOf(egresos)));
     }
 
     /**
@@ -276,6 +281,7 @@ public class TreasuryService {
     @Transactional
     public Movement registrarMovimientoManual(Account cuenta, MovementCategory categoria, String concepto,
                                               Double monto, LocalDate fecha, String notas) {
+        monto = monto != null ? Moneda.aCentavos(monto) : null;
         exigirCategoriaManual(categoria);
         validarManual(cuenta, monto);
         validarTextosManual(concepto, notas);
@@ -301,6 +307,7 @@ public class TreasuryService {
     @Transactional
     public Movement editarMovimientoManual(Long movimientoId, Account nuevaCuenta, String nuevoConcepto,
                                            Double nuevoMonto, LocalDate nuevaFecha, String nuevasNotas) {
+        nuevoMonto = nuevoMonto != null ? Moneda.aCentavos(nuevoMonto) : null;
         Movement movimiento = movimientoManual(movimientoId);
         validarManual(nuevaCuenta, nuevoMonto);
         validarTextosManual(nuevoConcepto, nuevasNotas);
@@ -392,6 +399,7 @@ public class TreasuryService {
     @Transactional
     public Transferencia registrarTransferencia(Account cuentaOrigen, Account cuentaDestino,
                                                 String concepto, Double monto, LocalDate fecha) {
+        monto = monto != null ? Moneda.aCentavos(monto) : null;
         if (monto == null || monto <= 0) {
             throw new InvalidTransferException("El monto de la transferencia debe ser mayor a cero");
         }
@@ -467,6 +475,7 @@ public class TreasuryService {
     @Transactional
     public Movement registrarEgresoDeCompra(Account cuenta, String concepto, Double monto, Purchase compra,
                                             LocalDate fecha) {
+        monto = Moneda.aCentavos(monto);
         Account gestionada = recargar(cuenta);
         exigirSaldoSuficiente(gestionada, monto);
         Movement movimiento = new Movement();
@@ -556,7 +565,7 @@ public class TreasuryService {
             if (saldo < monto) {
                 throw new InsufficientBalanceException(cuenta.getName(), saldo, monto);
             }
-            saldoCorriente.put(cuenta.getId(), saldo - monto);
+            saldoCorriente.put(cuenta.getId(), Moneda.restar(saldo, monto));
         }
         egresos.forEach(this::aplicarEfecto);
     }
@@ -594,6 +603,7 @@ public class TreasuryService {
      */
     private Movement aplicarMovimiento(Movement movimiento) {
         validarCoherencia(movimiento);
+        movimiento.setAmount(Moneda.aCentavos(movimiento.getAmount()));
         if (movimiento.getDate() == null) {
             movimiento.setDate(LocalDate.now(clock));
         }
@@ -611,8 +621,8 @@ public class TreasuryService {
         Account cuenta = recargar(movimiento.getAccount());
         double monto = movimiento.getAmount() != null ? movimiento.getAmount() : 0.0;
         cuenta.setCurrentBalance(movimiento.getType() == MovementType.INGRESO
-                ? saldoDe(cuenta) + monto
-                : saldoDe(cuenta) - monto);
+                ? Moneda.sumar(saldoDe(cuenta), monto)
+                : Moneda.restar(saldoDe(cuenta), monto));
         accountRepository.save(cuenta);
     }
 
@@ -630,8 +640,8 @@ public class TreasuryService {
         double monto = movimiento.getAmount() != null ? movimiento.getAmount() : 0.0;
         Account gestionada = recargar(cuenta);
         gestionada.setCurrentBalance(movimiento.getType() == MovementType.INGRESO
-                ? saldoDe(gestionada) - monto
-                : saldoDe(gestionada) + monto);
+                ? Moneda.restar(saldoDe(gestionada), monto)
+                : Moneda.sumar(saldoDe(gestionada), monto));
         accountRepository.save(gestionada);
     }
 
@@ -674,9 +684,9 @@ public class TreasuryService {
      */
     @Transactional(readOnly = true)
     public double balanceGlobal() {
-        return accountRepository.findAll().stream()
-                .mapToDouble(this::saldoDe)
-                .sum();
+        return Moneda.aCentavos(accountRepository.findAll().stream()
+                .map(cuenta -> BigDecimal.valueOf(saldoDe(cuenta)))
+                .reduce(BigDecimal.ZERO, BigDecimal::add));
     }
 
     /**

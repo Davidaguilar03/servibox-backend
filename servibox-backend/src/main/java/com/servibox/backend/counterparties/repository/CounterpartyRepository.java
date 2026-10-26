@@ -32,7 +32,9 @@ public interface CounterpartyRepository extends JpaRepository<Counterparty, Long
 
     Optional<Counterparty> findByDocumentNumberAndTenantId(String documentNumber, Long tenantId);
 
+    @Query("SELECT c FROM Counterparty c WHERE c.tenantId = :tenantId ORDER BY c.name, c.id")
     List<Counterparty> findByTenantIdOrderByNameAsc(Long tenantId);
 
+    @Query("SELECT c FROM Counterparty c WHERE c.tenantId = :tenantId AND c.role IN :roles ORDER BY c.name, c.id")
     List<Counterparty> findByTenantIdAndRoleInOrderByNameAsc(Long tenantId, Collection<CounterpartyRole> roles);
 }

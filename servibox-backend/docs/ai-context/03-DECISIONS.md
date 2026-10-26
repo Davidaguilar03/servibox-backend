@@ -12,6 +12,71 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-25: Precio unitario de facturas nuevas con hasta dos decimales significativos
+
+* Decision aprobada: ventas y compras nuevas rechazan con HTTP 400 los precios unitarios
+  positivos con precision significativa superior a dos decimales. Mensaje exacto:
+  `El precio unitario admite como maximo dos decimales`.
+* Validar todas las lineas al entrar en crearFactura, dentro de su transaccion y antes
+  de calculos, inserciones o cambios de stock/saldo. Se conserva el rechazo actual del
+  precio ausente, nulo, cero o negativo. No se redondea silenciosamente un precio.
+* Los DTO de entrada y los records de lineas reciben BigDecimal para no perder precision
+  del JSON antes de validar. stripTrailingZeros().scale() > 2 rechaza 0.005 y tambien
+  0.0100000000000000000001; 0.01 y 0.0100 se aceptan. JSON sigue usando numeros y las
+  entidades/columnas no cambian. Los constructores double existentes de siembra y pruebas
+  delegan por BigDecimal.valueOf, sin modificar sus llamadas ni reglas.
+* Reemplaza el pendiente sobre precios con mas de dos decimales de la entrada siguiente.
+  No se agregan columnas ni se reinterpretan documentos historicos: anular y restaurar
+  usan sus importes guardados. Pagos, abonos, saldos y transferencias conservan HALF_UP
+  ya aprobado. Dos lineas de 0.03 al 19 por ciento siguen sumando 0.08.
+* Frontend solo leido: sus totales previos y comparacion de fondos necesitan alinearse
+  con importes definitivos por linea; sus formatos ocultan centavos y falta mapear el
+  mensaje nuevo. Ejemplos y fuentes concretas en la sesion backend-polish.
+* PostgreSQL 16 permanece pendiente. PostgreSQL 18.2 no es una verificacion equivalente.
+  El 500 observado con H2 queda como incidencia pendiente de investigar, sin causa raiz
+  demostrada ni atribucion definitiva a inactividad o configuracion.
+* Alternativas descartadas: redondeo silencioso de precios, ampliar columnas o guardar
+  otro subtotal por linea; no son necesarios con el contrato aprobado.
+* Motivo: coherencia entre el precio admitido, base, IVA, totales y NUMERIC(14,2).
+
+## 2026-10-25: Orden estable, indices V6 y precision monetaria
+
+* Decision aprobada: para facturas nuevas de venta y compra, calcular base e IVA de cada
+  linea en decimal, multiplicando primero precio por cantidad. Redondear el importe final
+  de la linea a dos decimales HALF_UP y sumar los importes definitivos. Dos lineas de 0.03
+  al 19 por ciento: base 0.06, IVA 0.02 y total 0.08. Reemplaza acumular IVA sin redondear
+  las lineas antes de totalizar. No se distribuyen centavos entre lineas.
+* Moneda centraliza centavos y sumas/restas decimales con BigDecimal.valueOf. Las entidades
+  siguen Double y las columnas NUMERIC(14,2). Montos, movimientos, saldos, pendientes y
+  agregados usan importes coherentes antes de persistir y responder. Precio sugerido e IVA
+  del costo conservan pesos enteros; tasas y porcentajes no se redondean.
+* No se recalculan documentos historicos ni saldos mediante migracion. Anular y restaurar
+  usan los movimientos guardados. Se conserva la tolerancia de un peso en pendientes y
+  estados: no es un error de precision. Los gastos siguen permitiendo saldo negativo.
+* Exportados muestran dos decimales cuando el importe tiene centavos y conservan el
+  formato anterior para enteros. XLSX conserva celdas numericas, PDF usa coma decimal.
+* Catalogos por nombre/descripcion e id ascendentes; documentos por fecha de negocio e
+  id descendentes, anulados incluidos. Movimientos conservan su orden por uso y los
+  bloqueos no cambian. V6 agrega 18 indices justificados por listados, rangos y FK, sin
+  duplicar prefijos de PK/UNIQUE ni prometer mejoras no medidas. Detalle en la sesion.
+* Perfil prod existente: open-in-view=false. Activar con SPRING_PROFILES_ACTIVE=prod y
+  las variables DB_URL, DB_USERNAME, DB_PASSWORD y JWT_SECRET existentes. Tests tambien
+  lo desactivan. No se cambia ninguna relacion a EAGER: solo tenant era LAZY, sin getter;
+  los DTO y proyecciones existentes no requieren ampliar el grafo.
+* Cuatro mensajes corrigen solo sufijos posteriores al prefijo reconocido por el mapa
+  frontend. Sus traducciones, estados y clasificacion se conservan. Los prefijos y reglas
+  exactas que requieren cambios frontend se dejan intactos, ver lista en la sesion.
+  Reemplaza la convencion general de mensajes sin tildes solo donde el mapa sigue
+  reconociendo el mensaje y produciendo la misma traduccion y clasificacion.
+* Limitacion reportada antes de ampliar alcance: precio unitario con mas de dos decimales,
+  por ejemplo 0.005 por 2, no puede conservarse en NUMERIC(14,2) y reconstruir la base
+  0.01 sin guardar otro importe. No se agrega esquema ni se reinterpretan historicos.
+  Reemplazado por la decision anterior: ese precio se rechaza al crear, sin redondearlo.
+* Alternativas descartadas: redondear todo al peso, migrar todas las entidades a
+  BigDecimal, redondear solo DTO o recalcular historicos al consultar.
+* Motivo: alinear dinero guardado y expuesto y hacer repetibles las consultas sin cambiar
+  contratos ni las reglas de bloqueo. Ver sessions/2026-10-25-backend-polish.md.
+
 ## 2026-10-25: Edicion de nombre y saldo inicial de cuentas
 
 * Decision: `PUT /api/treasury/accounts/{id}` recibe `name` obligatorio, no blanco,
