@@ -10,6 +10,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MonedaTest {
 
     @Test
+    void centavosUsaHalfUpTambienParaMitadesNegativasYResiduos() {
+        assertThat(Moneda.aCentavos(1.005)).isEqualTo(1.01);
+        assertThat(Moneda.aCentavos(-1.005)).isEqualTo(-1.01);
+        assertThat(Moneda.aCentavos(28178315.549999997)).isEqualTo(28178315.55);
+        assertThat(Moneda.aCentavos(new BigDecimal("2.674999999"))).isEqualTo(2.67);
+    }
+
+    @Test
+    void sumasYRestasDecimalesConservanCentavos() {
+        assertThat(Moneda.sumar(0.1, 0.2)).isEqualTo(0.3);
+        assertThat(Moneda.restar(0.3, 0.1)).isEqualTo(0.2);
+        assertThat(Moneda.sumar(16963933.02, Moneda.sumar(4406852.45, 6807530.08)))
+                .isEqualTo(28178315.55);
+    }
+
+    @Test
     void formateaConPuntoDeMilesSinDecimalesNiNotacionCientifica() {
         assertThat(Moneda.formatear(3250000.0)).isEqualTo("$ 3.250.000");
         assertThat(Moneda.formatear(4212600.0)).isEqualTo("$ 4.212.600");

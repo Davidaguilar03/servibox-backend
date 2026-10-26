@@ -1103,6 +1103,28 @@ reportes en PDF y Excel".
 
 ## Base de datos
 
+Desde fix/41: los catalogos se consultan por nombre (descripcion en productos) e id ASC;
+ventas y compras, incluida la papelera, por invoiceDate e id DESC. El libro conserva
+date/id DESC y la proyeccion de exportacion date/id ASC. V6 agrega indices para estos
+accesos, detalles, recalculos y FK; no modifica filas ni migraciones anteriores.
+
+Los calculos monetarios nuevos usan BigDecimal.valueOf y Moneda para importes definitivos
+a dos decimales HALF_UP, conservando Double en las entidades. Base e IVA se totalizan
+desde importes finales por linea, no desde impuestos sin redondear. Documentos historicos
+conservan importes y movimientos; no hay migracion de redondeo de saldos. PDF/XLSX muestran
+centavos cuando existen. El sugerido y el IVA del costo siguen en pesos enteros.
+
+Las lineas de entrada de ventas y compras usan BigDecimal hasta validar su precision
+dentro de crearFactura: precio positivo con mas de dos decimales significativos es 400,
+sin inserciones ni redondeo silencioso. 0.0100 equivale a 0.01 y se acepta. Los DTO JSON
+siguen recibiendo numeros, las entidades siguen Double y no cambian columnas ni historicos.
+
+El perfil prod y las pruebas configuran spring.jpa.open-in-view=false. Las relaciones de
+negocio existentes son EAGER; la unica LAZY es tenant, sin getter ni exposicion. Los
+reportes resuelven relaciones dentro de servicios transaccionales o usan proyecciones.
+No se amplian grafos ni se serializan entidades. Activacion: SPRING_PROFILES_ACTIVE=prod,
+con las variables de conexion y JWT ya documentadas.
+
 * Nombres fisicos: los de [04-DATA-MODEL.md](04-DATA-MODEL.md). Tablas en mayusculas
   (`VENTAS`, `DETALLE_VENTAS`, `MOVIMIENTOS`), columnas en `snake_case`
   (`numero_factura_venta`, `fecha_movimiento`), PK `id_<entidad>` y columna de tenant

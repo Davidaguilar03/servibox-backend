@@ -290,7 +290,7 @@ class TenantProfileTest {
         editar(tokenUno, cuerpo("Otro nombre", "90012-34-56", null))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value(
-                        "El NIT solo admite digitos y un guion con el digito de verificacion, por ejemplo 900123456-7"));
+                        "El NIT solo admite digitos y un guion con el dígito de verificación, por ejemplo 900123456-7"));
         editar(tokenUno, cuerpo("Otro nombre", "1".repeat(26), null))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("El NIT no puede superar 25 caracteres"));
@@ -305,7 +305,7 @@ class TenantProfileTest {
     void lasReglasDelTelefonoSonLasDelRegistro() throws Exception {
         editar(tokenUno, cuerpo("Otro nombre", "900123456-7", "300-ABC"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("El telefono solo admite digitos, espacios, +, - y parentesis"));
+                .andExpect(jsonPath("$.error").value("El telefono solo admite digitos, espacios, +, - y paréntesis"));
         editar(tokenUno, cuerpo("Otro nombre", "900123456-7", "3".repeat(26)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("El telefono no puede superar 25 caracteres"));

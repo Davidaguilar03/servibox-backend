@@ -59,7 +59,7 @@ valores permitidos. Un campo NOT NULL en la base es `@NotNull` / `@NotBlank` en 
 `Request`, para que falte con 400 y no con el error crudo de la base.
 
 * **Validaciones de dominio**: rangos, largos de columna, fechas y formatos se comprueban en
-  el service con un mensaje especifico en espanol sin tildes y **400** (la excepcion de
+  el service con un mensaje especifico en espanol, compatible con el mapa frontend, y **400** (la excepcion de
   dominio del modulo o `IllegalArgumentException`), nunca el "Peticion invalida" generico
   ni un 500 por pasar el largo de una columna. Se validan antes de modificar la entidad o
   de cualquier consulta que haga flush.
@@ -75,6 +75,27 @@ valores permitidos. Un campo NOT NULL en la base es `@NotNull` / `@NotBlank` en 
   con centavos.
 
 ## Formato de respuestas API (DTOs)
+
+* Precio unitario en lineas de venta/compra: BigDecimal en la entrada y record del servicio,
+  validacion transaccional de stripTrailingZeros().scale() antes de escribir. Si el precio
+  positivo supera dos decimales significativos: 400 con El precio unitario admite como
+  maximo dos decimales. Conservar obligatoriedad y signo; aceptar 0.0100 como 0.01.
+  No redondear silenciosamente ni cambiar los importes de documentos historicos.
+
+* Dinero general: Moneda.aCentavos(BigDecimal), HALF_UP a dos decimales; operaciones con
+  BigDecimal.valueOf, nunca new BigDecimal(double). Moneda.sumar/restar para importes
+  definitivos. Normalizar montos antes de validar saldo, persistir y responder.
+* Facturas nuevas: multiplicar precio por cantidad en decimal, redondear el importe final
+  de la linea y su IVA a centavos, sumar los definitivos. No redondear antes la tasa ni
+  valores intermedios. Mantener congelados los importes historicos y el costo de venta.
+* Exportacion: enteros como antes; importes con centavos con dos decimales visibles.
+  No basta redondear la presentacion para arreglar diferencias con lo persistido.
+* Listados: catalogos por name e id ASC (description en productos); documentos por
+  invoiceDate e id DESC. Conservar movimientos DESC en pantalla y ASC en reporte, y el
+  orden de bloqueo por id ASC. Agregar desempates no cambia filtros ni parametros.
+* Tildes de mensajes: comprobar primero las expresiones regulares de errorMessages.ts
+  del frontend. Solo cambiar texto fuera de su parte literal reconocida; si rompe la
+  traduccion, documentarlo para una tarea frontend. Los estados y {error,status} siguen.
 
 Todos los DTOs son `record` en el paquete `dto` del modulo: `XxxRequest` de entrada
 (validado con `@Valid`) y `XxxResponse` de salida. Un controlador nunca devuelve una

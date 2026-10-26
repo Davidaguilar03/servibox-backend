@@ -19,6 +19,7 @@ import com.servibox.backend.treasury.service.TreasuryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.servibox.backend.shared.Moneda;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -135,20 +136,21 @@ public class ReportingService {
                     ? linea.getProduct().getCategory().getName() : "Sin categoria";
 
             double[] fila = porCategoria.computeIfAbsent(categoria, k -> new double[3]);
-            fila[0] += generado;
-            fila[1] += generado - neto;
-            fila[2] += neto;
+            fila[0] = Moneda.sumar(fila[0], generado);
+            fila[1] = Moneda.sumar(fila[1], Moneda.restar(generado, neto));
+            fila[2] = Moneda.sumar(fila[2], neto);
             facturasConIva.add(linea.getSale().getId());
         }
 
         List<IvaCategoryResponse> categorias = new ArrayList<>();
         porCategoria.forEach((nombre, f) -> categorias.add(new IvaCategoryResponse(nombre, f[0], f[1], f[2])));
-        categorias.sort(Comparator.comparingDouble(IvaCategoryResponse::ivaGenerado).reversed());
+        categorias.sort(Comparator.comparingDouble(IvaCategoryResponse::ivaGenerado).reversed()
+                .thenComparing(IvaCategoryResponse::category));
 
         return new IvaReportResponse(desde, hasta, categorias, facturasConIva.size(),
-                categorias.stream().mapToDouble(IvaCategoryResponse::ivaGenerado).sum(),
-                categorias.stream().mapToDouble(IvaCategoryResponse::ivaDescontable).sum(),
-                categorias.stream().mapToDouble(IvaCategoryResponse::ivaNeto).sum());
+                categorias.stream().map(IvaCategoryResponse::ivaGenerado).reduce(0.0, Moneda::sumar),
+                categorias.stream().map(IvaCategoryResponse::ivaDescontable).reduce(0.0, Moneda::sumar),
+                categorias.stream().map(IvaCategoryResponse::ivaNeto).reduce(0.0, Moneda::sumar));
     }
 
     /** Paquete: tambien la usa ReportExportService. */

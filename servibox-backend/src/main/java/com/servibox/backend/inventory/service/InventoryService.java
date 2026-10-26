@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Sort;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -46,7 +47,7 @@ public class InventoryService {
 
     @Transactional(readOnly = true)
     public List<Product> findAllProducts() {
-        return productRepository.findAll();
+        return productRepository.findAll(Sort.by("description", "id"));
     }
 
     /**
@@ -92,7 +93,7 @@ public class InventoryService {
 
     @Transactional(readOnly = true)
     public List<ProductCategory> findAllCategories() {
-        return productCategoryRepository.findAll();
+        return productCategoryRepository.findAll(Sort.by("name", "id"));
     }
 
     /** Mismo motivo que findProductById: findById se salta el filtro por tenant. */
@@ -107,7 +108,7 @@ public class InventoryService {
 
     @Transactional(readOnly = true)
     public List<TaxType> findAllTaxTypes() {
-        return taxTypeRepository.findAll();
+        return taxTypeRepository.findAll(Sort.by("name", "id"));
     }
 
     @Transactional
@@ -145,6 +146,9 @@ public class InventoryService {
         // Primero, sin consultas de por medio: una consulta con el producto ya modificado
         // haria que Hibernate escribiera un codigo largo y saliera un error de columna.
         validarProducto(product);
+        if (product.getPurchaseCost() != null) {
+            product.setPurchaseCost(Moneda.aCentavos(product.getPurchaseCost()));
+        }
         validarCodigoUnico(product);
         // Precios antes del primer INSERT: iva_producto y precio_sugerido son NOT NULL.
         recalculatePrices(product);
@@ -463,13 +467,13 @@ public class InventoryService {
         if (category == null || category.getTaxTypes() == null) {
             return 0.0;
         }
-        double total = 0.0;
+        BigDecimal total = BigDecimal.ZERO;
         for (TaxType tax : category.getTaxTypes()) {
             if (Boolean.TRUE.equals(tax.getIsVat()) && tax.getRate() != null) {
-                total += tax.getRate();
+                total = total.add(BigDecimal.valueOf(tax.getRate()));
             }
         }
-        return total;
+        return total.doubleValue();
     }
 
     /**

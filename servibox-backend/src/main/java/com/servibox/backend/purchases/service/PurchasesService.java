@@ -13,6 +13,7 @@ import com.servibox.backend.purchases.entity.PurchaseDetail;
 import com.servibox.backend.purchases.entity.PurchaseStatus;
 import com.servibox.backend.purchases.repository.PurchaseDetailRepository;
 import com.servibox.backend.purchases.repository.PurchaseRepository;
+import com.servibox.backend.shared.Moneda;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
@@ -23,8 +24,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Sort;
 
 import java.time.Clock;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -63,7 +66,7 @@ public class PurchasesService {
 
     @Transactional(readOnly = true)
     public List<Purchase> findAllPurchases() {
-        return purchaseRepository.findAll();
+        return purchaseRepository.findAll(Sort.by(Sort.Direction.DESC, "invoiceDate", "id"));
     }
 
     @Transactional(readOnly = true)
@@ -81,7 +84,10 @@ public class PurchasesService {
     }
 
     /** Una linea pedida: que producto, cuantas unidades y a que costo unitario sin IVA. */
-    public record LineaCompra(Long productId, Integer quantity, Double price) {
+    public record LineaCompra(Long productId, Integer quantity, BigDecimal price) {
+        public LineaCompra(Long productId, Integer quantity, double price) {
+            this(productId, quantity, BigDecimal.valueOf(price));
+        }
     }
 
     /**
@@ -97,6 +103,15 @@ public class PurchasesService {
                                  Account cuenta,
                                  String paymentMethod,
                                  List<LineaCompra> lineas) {
+
+        if (lineas != null) {
+            for (LineaCompra linea : lineas) {
+                if (linea.price() != null && linea.price().signum() > 0
+                        && linea.price().stripTrailingZeros().scale() > 2) {
+                    throw new InvalidPurchaseOperationException("El precio unitario admite como maximo dos decimales");
+                }
+            }
+        }
 
         // El proveedor bloqueado serializa sus compras: dos compras simultaneas suyas con
         // FAC-300 y fac-300 ya no pasan las dos la validacion, que distingue sin mayusculas y la
@@ -176,13 +191,15 @@ public class PurchasesService {
                         "La cantidad de " + producto.getDescription() + " debe ser mayor a cero");
             }
 
-            double precio = linea.price() != null ? linea.price() : 0.0;
+            double precio = linea.price() != null ? linea.price().doubleValue() : 0.0;
             if (precio <= 0) {
                 throw new InvalidPurchaseOperationException(
                         "El precio de " + producto.getDescription() + " debe ser mayor a cero");
             }
-            double baseLinea = precio * cantidad;
-            double ivaLinea = baseLinea * inventoryService.getIvaRateForProduct(producto);
+            BigDecimal baseExacta = linea.price().multiply(BigDecimal.valueOf(cantidad));
+            double baseLinea = Moneda.aCentavos(baseExacta);
+            double ivaLinea = Moneda.aCentavos(baseExacta.multiply(
+                    BigDecimal.valueOf(inventoryService.getIvaRateForProduct(producto))));
 
             PurchaseDetail detalle = new PurchaseDetail();
             detalle.setPurchase(guardada);
@@ -192,11 +209,11 @@ public class PurchasesService {
             detalle.setIvaAmount(ivaLinea);
             detalles.add(detalle);
 
-            subtotal += baseLinea;
-            ivaTotal += ivaLinea;
+            subtotal = Moneda.sumar(subtotal, baseLinea);
+            ivaTotal = Moneda.sumar(ivaTotal, ivaLinea);
         }
 
-        double total = subtotal + ivaTotal;
+        double total = Moneda.sumar(subtotal, ivaTotal);
 
         // Saldo suficiente solo aplica al contado. Una compra a credito no saca dinero
         // hoy, asi que no hay nada que validar; es lo que hace Autollantas.
@@ -234,6 +251,7 @@ public class PurchasesService {
      */
     @Transactional
     public Movement registrarPago(Long purchaseId, Long accountId, Double monto, LocalDate fecha) {
+        monto = monto != null ? Moneda.aCentavos(monto) : null;
         Purchase compra = bloquearCompra(purchaseId);
 
         if (compra.getStatus() != PurchaseStatus.PENDIENTE) {
@@ -256,7 +274,7 @@ public class PurchasesService {
         }
 
         double pendiente = saldoPendiente(compra);
-        if (monto - pendiente > TOLERANCIA_PESOS) {
+        if (Moneda.restar(monto, pendiente) > TOLERANCIA_PESOS) {
             throw new InvalidPurchaseOperationException(
                     "El pago de " + monto + " excede el saldo pendiente de " + pendiente);
         }
@@ -414,11 +432,11 @@ public class PurchasesService {
      */
     @Transactional(readOnly = true)
     public double saldoPendiente(Purchase compra) {
-        double pagado = treasuryService.movimientosDeCompra(compra).stream()
-                .mapToDouble(m -> m.getAmount() != null ? m.getAmount() : 0.0)
-                .sum();
+        double pagado = Moneda.aCentavos(treasuryService.movimientosDeCompra(compra).stream()
+                .map(m -> BigDecimal.valueOf(m.getAmount() != null ? m.getAmount() : 0.0))
+                .reduce(BigDecimal.ZERO, BigDecimal::add));
         double total = compra.getTotal() != null ? compra.getTotal() : 0.0;
-        double pendiente = total - pagado;
+        double pendiente = Moneda.restar(total, pagado);
         return pendiente < TOLERANCIA_PESOS ? 0.0 : pendiente;
     }
 

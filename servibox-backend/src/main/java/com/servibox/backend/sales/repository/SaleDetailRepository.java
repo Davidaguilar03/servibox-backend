@@ -10,6 +10,7 @@ import java.util.List;
 
 public interface SaleDetailRepository extends JpaRepository<SaleDetail, Long> {
 
+    @Query("SELECT d FROM SaleDetail d WHERE d.sale.id = :saleId ORDER BY d.id")
     List<SaleDetail> findBySaleId(Long saleId);
 
     /** Si el producto ya salio en alguna factura de venta, anuladas incluidas. */

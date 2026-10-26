@@ -12,6 +12,7 @@ import com.servibox.backend.sales.entity.SaleDetail;
 import com.servibox.backend.sales.entity.SaleStatus;
 import com.servibox.backend.sales.repository.SaleDetailRepository;
 import com.servibox.backend.sales.repository.SaleRepository;
+import com.servibox.backend.shared.Moneda;
 import com.servibox.backend.tenant.TenantContext;
 import com.servibox.backend.treasury.entity.Account;
 import com.servibox.backend.treasury.entity.Movement;
@@ -22,8 +23,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Sort;
 
 import java.math.BigInteger;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -62,7 +65,7 @@ public class SalesService {
 
     @Transactional(readOnly = true)
     public List<Sale> findAllSales() {
-        return saleRepository.findAll();
+        return saleRepository.findAll(Sort.by(Sort.Direction.DESC, "invoiceDate", "id"));
     }
 
     @Transactional(readOnly = true)
@@ -97,7 +100,10 @@ public class SalesService {
     }
 
     /** Una linea pedida: que producto, cuantas unidades y a que precio unitario sin IVA. */
-    public record LineaFactura(Long productId, Integer quantity, Double price) {
+    public record LineaFactura(Long productId, Integer quantity, BigDecimal price) {
+        public LineaFactura(Long productId, Integer quantity, double price) {
+            this(productId, quantity, BigDecimal.valueOf(price));
+        }
     }
 
     /**
@@ -115,6 +121,15 @@ public class SalesService {
                              Account cuenta,
                              String paymentMethod,
                              List<LineaFactura> lineas) {
+
+        if (lineas != null) {
+            for (LineaFactura linea : lineas) {
+                if (linea.price() != null && linea.price().signum() > 0
+                        && linea.price().stripTrailingZeros().scale() > 2) {
+                    throw new InvalidSaleOperationException("El precio unitario admite como maximo dos decimales");
+                }
+            }
+        }
 
         if (invoiceNumber == null || invoiceNumber.isBlank()) {
             invoiceNumber = siguienteNumeroFactura();
@@ -192,16 +207,18 @@ public class SalesService {
                 throw new InvalidSaleOperationException(
                         "La cantidad de " + producto.getDescription() + " debe ser mayor a cero");
             }
-            double precio = linea.price() != null ? linea.price() : 0.0;
+            double precio = linea.price() != null ? linea.price().doubleValue() : 0.0;
             if (precio <= 0) {
                 throw new InvalidSaleOperationException(
                         "El precio de " + producto.getDescription() + " debe ser mayor a cero");
             }
             descontarStock(producto, cantidad);
 
-            double baseLinea = precio * cantidad;
+            BigDecimal baseExacta = linea.price().multiply(BigDecimal.valueOf(cantidad));
+            double baseLinea = Moneda.aCentavos(baseExacta);
             // Congelado aqui: la tasa que rige es la del momento de facturar.
-            double ivaLinea = baseLinea * inventoryService.getIvaRateForProduct(producto);
+            double ivaLinea = Moneda.aCentavos(baseExacta.multiply(
+                    BigDecimal.valueOf(inventoryService.getIvaRateForProduct(producto))));
             // IVA a favor: el que ya se pago al comprar esas unidades.
             double descontableLinea = (producto.getTaxAmount() != null ? producto.getTaxAmount() : 0.0) * cantidad;
 
@@ -211,19 +228,19 @@ public class SalesService {
             detalle.setQuantity(cantidad);
             detalle.setPrice(precio);
             detalle.setIvaAmount(ivaLinea);
-            detalle.setIvaDifference(ivaLinea - descontableLinea);
+            detalle.setIvaDifference(Moneda.restar(ivaLinea, descontableLinea));
             // Congelado aqui, con el producto ya bloqueado: el costo vigente al facturar.
             detalle.setUnitCost(producto.getPurchaseCost() != null ? producto.getPurchaseCost() : 0.0);
             saleDetailRepository.save(detalle);
 
-            subtotal += baseLinea;
-            ivaGenerado += ivaLinea;
-            ivaDescontable += descontableLinea;
+            subtotal = Moneda.sumar(subtotal, baseLinea);
+            ivaGenerado = Moneda.sumar(ivaGenerado, ivaLinea);
+            ivaDescontable = Moneda.sumar(ivaDescontable, descontableLinea);
         }
 
         guardada.setSubtotal(subtotal);
-        guardada.setIvaPorPagar(ivaGenerado - ivaDescontable);
-        guardada.setTotal(subtotal + ivaGenerado);
+        guardada.setIvaPorPagar(Moneda.restar(ivaGenerado, ivaDescontable));
+        guardada.setTotal(Moneda.sumar(subtotal, ivaGenerado));
 
         if (paymentType == PaymentType.CONTADO) {
             guardada.setStatus(SaleStatus.PAGADA);
@@ -244,6 +261,7 @@ public class SalesService {
      */
     @Transactional
     public Movement registrarAbono(Long saleId, Long accountId, Double monto, LocalDate fecha) {
+        monto = monto != null ? Moneda.aCentavos(monto) : null;
         // Bloqueada: dos abonos o un abono y una anulacion de la misma factura se ejecutan uno
         // detras de otro, y el segundo ve el estado y el saldo pendiente que dejo el primero.
         Sale venta = bloquearVenta(saleId);
@@ -268,7 +286,7 @@ public class SalesService {
         }
 
         double pendiente = saldoPendiente(venta);
-        if (monto - pendiente > TOLERANCIA_PESOS) {
+        if (Moneda.restar(monto, pendiente) > TOLERANCIA_PESOS) {
             throw new InvalidSaleOperationException(
                     "El abono de " + monto + " excede el saldo pendiente de " + pendiente);
         }
@@ -385,11 +403,11 @@ public class SalesService {
      */
     @Transactional(readOnly = true)
     public double saldoPendiente(Sale venta) {
-        double abonado = treasuryService.movimientosDeVenta(venta).stream()
-                .mapToDouble(m -> m.getAmount() != null ? m.getAmount() : 0.0)
-                .sum();
+        double abonado = Moneda.aCentavos(treasuryService.movimientosDeVenta(venta).stream()
+                .map(m -> BigDecimal.valueOf(m.getAmount() != null ? m.getAmount() : 0.0))
+                .reduce(BigDecimal.ZERO, BigDecimal::add));
         double total = venta.getTotal() != null ? venta.getTotal() : 0.0;
-        double pendiente = total - abonado;
+        double pendiente = Moneda.restar(total, abonado);
         return pendiente < TOLERANCIA_PESOS ? 0.0 : pendiente;
     }
 

@@ -162,7 +162,7 @@ public class TenantRegistrationService {
         String slug = r.slug();
         if (slug == null || !SLUG.matcher(slug).matches()) {
             throw new InvalidRegistrationException(
-                    "El identificador debe tener de 3 a 30 caracteres con solo minusculas, numeros y guiones");
+                    "El identificador debe tener de 3 a 30 caracteres con solo minúsculas, números y guiones");
         }
         if (slug.startsWith("-") || slug.endsWith("-")) {
             throw new InvalidRegistrationException("El identificador no puede empezar ni terminar en guion");
@@ -183,7 +183,7 @@ public class TenantRegistrationService {
 
         if (r.adminUsername() == null || !USERNAME.matcher(r.adminUsername()).matches()) {
             throw new InvalidRegistrationException(
-                    "El usuario debe tener de 3 a 50 caracteres con letras, numeros, punto, guion y guion bajo");
+                    "El usuario debe tener de 3 a 50 caracteres con letras, números, punto, guion y guion bajo");
         }
 
         String password = r.password();
@@ -206,14 +206,14 @@ public class TenantRegistrationService {
         obligatorio(nit, 25, "El NIT");
         if (!NIT.matcher(nit.trim()).matches()) {
             throw new InvalidRegistrationException(
-                    "El NIT solo admite digitos y un guion con el digito de verificacion, por ejemplo 900123456-7");
+                    "El NIT solo admite digitos y un guion con el dígito de verificación, por ejemplo 900123456-7");
         }
     }
 
     public static void validarTelefono(String telefono) {
         obligatorio(telefono, 25, "El telefono");
         if (!TELEFONO.matcher(telefono.trim()).matches()) {
-            throw new InvalidRegistrationException("El telefono solo admite digitos, espacios, +, - y parentesis");
+            throw new InvalidRegistrationException("El telefono solo admite digitos, espacios, +, - y paréntesis");
         }
     }
 

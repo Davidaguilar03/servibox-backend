@@ -161,7 +161,9 @@ public class ExcelReportGenerator {
                     double monto = (Double) valor;
                     String color = colorForzado != null ? colorForzado : monto < 0 ? ROJO_NEGATIVO : NEGRO;
                     celda.setCellValue(monto);
-                    celda.setCellStyle(estilo(fondo, negrita, color, 0, "#,##0"));
+                    String formato = java.math.BigDecimal.valueOf(monto).stripTrailingZeros().scale() > 0
+                            ? "#,##0.00" : "#,##0";
+                    celda.setCellStyle(estilo(fondo, negrita, color, 0, formato));
                 }
                 case TEXT -> {
                     celda.setCellValue(String.valueOf(valor));
@@ -195,7 +197,7 @@ public class ExcelReportGenerator {
                 if (formato != null) {
                     estilo.setDataFormat(libro.createDataFormat().getFormat(formato));
                 }
-                if ("#,##0".equals(formato)) {
+                if ("#,##0".equals(formato) || "#,##0.00".equals(formato)) {
                     estilo.setAlignment(HorizontalAlignment.RIGHT);
                 }
                 if (fondo != null || formato != null) {

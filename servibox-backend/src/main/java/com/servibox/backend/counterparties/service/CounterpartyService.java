@@ -9,6 +9,7 @@ import com.servibox.backend.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Sort;
 
 import java.util.List;
 import java.util.Optional;
@@ -30,7 +31,7 @@ public class CounterpartyService {
 
     @Transactional(readOnly = true)
     public List<Counterparty> findAll() {
-        return counterpartyRepository.findAll();
+        return counterpartyRepository.findAll(Sort.by("name", "id"));
     }
 
     /**
