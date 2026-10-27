@@ -2,7 +2,7 @@
 
 Fuente: Diccionario de Datos de ServiBox (informe UPTC-EISC-SB-01) y su diagrama entidad-relacion, 14 entidades en tercera forma normal. Este archivo es la especificacion del esquema al que debe converger el codigo.
 
-**Estado.** El refactor de normalizacion termino (ver `sessions/2026-10-06-refactor-normalizacion.md`): el codigo tiene las 14 entidades y el esquema lo crea la migracion Flyway `V1__init_schema.sql`, escrita desde este archivo. `schema.SchemaConformanceTest` compara la base con este archivo. Donde el codigo y este archivo difieran, este archivo manda, salvo lo anotado en "Decisiones de implementacion" y "Pendientes" al final.
+**Estado.** El refactor de normalizacion termino (ver `sessions/2026-10-06-refactor-normalizacion.md`): el codigo tiene las 14 entidades y el esquema base lo crea la migracion Flyway `V1__init_schema.sql`, escrita desde este archivo; V2 a V7 lo evolucionan. `schema.SchemaConformanceTest` compara la base con este archivo. Donde el codigo y este archivo difieran, este archivo manda, salvo lo anotado en "Decisiones de implementacion" y "Pendientes" al final.
 
 ## Reglas generales
 
@@ -73,6 +73,7 @@ Modulo: Tesoreria.
 | balance_inicial | NUMERIC | 14,2 | NOT NULL | - | Saldo de apertura al registrar la cuenta en el sistema (en COP). |
 | saldo_actual | NUMERIC | 14,2 | NOT NULL | - | Saldo disponible en tiempo real, recalculado por movimientos de fondos. |
 | tipo_cuenta | VARCHAR | 30 | NOT NULL | - | Tipo de cuenta financiera (EFECTIVO, BANCO, DIGITAL). |
+| color_cuenta | VARCHAR | 7 | NULL | - | Color hexadecimal opaco #RRGGBB; null en cuentas antiguas o sin color. Agregado en V7. |
 | created_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de registro de la cuenta (UTC). |
 | updated_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de ultima afectacion de saldo (UTC). |
 

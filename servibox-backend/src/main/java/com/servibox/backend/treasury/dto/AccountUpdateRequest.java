@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Size;
 public record AccountUpdateRequest(
         @NotBlank @Size(max = 100) String name,
         @NotNull @PositiveOrZero Double initialBalance,
-        AccountType type
+        AccountType type,
+        String color
 ) {
 }

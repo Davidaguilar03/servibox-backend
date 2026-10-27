@@ -8,7 +8,8 @@ public record AccountResponse(
         String name,
         Double initialBalance,
         Double currentBalance,
-        AccountType type
+        AccountType type,
+        String color
 ) {
 
     public static AccountResponse from(Account account) {
@@ -17,7 +18,8 @@ public record AccountResponse(
                 account.getName(),
                 account.getInitialBalance(),
                 account.getCurrentBalance(),
-                account.getType()
+                account.getType(),
+                account.getColor()
         );
     }
 }
