@@ -76,6 +76,12 @@ valores permitidos. Un campo NOT NULL en la base es `@NotNull` / `@NotBlank` en 
 
 ## Formato de respuestas API (DTOs)
 
+* Color de cuentas: `color` opcional en POST /api/treasury/accounts y PUT
+  /api/treasury/accounts/{id}. Valor no nulo exactamente #RRGGBB; se normaliza a
+  mayusculas. En PUT, null u omision conservan el valor. `AccountResponse` incluye
+  `color` incluso si es null. Los demas campos y propiedades desconocidas mantienen
+  sus reglas. Ver decision del 2026-10-27 en 03-DECISIONS.md.
+
 * Precio unitario en lineas de venta/compra: BigDecimal en la entrada y record del servicio,
   validacion transaccional de stripTrailingZeros().scale() antes de escribir. Si el precio
   positivo supera dos decimales significativos: 400 con El precio unitario admite como

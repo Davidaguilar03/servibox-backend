@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotNull;
 public record AccountRequest(
         @NotBlank String name,
         Double initialBalance,
-        @NotNull AccountType type
+        @NotNull AccountType type,
+        String color
 ) {
 }

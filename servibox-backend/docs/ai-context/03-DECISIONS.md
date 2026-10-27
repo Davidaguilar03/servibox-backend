@@ -12,6 +12,20 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-27: Color opcional de cuentas
+
+* Decision: V7 agrega `cuentas.color_cuenta` VARCHAR(7) nullable, sin backfill. El alta
+  acepta omision o null; PUT con omision o null conserva el color anterior. No se ofrece
+  borrado en este contrato.
+* Solo se acepta #RRGGBB opaco, con letras en cualquier caja; se guarda y responde en
+  mayusculas. Otro valor no nulo devuelve 400 `El color debe tener el formato #RRGGBB`.
+  POST, PUT y GET /api/treasury/accounts incluyen color en la respuesta, null si falta.
+* La edicion mantiene las reglas de nombre, saldo, tipo, tenant, permisos y bloqueo.
+  El frontend siguiente priorizara el color persistido y usara su fallback provisional
+  solo si color es null. Despues sigue Reportes.
+* Motivo: conservar la eleccion del usuario sin asignar colores artificiales a cuentas
+  historicas ni cambiar cifras contables.
+
 ## 2026-10-25: Precio unitario de facturas nuevas con hasta dos decimales significativos
 
 * Decision aprobada: ventas y compras nuevas rechazan con HTTP 400 los precios unitarios

@@ -95,6 +95,85 @@ class AccountEditingTest {
                 .header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON).content(body));
     }
 
+    private ResultActions alta(String body) throws Exception {
+        return mockMvc.perform(post("/api/treasury/accounts").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(body));
+    }
+
+    @Test
+    void altaNormalizaColorYLoDevuelveEnListado() throws Exception {
+        alta("{\"name\":\"Colorida\",\"initialBalance\":10,\"type\":\"BANCO\",\"color\":\"#7c3aEd\"}")
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.color").value("#7C3AED"));
+        mockMvc.perform(get("/api/treasury/accounts").header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$[?(@.name == 'Colorida')].color").value("#7C3AED"));
+    }
+
+    @Test
+    void altaSinColorYConNullDevuelveNull() throws Exception {
+        alta("{\"name\":\"Sin color\",\"type\":\"BANCO\"}")
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.color").value((Object) null));
+        alta("{\"name\":\"Null\",\"type\":\"BANCO\",\"color\":null}")
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.color").value((Object) null));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " ", "red", "#ABC", "#12345678", "#12345G", "#123456 ", "#12345"})
+    void altaInvalidaNoPersisteCuenta(String color) throws Exception {
+        alta("{\"name\":\"Rechazada\",\"type\":\"BANCO\",\"color\":\"" + color + "\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("El color debe tener el formato #RRGGBB"));
+        mockMvc.perform(get("/api/treasury/accounts").header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$[?(@.name == 'Rechazada')]").isEmpty());
+    }
+
+    @Test
+    void editarSoloColorConservaSaldoYMovimiento() throws Exception {
+        editar("{\"name\":\"Banco\",\"initialBalance\":100000,\"color\":\"#aBc123\"}")
+                .andExpect(status().isOk()).andExpect(jsonPath("$.color").value("#ABC123"))
+                .andExpect(jsonPath("$.initialBalance").value(100000.0))
+                .andExpect(jsonPath("$.currentBalance").value(40000.0));
+        mockMvc.perform(get("/api/treasury/accounts").header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$[?(@.id == %d)].color".formatted(cuenta)).value("#ABC123"));
+        mockMvc.perform(get("/api/treasury/accounts/" + cuenta + "/movements")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.length()").value(1));
+    }
+
+    @Test
+    void omitirONullEnEdicionConservaColor() throws Exception {
+        editar("{\"name\":\"Banco\",\"initialBalance\":100000,\"color\":\"#112233\"}")
+                .andExpect(status().isOk());
+        editar("{\"name\":\"Banco\",\"initialBalance\":100000}")
+                .andExpect(jsonPath("$.color").value("#112233"));
+        editar("{\"name\":\"Banco\",\"initialBalance\":100000,\"color\":null}")
+                .andExpect(jsonPath("$.color").value("#112233"));
+    }
+
+    @Test
+    void cuentaHeredadaSinColorSigueEditable() throws Exception {
+        editar("{\"name\":\"Heredada\",\"initialBalance\":100000}")
+                .andExpect(status().isOk()).andExpect(jsonPath("$.color").value((Object) null));
+    }
+
+    @Test
+    void colorInvalidoEnEdicionNoCambiaCuenta() throws Exception {
+        editar("{\"name\":\"Otro\",\"initialBalance\":120000,\"color\":\"#FFF\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("El color debe tener el formato #RRGGBB"));
+        persistido("Banco", 100000, 40000);
+    }
+
+    @Test
+    void tenantAjenoNoPuedeCambiarColor() throws Exception {
+        String otro = usuario(Role.ADMIN);
+        mockMvc.perform(put("/api/treasury/accounts/" + cuenta).header("Authorization", "Bearer " + otro)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Banco\",\"initialBalance\":100000,\"color\":\"#112233\"}"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/treasury/accounts").header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$[?(@.id == %d)].color".formatted(cuenta)).value((Object) null));
+    }
+
     private void persistido(String name, double initial, double balance) throws Exception {
         mockMvc.perform(get("/api/treasury/accounts").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())

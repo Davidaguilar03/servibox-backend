@@ -31,6 +31,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -76,6 +77,7 @@ public class TreasuryService {
      */
     @Transactional
     public Account saveAccount(Account account) {
+        account.setColor(normalizarColor(account.getColor()));
         validarNombreUnico(account.getId(), account.getName());
         if (account.getInitialBalance() == null) {
             account.setInitialBalance(0.0);
@@ -90,6 +92,7 @@ public class TreasuryService {
 
     @Transactional
     public Account editarCuenta(Long id, AccountUpdateRequest request) {
+        String color = normalizarColor(request.color());
         bloquearCuentas(List.of(id));
         Account cuenta = findAccountById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Cuenta no encontrada: " + id));
@@ -110,7 +113,17 @@ public class TreasuryService {
             cuenta.setInitialBalance(inicial);
         }
         cuenta.setName(request.name());
+        if (color != null) {
+            cuenta.setColor(color);
+        }
         return accountRepository.save(cuenta);
+    }
+
+    private static String normalizarColor(String color) {
+        if (color != null && !color.matches("#[0-9A-Fa-f]{6}")) {
+            throw new IllegalArgumentException("El color debe tener el formato #RRGGBB");
+        }
+        return color == null ? null : color.toUpperCase(Locale.ROOT);
     }
 
     /**

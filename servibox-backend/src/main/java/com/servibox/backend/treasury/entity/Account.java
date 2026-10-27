@@ -48,4 +48,7 @@ public class Account extends TenantAwareEntity {
     @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "tipo_cuenta", length = 30, nullable = false)
     private AccountType type;
+
+    @Column(name = "color_cuenta", length = 7)
+    private String color;
 }

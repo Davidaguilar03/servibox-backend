@@ -51,6 +51,7 @@ public class TreasuryController {
         account.setName(request.name());
         account.setInitialBalance(request.initialBalance());
         account.setType(request.type());
+        account.setColor(request.color());
         return AccountResponse.from(treasuryService.saveAccount(account));
     }
 
