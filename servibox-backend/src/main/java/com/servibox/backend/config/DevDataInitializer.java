@@ -46,7 +46,7 @@ import java.util.Set;
  * Datos minimos para probar en local. Solo perfil dev.
  */
 @Component
-@Profile("dev")
+@Profile("dev & !platform-bootstrap")
 @RequiredArgsConstructor
 @Slf4j
 public class DevDataInitializer implements CommandLineRunner {

@@ -14,6 +14,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
+import org.springframework.dao.DataAccessException;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -37,6 +38,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
+        TenantContext.clear();
+        SecurityContextHolder.clearContext();
         try {
             String token = extractToken(request);
             if (token != null) {
@@ -47,6 +50,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // El pool de hilos del servidor se reutiliza entre requests: un tenant que
             // quede pegado aqui se filtraria al siguiente request atendido por este hilo.
             TenantContext.clear();
+            SecurityContextHolder.clearContext();
         }
     }
 
@@ -72,10 +76,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                     username,
                     null,
-                    List.of(new SimpleGrantedAuthority("ROLE_" + user.get().getRole().name()))
+                    List.of(new SimpleGrantedAuthority("TENANT_IDENTITY"),
+                            new SimpleGrantedAuthority("ROLE_" + user.get().getRole().name()))
             );
             SecurityContextHolder.getContext().setAuthentication(authentication);
-        } catch (JwtException | IllegalArgumentException ex) {
+        } catch (JwtException | IllegalArgumentException | DataAccessException ex) {
             // Token invalido o vencido: se sigue sin autenticar y la cadena de seguridad
             // responde 401 en la ruta protegida.
             rechazar();

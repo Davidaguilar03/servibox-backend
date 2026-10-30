@@ -69,7 +69,7 @@ class RequestBodyErrorsTest {
         record Cuerpo(Role role, CounterpartyRole counterpartyRole, DocumentType documentType) {
         }
 
-        @PostMapping("/api/test/enums")
+        @PostMapping("/api/inventory/test/enums")
         Cuerpo eco(@RequestBody Cuerpo cuerpo) {
             return cuerpo;
         }
@@ -145,7 +145,7 @@ class RequestBodyErrorsTest {
 
     @Test
     void unRolInvalidoEs400() throws Exception {
-        enviar("/api/test/enums", """
+        enviar("/api/inventory/test/enums", """
                 {"role":"EMPLEADO"}
                 """)
                 .andExpect(status().isBadRequest())
@@ -155,7 +155,7 @@ class RequestBodyErrorsTest {
 
     @Test
     void unTipoDeTerceroInvalidoEs400() throws Exception {
-        enviar("/api/test/enums", """
+        enviar("/api/inventory/test/enums", """
                 {"counterpartyRole":"EMPLEADO"}
                 """)
                 .andExpect(status().isBadRequest())
@@ -165,7 +165,7 @@ class RequestBodyErrorsTest {
 
     @Test
     void unTipoDeDocumentoInvalidoEs400() throws Exception {
-        enviar("/api/test/enums", """
+        enviar("/api/inventory/test/enums", """
                 {"documentType":"DNI"}
                 """)
                 .andExpect(status().isBadRequest())
@@ -187,7 +187,7 @@ class RequestBodyErrorsTest {
     /** Los valores validos pasan: el 400 es por el valor, no por el endpoint de prueba. */
     @Test
     void losValoresValidosPasan() throws Exception {
-        enviar("/api/test/enums", """
+        enviar("/api/inventory/test/enums", """
                 {"role":"CAJERO","counterpartyRole":"AMBOS","documentType":"NIT"}
                 """)
                 .andExpect(status().isOk())

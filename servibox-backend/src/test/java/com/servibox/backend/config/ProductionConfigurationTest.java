@@ -8,6 +8,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ProductionConfigurationTest {
 
+    private static final String PLATFORM_TEST_KEY = "PLATFORM_JWT_SECRET=unit-config-platform-only-key-2026";
+
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withInitializer(new ConfigDataApplicationContextInitializer())
             .withUserConfiguration(ProductionConfiguration.class)
@@ -43,7 +45,7 @@ class ProductionConfigurationTest {
 
     @Test
     void aceptaSecretoYResuelveConfiguracionProd() {
-        runner.withPropertyValues("JWT_SECRET=" + "x".repeat(32), "PORT=9123",
+        runner.withPropertyValues(PLATFORM_TEST_KEY, "JWT_SECRET=" + "x".repeat(32), "PORT=9123",
                 "DB_URL=jdbc:postgresql://db:5432/servibox", "DB_USERNAME=owner", "DB_PASSWORD=ephemeral")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
@@ -61,13 +63,13 @@ class ProductionConfigurationTest {
 
     @Test
     void puertoLocalPorDefecto() {
-        runner.withPropertyValues("JWT_SECRET=" + "x".repeat(32))
+        runner.withPropertyValues(PLATFORM_TEST_KEY, "JWT_SECRET=" + "x".repeat(32))
                 .run(context -> assertThat(context.getEnvironment().getProperty("server.port")).isEqualTo("8080"));
     }
 
     @Test
     void serverPortDelEntornoTienePrecedenciaSobrePort() {
-        runner.withPropertyValues("JWT_SECRET=" + "x".repeat(32), "PORT=9123")
+        runner.withPropertyValues(PLATFORM_TEST_KEY, "JWT_SECRET=" + "x".repeat(32), "PORT=9123")
                 .withInitializer(context -> context.getEnvironment().getPropertySources().addFirst(
                         new org.springframework.core.env.SystemEnvironmentPropertySource(
                                 "provider", java.util.Map.of("SERVER_PORT", "9234"))))
@@ -81,5 +83,20 @@ class ProductionConfigurationTest {
             assertThat(context.getEnvironment().getProperty("servibox.jwt.secret"))
                     .isEqualTo("dev-secret-cambiar-en-produccion-minimo-32-caracteres");
         });
+    }
+
+    @Test
+    void plataformaRechazaAusenteVaciaCortaBlancaCompartidaYDefaults() {
+        runner.withPropertyValues("JWT_SECRET=" + "x".repeat(32))
+                .run(context -> assertThat(context).hasFailed());
+        for (String secret : java.util.List.of("", " ", "short", "x".repeat(32),
+                "dev-only-platform-secret-never-for-production-2026",
+                "test-only-platform-secret-never-for-production-2026")) {
+            runner.withPropertyValues("JWT_SECRET=" + "x".repeat(32), "PLATFORM_JWT_SECRET=" + secret)
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure()).hasMessageContaining("PLATFORM_JWT_SECRET es obligatorio");
+                    });
+        }
     }
 }

@@ -70,7 +70,7 @@ class FlywayMigrationTest {
                     tablas++;
                 }
             }
-            assertThat(tablas).isEqualTo(14);
+            assertThat(tablas).isEqualTo(15);
         }
     }
 

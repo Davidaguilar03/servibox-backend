@@ -2,11 +2,11 @@
 
 Fuente: Diccionario de Datos de ServiBox (informe UPTC-EISC-SB-01) y su diagrama entidad-relacion, 14 entidades en tercera forma normal. Este archivo es la especificacion del esquema al que debe converger el codigo.
 
-**Estado.** El refactor de normalizacion termino (ver `sessions/2026-10-06-refactor-normalizacion.md`): el codigo tiene las 14 entidades y el esquema base lo crea la migracion Flyway `V1__init_schema.sql`, escrita desde este archivo; V2 a V7 lo evolucionan. `schema.SchemaConformanceTest` compara la base con este archivo. Donde el codigo y este archivo difieran, este archivo manda, salvo lo anotado en "Decisiones de implementacion" y "Pendientes" al final.
+**Estado.** El refactor de normalizacion termino (ver `sessions/2026-10-06-refactor-normalizacion.md`): las 14 tablas comerciales parten de Flyway `V1__init_schema.sql`, escrita desde este archivo; V2 a V7 las evolucionan. V8 agrega la identidad global de plataforma, para 15 tablas. `schema.SchemaConformanceTest` compara la base con este archivo. Donde el codigo y este archivo difieran, este archivo manda, salvo lo anotado en "Decisiones de implementacion" y "Pendientes" al final.
 
 ## Reglas generales
 
-* Multi-tenant: base compartida y esquema compartido. La columna `id_tenant` esta en todas las tablas excepto `TENANTS` y `CATEGORIA_IMPUESTOS`. En la capa JPA el aislamiento lo da el `@Filter` de Hibernate.
+* Multi-tenant: base compartida y esquema compartido. La columna `id_tenant` esta en todas las tablas excepto `TENANTS`, `CATEGORIA_IMPUESTOS` y `ADMINISTRADORES_PLATAFORMA` (V8, identidad global adicional a las 14 tablas comerciales). En la capa JPA el aislamiento lo da el `@Filter` de Hibernate.
 * Unicos compuestos con `id_tenant`: `(id_tenant, username)` en USUARIOS, `(id_tenant, nombre_cuenta)` en CUENTAS, `(id_tenant, numero_documento)` en TERCEROS, `(id_tenant, id_tercero, numero_factura_compra)` en COMPRAS (desde V3; antes `(id_tenant, numero_factura_compra)`), `(id_tenant, numero_factura_venta)` en VENTAS, `(id_tenant, codigo_producto)` en PRODUCTOS.
 * Motor: PostgreSQL 16. Tipos fisicos: identificadores y claves foraneas `BIGINT`; texto `VARCHAR(n)`; valores de enum `VARCHAR(n)` con su longitud, no tipo ENUM; montos en COP `NUMERIC(14,2)`; tasas y porcentajes como fraccion `NUMERIC(8,6)` (0.19 es 19 por ciento); fechas de negocio (`fecha_movimiento`, `fecha_compra`, `fecha_vencimiento_compra`, `fecha_venta`, `fecha_vencimiento_venta`) `DATE`; fechas de auditoria (`created_at`, `updated_at`, `fecha_creacion_tenant`) `TIMESTAMP WITHOUT TIME ZONE` en UTC; banderas `BOOLEAN`.
 * Integridad referencial: `ON DELETE RESTRICT` en todas las claves foraneas: nada con historial transaccional se elimina.
@@ -45,6 +45,18 @@ Modulo: Multi-tenancy y administracion.
 | rol | VARCHAR | 30 | NOT NULL | - | Rol RBAC asignado para autorizacion de funciones (ADMIN, MECANICO, CAJERO). |
 | created_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de registro del usuario (UTC). |
 | updated_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de ultima modificacion en credenciales o perfil (UTC). |
+
+### ADMINISTRADORES_PLATAFORMA
+
+Modulo: Identidad global de plataforma, V8. Sin tenant ni rol comercial.
+
+| Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
+|-|-|-|-|-|-|
+| id_administrador | BIGINT | 8 bytes | NOT NULL | PK | Identificador estable; bootstrap reserva 1 con INSERT, sin reemplazo. |
+| email | VARCHAR | 150 | NOT NULL | UK | Normalizado con strip y minusculas; unico global. CHECK LOWER(TRIM(email)). |
+| password_hash | VARCHAR | 255 | NOT NULL | - | Hash BCrypt privado. Nunca se devuelve por HTTP. |
+| activo | BOOLEAN | 1 byte | NOT NULL | - | Revalidado en cada peticion de plataforma. |
+| auth_version | BIGINT | 8 bytes | NOT NULL | - | No negativo, inicial 0; debe coincidir con el JWT en cada peticion. |
 
 ### CONFIGURACION_FINANCIERA
 

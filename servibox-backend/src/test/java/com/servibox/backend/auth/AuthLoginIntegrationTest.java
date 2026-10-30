@@ -40,7 +40,7 @@ class AuthLoginIntegrationTest {
     private static final String SLUG = "taller-prueba";
     private static final String USERNAME = "admin-prueba";
     private static final String PASSWORD = "clave-correcta";
-    private static final String RUTA_PROTEGIDA = "/api/prueba/protegida";
+    private static final String RUTA_PROTEGIDA = "/api/inventory/security-test";
 
     /**
      * No hay ninguna ruta de negocio todavia. Este controlador existe solo para tener algo

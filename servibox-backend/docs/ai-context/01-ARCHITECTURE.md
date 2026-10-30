@@ -142,13 +142,44 @@ que poblar `TenantContext` explicitamente.
 
 ## Capa de seguridad JWT
 
+### Identidad de plataforma (2026-10-30)
+
+Paquete `platform`: `PlatformAdmin` y repositorio global propio, sin TenantAwareEntity,
+sin tenant ficticio y sin cambios a Role. V8 agrega ADMINISTRADORES_PLATAFORMA. Bootstrap
+privado explicito en el main, sin runner automatico, reserva id 1 mediante persist/INSERT;
+una cuenta existente impide repetirlo y la PK impide reemplazo concurrente. Contrato de
+entrada oculta/pipe y operacion local/contenedor en [DEPLOYMENT.md](../DEPLOYMENT.md).
+
+Dos cadenas ordenadas y stateless. Primera: `/api/platform/**`, solo POST
+`/api/platform/auth/login` publico y GET `/api/platform/auth/me` con PLATFORM_IDENTITY;
+resto denegado. Segunda: login/registro tenant y GET salud publicos, familias comerciales
+actuales con TENANT_IDENTITY y resto denegado. El filtro tenant tiene registro servlet
+automatico deshabilitado: solo corre dentro de su cadena, nunca en plataforma.
+Ambos filtros limpian TenantContext al entrar y en finally, y no conservan SecurityContext.
+
+JWT plataforma: clave PLATFORM_JWT_SECRET exclusiva, sub=id estable, iss=servibox-platform,
+aud=[platform], identityType=PLATFORM, iat, exp, authVersion entero no negativo y sin
+tenantId. Cada peticion consulta cuenta activa y version en base. Fallo de consulta no
+autentica. Duracion inicial 900000 ms, configurable entre 1 y 86400000 ms, sin refresh.
+Login generico `Credenciales invalidas`; respuesta {token,admin:{id,email}} y me {id,email}.
+Nunca se devuelve la entidad, hash, clave ni dato comercial. No existe alta HTTP,
+recuperacion publica, impersonacion ni gestion de administradores adicionales.
+
+JWT tenant nuevo conserva firma, sub, tenantId y role y agrega iss=servibox-tenant,
+aud=[tenant], identityType=TENANT. Heredado se admite hasta expirar solo si faltan juntos
+iss, aud e identityType, con firma tenant, sub no blanco, tenantId entero positivo, rol
+comercial conocido, iat y exp validos. Un contrato parcialmente marcado se rechaza.
+Roles efectivos y usuario activo siguen viniendo de BD. Ninguna de las dos formas entra
+en plataforma. La version y revocacion por suspension/reactivacion del tenant siguen
+pendientes para tarea 5; esta entrega no agrega version tenant ni resuelve esa limitacion.
+
 Autenticacion por token, sin sesion de servidor. El tenant no lo elige el cliente: viaja
 firmado dentro del token.
 
 ### Flujo completo
 
-1. **`POST /api/auth/login`** (con `POST /api/auth/register`, las unicas rutas con
-   `permitAll`). Body: `tenantSlug`, `username`, `password`.
+1. **`POST /api/auth/login`** publico por metodo/ruta exactos, igual que registro tenant
+   y salud; login plataforma pertenece a su cadena propia. Body: `tenantSlug`, `username`, `password`.
 2. **`auth.AuthController`** busca el tenant por `slug`, luego el usuario con
    `findByUsernameAndTenantId`, y compara la contrasena con
    `passwordEncoder.matches(...)` contra el `passwordHash` BCrypt.
@@ -156,7 +187,8 @@ firmado dentro del token.
    (tenant inexistente, usuario inexistente, usuario inactivo, contrasena incorrecta).
    Distinguirlos le confirmaria a un atacante que usuarios existen en que tenant.
 4. Si cuadra, **`auth.JwtService.generateToken(user)`** emite un JWT firmado con HMAC SHA
-   con los claims `sub` (username), `tenantId` y `role`, y expiracion segun configuracion.
+   con los claims `sub` (username), `tenantId`, `role` y marcadores tenant descritos arriba,
+   y expiracion segun configuracion.
    La respuesta es `LoginResponse`: `{"token", "user": {"username", "role", "fullName"},
    "tenant": {"name", "slug"}}`, armada con el usuario y el tenant que el login ya verifico.
    `fullName` es null en los usuarios creados antes del registro publico.
@@ -274,6 +306,7 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | `InsufficientStockException`, `InsufficientBalanceException` | 409 | mensaje de la excepcion; los montos de saldo con `Moneda.formatear` ("hay $ 3.250.000 y se requieren $ 4.212.600") |
 | `PessimisticLockingFailureException` de Spring, `PessimisticLockException` y `LockTimeoutException` de JPA y `PessimisticLockException` de Hibernate (bloqueo de fila no obtenido: espera agotada o interbloqueo) | 409 | "El recurso esta siendo modificado por otra operacion, intenta de nuevo" |
 | `InvalidCredentialsException` y `AuthenticationException` | 401 | "Credenciales invalidas" |
+| Denegacion de autorizacion en la cadena de seguridad | 403 | "Acceso denegado", JSON directo sin despacho a /error |
 | `MethodArgumentNotValidException` (fallo de `@Valid`) | 400 | "Peticion invalida" |
 | `HttpMessageNotReadableException` (JSON mal formado o valor del tipo equivocado) | 400 | Si el valor es de un enum: "Valor invalido 'X' en el campo f. Valores permitidos: ..."; si no, un mensaje generico |
 | `MethodArgumentTypeMismatchException` (parametro de query o de ruta del tipo equivocado, por ejemplo `?category=X`) | 400 | "Valor invalido 'X' en el parametro p", mas "Valores permitidos: ..." si es un enum |
@@ -298,8 +331,9 @@ de error.
 
 `SecurityConfig` (paquete `config`): sesion `STATELESS`, CSRF deshabilitado (es una API
 pura, sin formularios ni cookies de sesion), `BCryptPasswordEncoder` como bean,
-`permitAll` en `POST /api/auth/login`, `POST /api/auth/register` y `GET /api/health`, y `authenticated()`
-en todo lo demas.
+`permitAll` en `POST /api/auth/login`, `POST /api/auth/register` y `GET /api/health`, y
+TENANT_IDENTITY en las familias comerciales enumeradas; resto denegado. Cadena de
+plataforma separada descrita arriba, con login publico propio.
 
 Propiedades en `application.properties`:
 
@@ -331,8 +365,8 @@ puerto PORT (SERVER_PORT tiene precedencia), variables y operacion en
 `fullName` (desde V2, null en los anteriores), `active`, y `role` como enum `auth.entity.Role` (`ADMIN`, `MECANICO`, `CAJERO`, los del
 diccionario) con `@Enumerated(STRING)`. Motivo del enum en vez de tabla en
 [03-DECISIONS.md](03-DECISIONS.md). El rol viaja en el JWT y como authority `ROLE_<rol>`,
-pero **todavia no hay reglas de permisos por rol**: toda ruta autenticada vale para
-cualquiera.
+con permisos ADMIN existentes para editar perfil, configuracion financiera y categorias.
+La autoridad de identidad comercial es independiente de esos roles.
 
 La restriccion unica es **compuesta**, `(id_tenant, username)`, no `unique` en la columna
 sola: dos negocios distintos pueden tener cada uno su usuario `admin`.

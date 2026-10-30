@@ -1,6 +1,12 @@
 package com.servibox.backend.config;
 
 import com.servibox.backend.auth.JwtAuthenticationFilter;
+import com.servibox.backend.platform.PlatformAdminRepository;
+import com.servibox.backend.platform.PlatformAuthenticationFilter;
+import com.servibox.backend.platform.PlatformJwtService;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+import org.springframework.core.annotation.Order;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -22,6 +28,37 @@ public class SecurityConfig {
     }
 
     @Bean
+    @ConditionalOnWebApplication
+    @Order(1)
+    public SecurityFilterChain platformSecurityFilterChain(HttpSecurity http, PlatformJwtService jwtService,
+            PlatformAdminRepository repository, JsonAuthenticationEntryPoint entryPoint) throws Exception {
+        return http.securityMatcher("/api/platform/**")
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(HttpMethod.POST, "/api/platform/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/platform/auth/me").hasAuthority("PLATFORM_IDENTITY")
+                        .anyRequest().denyAll())
+                .exceptionHandling(handling -> handling.authenticationEntryPoint(entryPoint)
+                        .accessDeniedHandler((request, response, error) -> {
+                            response.setStatus(403);
+                            response.setContentType("application/json");
+                            response.getWriter().write("{\"error\":\"Acceso denegado\",\"status\":403}");
+                        }))
+                .addFilterBefore(new PlatformAuthenticationFilter(jwtService, repository), UsernamePasswordAuthenticationFilter.class)
+                .build();
+    }
+
+    @Bean
+    public FilterRegistrationBean<JwtAuthenticationFilter> tenantFilterRegistration(JwtAuthenticationFilter filter) {
+        FilterRegistrationBean<JwtAuthenticationFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    @ConditionalOnWebApplication
+    @Order(2)
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             JwtAuthenticationFilter jwtAuthenticationFilter,
@@ -32,8 +69,16 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, "/api/health").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register").permitAll()
-                        .anyRequest().authenticated())
-                .exceptionHandling(handling -> handling.authenticationEntryPoint(authenticationEntryPoint))
+                        .requestMatchers("/api/tenant", "/api/inventory/**", "/api/treasury/**",
+                                "/api/counterparties/**", "/api/sales/**", "/api/purchases/**", "/api/reporting/**")
+                        .hasAuthority("TENANT_IDENTITY")
+                        .anyRequest().denyAll())
+                .exceptionHandling(handling -> handling.authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler((request, response, error) -> {
+                            response.setStatus(403);
+                            response.setContentType("application/json");
+                            response.getWriter().write("{\"error\":\"Acceso denegado\",\"status\":403}");
+                        }))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }
