@@ -10,4 +10,7 @@ public interface TenantRepository extends JpaRepository<Tenant, Long> {
 
     /** Para el registro: un slug nuevo no puede coincidir con otro ni en mayusculas. */
     boolean existsBySlugIgnoreCase(String slug);
+
+    /** Coincidencia indicativa para la revision de solicitudes de registro; el NIT no es unico. */
+    long countByNit(String nit);
 }

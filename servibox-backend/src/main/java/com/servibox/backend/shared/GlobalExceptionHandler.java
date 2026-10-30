@@ -14,6 +14,7 @@ import com.servibox.backend.inventory.service.ProductCodeLockedException;
 import com.servibox.backend.purchases.service.DuplicatePurchaseInvoiceNumberException;
 import com.servibox.backend.purchases.service.InsufficientBalanceException;
 import com.servibox.backend.purchases.service.InvalidPurchaseOperationException;
+import com.servibox.backend.registration.RegistrationRequestConflictException;
 import com.servibox.backend.sales.service.DuplicateInvoiceNumberException;
 import com.servibox.backend.sales.service.InsufficientStockException;
 import com.servibox.backend.sales.service.InvalidSaleOperationException;
@@ -166,6 +167,12 @@ public class GlobalExceptionHandler {
     /** Registro con un slug que ya tiene otra serviteca. */
     @ExceptionHandler(DuplicateTenantSlugException.class)
     public ResponseEntity<ErrorResponse> manejarSlugDuplicado(DuplicateTenantSlugException ex) {
+        return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** Solicitud de registro: slug no disponible, clave de reintento reutilizada, estado o version. */
+    @ExceptionHandler(RegistrationRequestConflictException.class)
+    public ResponseEntity<ErrorResponse> manejarConflictoSolicitud(RegistrationRequestConflictException ex) {
         return construir(HttpStatus.CONFLICT, ex.getMessage());
     }
 

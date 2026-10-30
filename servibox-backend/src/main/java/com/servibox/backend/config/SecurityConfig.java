@@ -38,6 +38,10 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/platform/auth/login").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/platform/auth/me").hasAuthority("PLATFORM_IDENTITY")
+                        .requestMatchers(HttpMethod.GET, "/api/platform/registration-requests",
+                                "/api/platform/registration-requests/*").hasAuthority("PLATFORM_IDENTITY")
+                        .requestMatchers(HttpMethod.POST, "/api/platform/registration-requests/*/approve",
+                                "/api/platform/registration-requests/*/reject").hasAuthority("PLATFORM_IDENTITY")
                         .anyRequest().denyAll())
                 .exceptionHandling(handling -> handling.authenticationEntryPoint(entryPoint)
                         .accessDeniedHandler((request, response, error) -> {
@@ -68,7 +72,8 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, "/api/health").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register",
+                                "/api/registration-requests").permitAll()
                         .requestMatchers("/api/tenant", "/api/inventory/**", "/api/treasury/**",
                                 "/api/counterparties/**", "/api/sales/**", "/api/purchases/**", "/api/reporting/**")
                         .hasAuthority("TENANT_IDENTITY")
