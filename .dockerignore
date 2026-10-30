@@ -1,0 +1,24 @@
+# Solo los insumos versionados necesarios para Maven entran al contexto.
+**
+!Dockerfile
+!servibox-backend/
+!servibox-backend/pom.xml
+!servibox-backend/mvnw
+!servibox-backend/.mvn/
+!servibox-backend/.mvn/wrapper/
+!servibox-backend/.mvn/wrapper/maven-wrapper.properties
+!servibox-backend/src/
+!servibox-backend/src/**
+**/.git
+**/.idea
+**/target
+**/*.iml
+**/.env*
+**/*secret*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.jks
+**/*.log
+**/tmp
+**/temp
