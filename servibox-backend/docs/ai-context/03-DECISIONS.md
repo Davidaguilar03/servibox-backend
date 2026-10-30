@@ -12,6 +12,31 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-30: Identidad y seguridad separadas de plataforma
+
+* Decision: tabla global ADMINISTRADORES_PLATAFORMA (V8), sin tenant ni SUPERADMIN en Role.
+  Email normalizado unico, BCrypt, activo y authVersion. Solo bootstrap privado explicito;
+  id 1 reservado, INSERT sin reemplazo y rechazo si existe cualquier cuenta. Sin gestion
+  de operadores adicionales, recuperacion publica, correo, solicitudes o panel.
+* Dos cadenas stateless con autoridades distintas y denegacion por defecto. Reemplaza
+  la autorizacion historica anyRequest authenticated. Publicos solo los metodos/rutas
+  enumerados de login, registro tenant y salud; plataforma agrega su login propio.
+* JWT plataforma usa clave distinta, issuer/tipo/audiencia obligatorios, id estable,
+  iat/exp y version; 15 minutos iniciales sin refresh. Activo/version se consultan por
+  peticion; fallo de base no autentica. No establece TenantContext ni accede a negocio.
+* Compatibilidad: se conserva JWT_SECRET y la vigencia tenant. Tokens heredados solo
+  sin los tres marcadores nuevos, con claims comerciales completos y firma tenant.
+  Nueva emision agrega marcadores tenant; roles efectivos siguen en BD. La propuesta
+  de version tenant del informe se difiere a tarea 5, junto con suspension/reactivacion.
+* Bootstrap arranca contexto no HTTP y cierra siempre; entrada por consola oculta o pipe
+  privado explicito. No secretos en argumentos, siembra ni migraciones. Prod exige clave
+  exclusiva, minimo 32 bytes y sin defaults dev/test. Dev/test tienen claves solo locales.
+* Alternativas descartadas: rol comercial elevado, tenant ficticio, cadena compartida
+  autenticada, provision automatica al arrancar y fallback productivo. El contrato de
+  operacion esta en ../DEPLOYMENT.md; pruebas y limitaciones en la sesion de esta fecha.
+* Reautenticacion de acciones sensibles y recuperacion privada auditada quedan para
+  futuras entregas antes de habilitar operaciones destructivas. No se declara despliegue.
+
 ## 2026-10-29: Contenedor backend prod y disponibilidad HTTP
 
 * Decision: Dockerfile en raiz Git, build Java 21 con wrapper Maven existente y runtime

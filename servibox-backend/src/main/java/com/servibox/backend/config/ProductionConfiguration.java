@@ -22,6 +22,12 @@ public class ProductionConfiguration {
                 throw new IllegalStateException(
                         "JWT_SECRET es obligatorio en prod, debe tener al menos 32 bytes y no puede ser el secreto de desarrollo");
             }
+            String platformSecret = environment.getProperty("servibox.platform.jwt.secret", "");
+            if (platformSecret.isBlank() || platformSecret.getBytes(StandardCharsets.UTF_8).length < 32
+                    || platformSecret.equals(secret) || platformSecret.startsWith("dev-") || platformSecret.startsWith("test-")) {
+                throw new IllegalStateException(
+                        "PLATFORM_JWT_SECRET es obligatorio en prod, requiere al menos 32 bytes, debe ser exclusivo y no de desarrollo o pruebas");
+            }
         };
     }
 }
