@@ -12,6 +12,44 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-30: Solicitudes de registro y revision de plataforma (tarea 4A)
+
+* Decision: V9 agrega SOLICITUDES_REGISTRO, global y sin contrasena, usuario ni tenant.
+  Estados PENDING, APPROVED, REJECTED y CANCELLED. Id UUID opaco en VARCHAR(36).
+  Reserva vigente en `slug_reservado` (igual al slug en PENDING/APPROVED, NULL despues)
+  con UNIQUE y CHECK de coherencia con el estado: equivale al indice unico parcial
+  pedido, que H2 no admite; asi el mismo esquema corre en H2 y PostgreSQL.
+* POST `/api/registration-requests` publico, 202 con acuse `{requestId,status,message}`,
+  sin JWT. Exige header Idempotency-Key (8 a 100 caracteres `[A-Za-z0-9._:-]`); misma
+  clave y mismo cuerpo devuelve el mismo acuse, cuerpo distinto 409. Hash SHA-256 del
+  cuerpo recibido. Mismas validaciones y mensajes que el registro actual, sin usuario ni
+  contrasena; `password` presente es 400. Slug normalizado (trim, minusculas) contra
+  tenants sin distinguir mayusculas y contra reservas vigentes, con bloqueo pesimista de
+  la reserva y UNIQUE como defensa ante carreras. NIT y correo solo coincidencias
+  indicativas en el detalle, sin UNIQUE.
+* Revision: GET listado paginado (status, page, size de 1 a 100, orden fecha desc), GET
+  detalle, POST approve `{expectedVersion}` y POST reject `{expectedVersion,reason}`, con
+  PLATFORM_IDENTITY y sin TenantContext. Bloqueo pesimista y version: un solo ganador; el
+  reintento del mismo revisor desde la misma version devuelve el mismo resultado sin
+  cambiar nada. Aprobar exige PENDING vigente, no crea tenant, no envia correo ni da
+  acceso, y extiende la reserva. Rechazar exige motivo y libera el slug. Ninguna otra
+  ruta de plataforma se abre.
+* Vencimiento perezoso, sin proceso programado: la reserva vencida se cancela cuando otra
+  solicitud pide el mismo slug; aprobar una PENDING vencida es 409; la clave de reintento
+  vencida se libera al reutilizarla. Plazos configurables, defaults PROPUESTOS y no
+  confirmados por David: 7 dias PENDING, 30 dias APPROVED, 48 h de idempotencia.
+* Compuerta REGISTRATION_REQUESTS_ENABLED, default false: apagada, la ruta publica es 404
+  como no disponible y el registro inmediato sigue igual. Encendida, el registro inmediato
+  responde 403: nunca dos vias publicas activas. Se eligio ruta nueva en vez de cambiar
+  `/api/auth/register` (propuesta de la auditoria) porque la tarea fija la ruta exacta.
+* Corte 4A/4B: 4B agrega token de activacion, correo/outbox, reenvio, creacion atomica de
+  tenant/ADMIN y el estado ACTIVATED (exigira ampliar ck_solicitud_estado). La solicitud no
+  guarda username: 4B debe pedirlo al activar o agregarlo. No abrir solicitudes en publico
+  antes de 4B verificada.
+* Alternativas descartadas: indice parcial solo en PostgreSQL (esquemas distintos por
+  motor), tabla de reservas separada (dos tablas con exists separados), UNIQUE de NIT o
+  correo, y crear el tenant inactivo al aprobar.
+
 ## 2026-10-30: Identidad y seguridad separadas de plataforma
 
 * Decision: tabla global ADMINISTRADORES_PLATAFORMA (V8), sin tenant ni SUPERADMIN en Role.

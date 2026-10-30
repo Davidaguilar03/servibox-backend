@@ -77,9 +77,13 @@ public class TenantRegistrationService {
     @Value("${servibox.registration.enabled}")
     private boolean enabled;
 
+    /** Con las solicitudes de registro abiertas, el registro inmediato queda cerrado: una sola via publica. */
+    @Value("${servibox.registration-requests.enabled}")
+    private boolean requestsEnabled;
+
     @Transactional
     public LoginResponse registrar(RegisterRequest request) {
-        if (!enabled) {
+        if (!enabled || requestsEnabled) {
             throw new RegistrationDisabledException();
         }
         validar(request);
@@ -158,28 +162,8 @@ public class TenantRegistrationService {
         validarNombreComercial(r.businessName());
         validarNit(r.nit());
         validarTelefono(r.phone());
-
-        String slug = r.slug();
-        if (slug == null || !SLUG.matcher(slug).matches()) {
-            throw new InvalidRegistrationException(
-                    "El identificador debe tener de 3 a 30 caracteres con solo minúsculas, números y guiones");
-        }
-        if (slug.startsWith("-") || slug.endsWith("-")) {
-            throw new InvalidRegistrationException("El identificador no puede empezar ni terminar en guion");
-        }
-        if (SLUGS_RESERVADOS.contains(slug)) {
-            throw new InvalidRegistrationException("El identificador " + slug + " esta reservado");
-        }
-
-        obligatorio(r.adminFullName(), 150, "El nombre completo del administrador");
-
-        String correo = r.adminEmail() == null ? "" : r.adminEmail().trim();
-        if (correo.length() > 150) {
-            throw new InvalidRegistrationException("El correo del administrador no puede superar 150 caracteres");
-        }
-        if (!CORREO.matcher(correo).matches()) {
-            throw new InvalidRegistrationException("El correo del administrador no es valido");
-        }
+        validarSlug(r.slug());
+        validarResponsable(r.adminFullName(), r.adminEmail());
 
         if (r.adminUsername() == null || !USERNAME.matcher(r.adminUsername()).matches()) {
             throw new InvalidRegistrationException(
@@ -214,6 +198,33 @@ public class TenantRegistrationService {
         obligatorio(telefono, 25, "El telefono");
         if (!TELEFONO.matcher(telefono.trim()).matches()) {
             throw new InvalidRegistrationException("El telefono solo admite digitos, espacios, +, - y paréntesis");
+        }
+    }
+
+    // Tambien para las solicitudes de registro (RegistrationRequestService), con los mismos mensajes.
+
+    public static void validarSlug(String slug) {
+        if (slug == null || !SLUG.matcher(slug).matches()) {
+            throw new InvalidRegistrationException(
+                    "El identificador debe tener de 3 a 30 caracteres con solo minúsculas, números y guiones");
+        }
+        if (slug.startsWith("-") || slug.endsWith("-")) {
+            throw new InvalidRegistrationException("El identificador no puede empezar ni terminar en guion");
+        }
+        if (SLUGS_RESERVADOS.contains(slug)) {
+            throw new InvalidRegistrationException("El identificador " + slug + " esta reservado");
+        }
+    }
+
+    public static void validarResponsable(String nombre, String correoRecibido) {
+        obligatorio(nombre, 150, "El nombre completo del administrador");
+
+        String correo = correoRecibido == null ? "" : correoRecibido.trim();
+        if (correo.length() > 150) {
+            throw new InvalidRegistrationException("El correo del administrador no puede superar 150 caracteres");
+        }
+        if (!CORREO.matcher(correo).matches()) {
+            throw new InvalidRegistrationException("El correo del administrador no es valido");
         }
     }
 

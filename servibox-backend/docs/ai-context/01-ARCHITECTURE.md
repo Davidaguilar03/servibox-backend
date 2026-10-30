@@ -151,8 +151,10 @@ una cuenta existente impide repetirlo y la PK impide reemplazo concurrente. Cont
 entrada oculta/pipe y operacion local/contenedor en [DEPLOYMENT.md](../DEPLOYMENT.md).
 
 Dos cadenas ordenadas y stateless. Primera: `/api/platform/**`, solo POST
-`/api/platform/auth/login` publico y GET `/api/platform/auth/me` con PLATFORM_IDENTITY;
-resto denegado. Segunda: login/registro tenant y GET salud publicos, familias comerciales
+`/api/platform/auth/login` publico; GET `/api/platform/auth/me`, GET
+`/api/platform/registration-requests` y `/{id}`, POST `/{id}/approve` y `/{id}/reject` con
+PLATFORM_IDENTITY; resto denegado. Segunda: login/registro tenant, POST
+`/api/registration-requests` y GET salud publicos, familias comerciales
 actuales con TENANT_IDENTITY y resto denegado. El filtro tenant tiene registro servlet
 automatico deshabilitado: solo corre dentro de su cadena, nunca en plataforma.
 Ambos filtros limpian TenantContext al entrar y en finally, y no conservan SecurityContext.
@@ -300,7 +302,8 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | `DuplicateProductCodeException`, `DuplicateAccountNameException`, `DuplicateInvoiceNumberException`, `DuplicatePurchaseInvoiceNumberException`, `DuplicateCounterpartyDocumentException` | 409 | mensaje de la excepcion |
 | `InvalidRegistrationException` (dato del registro publico) | 400 | mensaje de la regla |
 | `DuplicateTenantSlugException` (slug ya registrado) | 409 | "Ya existe una serviteca con el identificador X" |
-| `RegistrationDisabledException` (`servibox.registration.enabled=false`) | 403 | "El registro de nuevas servitecas esta deshabilitado" |
+| `RegistrationDisabledException` (`servibox.registration.enabled=false`, o solicitudes de registro abiertas) | 403 | "El registro de nuevas servitecas esta deshabilitado" |
+| `RegistrationRequestConflictException` (solicitudes de registro) | 409 | "El codigo solicitado no esta disponible", "La clave de reintento ya se uso con otros datos", "La solicitud ya no permite esta operacion" o "El recurso cambio; actualiza e intenta de nuevo" |
 | `AdminRequiredException` (sin rol ADMIN: perfil del tenant, configuracion financiera, alta o edicion de categorias) | 403 | "Solo un administrador puede editar los datos de la serviteca", "...editar la configuracion financiera" o "...crear o editar categorias" |
 | `SystemCounterpartyException` (editar el Consumidor final o usar su documento) | 409 | mensaje de la excepcion |
 | `InsufficientStockException`, `InsufficientBalanceException` | 409 | mensaje de la excepcion; los montos de saldo con `Moneda.formatear` ("hay $ 3.250.000 y se requieren $ 4.212.600") |
@@ -345,6 +348,10 @@ servibox.registration.enabled=${REGISTRATION_ENABLED:true}
 ```
 
 `servibox.registration.enabled` apaga el registro publico (403) sin desplegar codigo.
+`servibox.registration-requests.enabled` (REGISTRATION_REQUESTS_ENABLED, default false)
+abre POST `/api/registration-requests` y, mientras esta abierta, el registro inmediato
+responde 403: nunca hay dos vias publicas activas. Plazos configurables en
+[DEPLOYMENT.md](../DEPLOYMENT.md); contrato en la sesion 2026-10-30-registration-requests.
 
 `servibox.business.time-zone` es la zona de negocio: `config.BusinessClockConfiguration`
 expone con ella el bean `Clock` (`businessClock`) del que sale todo "hoy" de negocio. Ver
@@ -393,6 +400,7 @@ Base: `com.servibox.backend`. Un paquete por modulo de negocio, mas tres transve
 | `tenant` | `Tenant`, `TenantRepository`, `TenantContext`, `TenantAwareJpaTransactionManager`, `TenantFilterConfiguration` |
 | `shared` | `TenantAwareEntity`, `ErrorResponse`, `GlobalExceptionHandler`, `ResourceNotFoundException` |
 | `auth` | `JwtService`, `JwtAuthenticationFilter`, `AuthController`, `TenantRegistrationService`, `InvalidCredentialsException` y las tres excepciones del registro, mas `entity` / `repository` / `dto` |
+| `registration` | solicitudes de registro (4A): `RegistrationRequest`, su servicio, el controlador publico y el de revision de plataforma; global, sin tenant |
 | `inventory` | primer modulo de negocio migrado, ver abajo |
 | `treasury` | segundo modulo de negocio migrado, ver abajo |
 | `counterparties` | terceros (`Counterparty`): clientes y proveedores en una sola entidad, compartida por `sales` y `purchases`, ver abajo |

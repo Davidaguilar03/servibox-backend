@@ -36,13 +36,18 @@ No poner secretos dentro de src; nunca pasarlos mediante COPY, ARG o ENV de buil
 | PLATFORM_JWT_SECRET | Si | Clave aleatoria privada exclusiva de plataforma, al menos 32 bytes UTF-8; distinta de JWT_SECRET, sin valores dev/test ni fallback productivo |
 | PLATFORM_JWT_EXPIRATION_MS | No | Entre 1 y 86400000 milisegundos, default 900000 (15 minutos); sin refresh |
 | REGISTRATION_ENABLED | No | Booleano, default true; false responde 403 al registro. Decidir politica antes de publicar |
+| REGISTRATION_REQUESTS_ENABLED | No | Booleano, default false. false: POST /api/registration-requests responde 404. true: abre solicitudes y cierra el registro inmediato (403). No activar en publico hasta que 4B (activacion y correo) este verificada |
+| REGISTRATION_REQUESTS_PENDING_RESERVATION | No | Duracion Spring positiva (7d, 48h, P7D), default 7d: vigencia de la reserva de slug en PENDING. Propuesta, no confirmada |
+| REGISTRATION_REQUESTS_APPROVED_RESERVATION | No | Duracion positiva, default 30d desde la aprobacion. Propuesta, no confirmada |
+| REGISTRATION_REQUESTS_IDEMPOTENCY_RETENTION | No | Duracion positiva, default 48h de retencion de Idempotency-Key. Propuesta, no confirmada. Un plazo no positivo impide arrancar |
 | BUSINESS_TIME_ZONE | No | Id de java.time.ZoneId, default America/Bogota. Auditoria UTC |
 | REPORTING_MAX_EXPORT_ROWS | No | Entero positivo, default 20000 movimientos por exportacion; superarlo responde 400 |
 
 Exportacion: rango maximo existente de 366 dias para PDF/XLSX; acotar fechas y filas.
 `DEV_DEMO_DATA` es exclusivo de dev, no se usa en prod. No hay siembra demo en prod.
 El JAR conserva bibliotecas H2 de desarrollo por el pom existente, pero prod fija el
-driver PostgreSQL y exige DB_URL; no arranca una base H2. Flyway aplica V1 a V8,
+driver PostgreSQL y exige DB_URL; no arranca una base H2. Flyway aplica V1 a V9 (V9:
+SOLICITUDES_REGISTRO, sin tocar tablas comerciales),
 Hibernate valida con `ddl-auto=validate` y `open-in-view=false`. No usar repair, baseline
 ni ddl-auto=update para esquivar errores. Conservar el mismo JWT_SECRET al reiniciar;
 cambiarlo invalida tokens previos. Ninguna variable secreta lleva un ejemplo real aqui.
