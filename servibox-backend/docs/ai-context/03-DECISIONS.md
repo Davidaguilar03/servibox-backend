@@ -12,6 +12,27 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-29: Contenedor backend prod y disponibilidad HTTP
+
+* Decision: Dockerfile en raiz Git, build Java 21 con wrapper Maven existente y runtime
+  JRE sin privilegios (10001), bases fijadas por digest. Contexto raiz exterior; Maven
+  permanece anidado. Sin dependencias nuevas ni modificaciones de V1 a V7.
+* Prod usa PORT con fallback 8080; SERVER_PORT conserva precedencia Spring y se debe
+  dejar sin definir en Railway. DB_URL debe ser JDBC, con usuario y clave separados;
+  driver PostgreSQL explicito. Flyway, validate y open-in-view=false se conservan.
+* JWT_SECRET efectivo se valida al iniciar prod, antes de crear beans de aplicacion:
+  ausente, blanco, menos de 32 bytes UTF-8 o fallback dev impiden arranque con mensaje
+  sin valor secreto. Reemplaza la recomendacion anterior sin validacion obligatoria.
+* GET /api/health publico devuelve solo status UP y no consulta base. No cambia permisos
+  del resto. Alternativas descartadas: Actuator y chequeo SQL publico, innecesarios para
+  disponibilidad minima del proceso. El chequeo no certifica disponibilidad de la base.
+* Reemplazados los pendientes historicos de compatibilidad PG16 por evidencia externa
+  de la tarea 2 (16.15, migraciones vacio/V2 a V7, 228 comprobaciones HTTP/estado,
+  15 JUnit de concurrencia y seis exportados); no implica suite completa sobre PG16.
+* Motivo: preparar build y arranque verificables localmente sin desplegar ni contratar.
+  No habilitar CORS: frontend/proxy futuro usara /api y mismo origen. Contrato operativo
+  y fuentes oficiales Railway en ../DEPLOYMENT.md; resultados en la sesion de hoy.
+
 ## 2026-10-27: Color opcional de cuentas
 
 * Decision: V7 agrega `cuentas.color_cuenta` VARCHAR(7) nullable, sin backfill. El alta
@@ -46,7 +67,8 @@ Formato de cada entrada:
 * Frontend solo leido: sus totales previos y comparacion de fondos necesitan alinearse
   con importes definitivos por linea; sus formatos ocultan centavos y falta mapear el
   mensaje nuevo. Ejemplos y fuentes concretas en la sesion backend-polish.
-* PostgreSQL 16 permanece pendiente. PostgreSQL 18.2 no es una verificacion equivalente.
+* Pendiente de PostgreSQL 16 reemplazado por evidencia tarea 2 del 2026-10-29, ver entrada
+  de contenedor arriba. PostgreSQL 18.2 no es una verificacion equivalente.
   El 500 observado con H2 queda como incidencia pendiente de investigar, sin causa raiz
   demostrada ni atribucion definitiva a inactividad o configuracion.
 * Alternativas descartadas: redondeo silencioso de precios, ampliar columnas o guardar

@@ -298,7 +298,7 @@ de error.
 
 `SecurityConfig` (paquete `config`): sesion `STATELESS`, CSRF deshabilitado (es una API
 pura, sin formularios ni cookies de sesion), `BCryptPasswordEncoder` como bean,
-`permitAll` solo en `POST /api/auth/login` y `POST /api/auth/register`, y `authenticated()`
+`permitAll` en `POST /api/auth/login`, `POST /api/auth/register` y `GET /api/health`, y `authenticated()`
 en todo lo demas.
 
 Propiedades en `application.properties`:
@@ -318,6 +318,12 @@ expone con ella el bean `Clock` (`businessClock`) del que sale todo "hoy" de neg
 
 El valor por defecto del secret es solo para desarrollo local. **En produccion `JWT_SECRET`
 tiene que venir de una variable de entorno real**, nunca el valor de respaldo.
+ProductionConfiguration valida antes de crear los beans de aplicacion que el secreto
+efectivo en prod no sea blanco, corto (menos de 32 bytes UTF-8) ni el fallback dev.
+El perfil prod sobreescribe el fallback con JWT_SECRET vacio si falta, para rechazarlo.
+GET /api/health solo confirma disponibilidad HTTP; no consulta la base. Contenedor,
+puerto PORT (SERVER_PORT tiene precedencia), variables y operacion en
+[DEPLOYMENT.md](../DEPLOYMENT.md).
 
 ### Modelo de usuario
 
@@ -1182,5 +1188,8 @@ con las variables de conexion y JWT ya documentadas.
     aplica sobre una base en V1 con datos y deja las columnas nuevas en null, Hibernate
     valida el esquema del contexto, y la relacion a `Tenant` de
     `TenantAwareEntity` no lee TENANTS al cargar una entidad.
-  * Pendiente: no hay prueba contra PostgreSQL real (Testcontainers); V1 y V2 solo se
-    probaron en H2 en modo PostgreSQL.
+  * Reemplazado el pendiente historico de PostgreSQL: la tarea 2 externa verifico
+    PostgreSQL 16.15 desde vacio y desde V2 con datos hasta V7, HTTP, persistencia y
+    15 casos existentes de concurrencia. No hay Testcontainers ni suite completa sobre
+    PostgreSQL. La tarea 3 agrega smoke local del contenedor final prod; ver sesion
+    2026-10-29-backend-deployment para evidencia y limites.
