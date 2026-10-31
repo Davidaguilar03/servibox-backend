@@ -326,6 +326,7 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | `PlatformTenantConflictException` (suspender o reactivar, 5A) | 409 | "El recurso cambio; actualiza e intenta de nuevo", "El tenant ya esta suspendido" o "El tenant ya esta activo" |
 | `ActivationException` (enlace de activacion, 4B) | 400, 410 o 409 | "El enlace de activacion no es valido" (400), "El enlace de activacion vencio o fue reemplazado" (410), "El enlace de activacion ya fue utilizado; inicia sesion" (409) |
 | `ResendLimitException` (reenvio de activacion, 4B) | 429 | "Espera un momento antes de reenviar la activacion" o "Se alcanzo el limite diario de reenvios de esta solicitud" |
+| `RateLimitExceededException` (limite por IP de las rutas publicas de solicitudes, tarea 49) | 429 con `Retry-After` | "Demasiadas solicitudes desde esta conexion, intenta de nuevo mas tarde" (crear) o "Demasiados intentos de activacion, espera unos minutos e intenta de nuevo" (activar) |
 | `AdminRequiredException` (sin rol ADMIN: perfil del tenant, configuracion financiera, alta o edicion de categorias) | 403 | "Solo un administrador puede editar los datos de la serviteca", "...editar la configuracion financiera" o "...crear o editar categorias" |
 | `SystemCounterpartyException` (editar el Consumidor final o usar su documento) | 409 | mensaje de la excepcion |
 | `InsufficientStockException`, `InsufficientBalanceException` | 409 | mensaje de la excepcion; los montos de saldo con `Moneda.formatear` ("hay $ 3.250.000 y se requieren $ 4.212.600") |
@@ -383,6 +384,13 @@ nunca envian. `mail.OutboxWorker` (tarea programada solo en el servidor HTTP) re
 transaccion; sin SMTP_HOST no hay transporte y lo pendiente espera. Activar provisiona con
 `TenantRegistrationService.provisionar`, el mismo codigo del registro inmediato. Contrato en
 la sesion 2026-10-30-activation-outbox-email.
+
+Limite de tasa (tarea 49): `registration.PublicRateLimiter` lo aplica en el controlador,
+despues de la compuerta y antes del servicio, con una `FixedWindowRateLimiter` por ruta
+(ventana fija por IP en un `ConcurrentHashMap`, purga perezosa, tope de entradas que falla
+cerrado, reloj inyectable). IP del socket salvo cabecera de proxy configurada. Solo esas dos
+rutas; ni login ni plataforma. Propiedades `servibox.rate-limit.*` en
+[DEPLOYMENT.md](../DEPLOYMENT.md); el perfil test lo apaga y sus pruebas lo encienden.
 
 `servibox.business.time-zone` es la zona de negocio: `config.BusinessClockConfiguration`
 expone con ella el bean `Clock` (`businessClock`) del que sale todo "hoy" de negocio. Ver

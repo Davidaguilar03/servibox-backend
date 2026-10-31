@@ -58,8 +58,9 @@ enum que no existe) es **400**, nunca 500; si es un enum, el mensaje nombra el c
 valores permitidos. Un campo NOT NULL en la base es `@NotNull` / `@NotBlank` en su
 `Request`, para que falte con 400 y no con el error crudo de la base. Enlace de activacion
 (4B): no valido **400**, vencido o reemplazado **410**, ya usado **409**; limite de reenvio
-de activacion **429**. No confundir este 429 de dominio con el limite de tasa por IP, que
-sigue pendiente. Panel de plataforma (5A): version esperada distinta o transicion de
+de activacion **429**. No confundir este 429 de dominio con el limite de tasa por IP de las
+rutas publicas de solicitudes (tarea 49): tambien **429**, con mensaje propio y cabecera
+`Retry-After` en segundos. Panel de plataforma (5A): version esperada distinta o transicion de
 estado del tenant no permitida es **409** (no 400 como en documentos comerciales: lo pide
 el contrato de plataforma, igual que 4A).
 
