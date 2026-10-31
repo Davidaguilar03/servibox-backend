@@ -12,6 +12,36 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-31: Limite de tasa por IP en las rutas publicas de solicitudes (tarea 49)
+
+* Decision: POST `/api/registration-requests` y POST `/api/registration-requests/activate`
+  tienen cada una su cuota por IP, en memoria y por instancia: ventana fija, defaults 5 por
+  hora (crear) y 10 por 15 minutos (activar), configurables, con interruptor. Excedida: 429,
+  `Retry-After` en segundos redondeado hacia arriba y `{"error","status"}` con mensaje propio,
+  distinto de los 429 de reenvio. Sin dependencias nuevas.
+* Orden: compuerta, limite, servicio. Apagada responde 404 sin consumir. Un JSON ilegible
+  responde 400 antes del controlador y tampoco consume (no llega a la base). Los 400, 409 y
+  410 del servicio si consumen: cada intento de token cuenta.
+* Reintento con la misma Idempotency-Key: cuenta como una peticion mas, ni mas ni menos.
+  Eximirlo exigiria leer la base antes del limite (consulta gratis para un atacante) y la
+  cuota de 5 por hora deja margen para reintentos legitimos.
+* IP: la del socket por defecto. `servibox.rate-limit.client-ip-header` (vacia por defecto)
+  nombra la cabecera del proxy de confianza; se toma su ultima entrada, la que agrega el
+  proxy, y un valor que no parece IP vuelve a la del socket. Railway documenta X-Real-IP
+  y no X-Forwarded-For; que reemplace un valor del cliente no esta documentado y se debe
+  comprobar al desplegar. No se usa `server.forward-headers-strategy`.
+* Memoria: purga perezosa de ventanas vencidas una vez por ventana y al llegar al tope
+  (default 10000 IP por ruta). Lleno y sin vencidas, una IP nueva recibe 429 con Retry-After
+  de una ventana completa (falla cerrado): se prefiere frenar el alta publica durante un
+  ataque distribuido a dejarla sin limite. Las IP ya registradas conservan su cuota.
+* Plazos confirmados por David el 2026-10-31, sin cambios en codigo: reserva PENDING 7 dias,
+  APPROVED 30 dias, idempotencia 48 h, token de activacion 24 h, reenvio cada 60 s y maximo
+  5 por dia (24 h moviles). Reemplaza "propuestos, no confirmados" de las entradas 4A y 4B.
+* Alternativas descartadas: Bucket4j o Caffeine (dependencia nueva para dos rutas), filtro
+  de servlet (tendria que repetir la compuerta para no consumir con 404), ventana deslizante
+  con marcas por peticion (mas memoria por IP; la ventana fija admite hasta el doble en el
+  borde de dos ventanas), limite compartido entre instancias (fuera de alcance).
+
 ## 2026-10-31: Filtros del listado de solicitudes de registro (tarea 48)
 
 * Decision: GET `/api/platform/registration-requests` acepta ademas `tenantName`,
@@ -112,7 +142,8 @@ Formato de cada entrada:
   arranca. SENT significa aceptado por el transporte, no entregado al buzon. Transporte
   falso solo en pruebas. Envio real no verificado; proveedor sin elegir.
 * Plazos configurables con defaults PROPUESTOS, no confirmados por David: token 24 h,
-  reenvio cada 60 s y 5 por dia. Sin cambio en los plazos de 4A.
+  reenvio cada 60 s y 5 por dia. Sin cambio en los plazos de 4A. (Reemplazado: confirmados
+  el 2026-10-31, ver tarea 49.)
 * Palabras reservadas de slug: se agregan `plataforma` y `activar`, con el mismo mensaje;
   aplican tambien al registro inmediato. `platform` (mencionada en la nota 4A) no se agrego
   porque la tarea pidio solo esas dos.
@@ -146,6 +177,7 @@ Formato de cada entrada:
   solicitud pide el mismo slug; aprobar una PENDING vencida es 409; la clave de reintento
   vencida se libera al reutilizarla. Plazos configurables, defaults PROPUESTOS y no
   confirmados por David: 7 dias PENDING, 30 dias APPROVED, 48 h de idempotencia.
+  (Reemplazado: confirmados el 2026-10-31, ver tarea 49.)
 * Compuerta REGISTRATION_REQUESTS_ENABLED, default false: apagada, la ruta publica es 404
   como no disponible y el registro inmediato sigue igual. Encendida, el registro inmediato
   responde 403: nunca dos vias publicas activas. Se eligio ruta nueva en vez de cambiar

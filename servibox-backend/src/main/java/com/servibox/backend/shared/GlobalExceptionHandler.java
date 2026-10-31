@@ -16,6 +16,7 @@ import com.servibox.backend.purchases.service.InsufficientBalanceException;
 import com.servibox.backend.purchases.service.InvalidPurchaseOperationException;
 import com.servibox.backend.platform.PlatformTenantConflictException;
 import com.servibox.backend.registration.ActivationException;
+import com.servibox.backend.registration.RateLimitExceededException;
 import com.servibox.backend.registration.RegistrationRequestConflictException;
 import com.servibox.backend.registration.ResendLimitException;
 import com.servibox.backend.sales.service.DuplicateInvoiceNumberException;
@@ -195,6 +196,14 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ResendLimitException.class)
     public ResponseEntity<ErrorResponse> manejarLimiteReenvio(ResendLimitException ex) {
         return construir(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
+    }
+
+    /** Limite de tasa por IP de una ruta publica de solicitudes de registro. */
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<ErrorResponse> manejarLimiteTasa(RateLimitExceededException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
+                .body(new ErrorResponse(ex.getMessage(), HttpStatus.TOO_MANY_REQUESTS.value()));
     }
 
     /** servibox.registration.enabled=false. */

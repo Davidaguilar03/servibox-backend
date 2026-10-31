@@ -36,14 +36,21 @@ No poner secretos dentro de src; nunca pasarlos mediante COPY, ARG o ENV de buil
 | PLATFORM_JWT_SECRET | Si | Clave aleatoria privada exclusiva de plataforma, al menos 32 bytes UTF-8; distinta de JWT_SECRET, sin valores dev/test ni fallback productivo |
 | PLATFORM_JWT_EXPIRATION_MS | No | Entre 1 y 86400000 milisegundos, default 900000 (15 minutos); sin refresh |
 | REGISTRATION_ENABLED | No | Booleano, default true; false responde 403 al registro. Decidir politica antes de publicar |
-| REGISTRATION_REQUESTS_ENABLED | No | Booleano, default false. false: POST /api/registration-requests y POST /api/registration-requests/activate responden 404. true: abre ambas y cierra el registro inmediato (403). No activar en publico sin limite de tasa (tarea 7 u 8) ni sin verificar un envio real de correo |
-| REGISTRATION_REQUESTS_PENDING_RESERVATION | No | Duracion Spring positiva (7d, 48h, P7D), default 7d: vigencia de la reserva de slug en PENDING. Propuesta, no confirmada |
-| REGISTRATION_REQUESTS_APPROVED_RESERVATION | No | Duracion positiva, default 30d desde la aprobacion. Propuesta, no confirmada |
-| REGISTRATION_REQUESTS_IDEMPOTENCY_RETENTION | No | Duracion positiva, default 48h de retencion de Idempotency-Key. Propuesta, no confirmada. Un plazo no positivo impide arrancar |
+| REGISTRATION_REQUESTS_ENABLED | No | Booleano, default false. false: POST /api/registration-requests y POST /api/registration-requests/activate responden 404. true: abre ambas y cierra el registro inmediato (403). No activar en publico sin verificar un envio real de correo ni sin configurar y comprobar PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER en Railway (ver Limite de tasa publico) |
+| REGISTRATION_REQUESTS_PENDING_RESERVATION | No | Duracion Spring positiva (7d, 48h, P7D), default 7d: vigencia de la reserva de slug en PENDING. Confirmado por David el 2026-10-31 |
+| REGISTRATION_REQUESTS_APPROVED_RESERVATION | No | Duracion positiva, default 30d desde la aprobacion. Confirmado por David el 2026-10-31 |
+| REGISTRATION_REQUESTS_IDEMPOTENCY_RETENTION | No | Duracion positiva, default 48h de retencion de Idempotency-Key. Confirmado por David el 2026-10-31. Un plazo no positivo impide arrancar |
 | ACTIVATION_BASE_URL | Si | URL publica del frontend para el enlace `/activar#token=...`, sin query ni fragmento, maximo 200 caracteres. prod exige `https://`; nunca se toma del header Host. Dev: http://localhost:5173 |
-| REGISTRATION_ACTIVATION_TOKEN_TTL | No | Duracion positiva, default 24h de vigencia del enlace. Propuesta, no confirmada |
-| REGISTRATION_ACTIVATION_RESEND_COOLDOWN | No | Duracion no negativa, default 60s entre enlaces de una solicitud. Propuesta, no confirmada |
-| REGISTRATION_ACTIVATION_RESEND_DAILY_LIMIT | No | Entero positivo, default 5 reenvios por solicitud en 24 h moviles. Propuesta, no confirmada |
+| REGISTRATION_ACTIVATION_TOKEN_TTL | No | Duracion positiva, default 24h de vigencia del enlace. Confirmado por David el 2026-10-31 |
+| REGISTRATION_ACTIVATION_RESEND_COOLDOWN | No | Duracion no negativa, default 60s entre enlaces de una solicitud. Confirmado por David el 2026-10-31 |
+| REGISTRATION_ACTIVATION_RESEND_DAILY_LIMIT | No | Entero positivo, default 5 reenvios por solicitud en 24 h moviles. Confirmado por David el 2026-10-31 |
+| PUBLIC_RATE_LIMIT_ENABLED | No | Booleano, default true. false apaga el limite de tasa por IP de las dos rutas publicas de solicitudes (solo para pruebas) |
+| PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER | Si en Railway | Nombre de la cabecera con la IP del cliente que pone el proxy de confianza; vacia (default) usa la IP del socket e ignora X-Forwarded-For y X-Real-IP. En Railway: `X-Real-IP`. Se toma la ultima entrada; un valor que no parece IP vuelve a la del socket |
+| PUBLIC_RATE_LIMIT_MAX_ENTRIES | No | Entero positivo, default 10000 IP por ruta. Lleno y sin ventanas vencidas, una IP nueva recibe 429 (falla cerrado) |
+| PUBLIC_RATE_LIMIT_REQUESTS_LIMIT | No | Entero positivo, default 5 POST /api/registration-requests por IP y ventana |
+| PUBLIC_RATE_LIMIT_REQUESTS_WINDOW | No | Duracion positiva, default 1h |
+| PUBLIC_RATE_LIMIT_ACTIVATION_LIMIT | No | Entero positivo, default 10 POST /api/registration-requests/activate por IP y ventana |
+| PUBLIC_RATE_LIMIT_ACTIVATION_WINDOW | No | Duracion positiva, default 15m |
 | MAIL_OUTBOX_ENCRYPTION_KEY | Si | Clave aleatoria privada de al menos 32 bytes UTF-8 que cifra el cuerpo pendiente del outbox; distinta de JWT_SECRET y PLATFORM_JWT_SECRET, sin valores dev/test ni fallback productivo. Rotarla deja lo pendiente en FAILED (PAYLOAD_INVALIDO): reenviar la activacion |
 | MAIL_OUTBOX_POLL_INTERVAL | No | Duracion positiva, default 30s entre lotes del worker |
 | MAIL_OUTBOX_MAX_ATTEMPTS | No | Entero positivo, default 6 intentos antes de FAILED |
@@ -135,6 +142,28 @@ Cada peticion de plataforma revalida activo/authVersion. La recuperacion privada
 y un mecanismo operativo de rotacion/revocacion no tienen comando en esta entrega;
 deben definirse antes de operar publicamente. Rotar PLATFORM_JWT_SECRET invalida todos
 sus JWT y no cambia JWT_SECRET tenant.
+
+### Limite de tasa publico (tarea 49)
+
+POST /api/registration-requests y POST /api/registration-requests/activate tienen cada una
+su cuota por IP (defaults 5 por hora y 10 por 15 minutos). Al superarla: 429, cabecera
+Retry-After en segundos y `{"error","status"}`. Con la compuerta apagada siguen en 404 sin
+consumir cuota. Ninguna otra ruta tiene limite (tampoco los logins).
+
+* En memoria y por instancia: con varias replicas cada una cuenta por su lado (el limite
+  efectivo se multiplica) y un reinicio o despliegue borra los contadores.
+* IP del cliente: Spring no tiene `server.forward-headers-strategy` configurado, asi que la
+  IP es la del socket. Detras del proxy de Railway esa IP es la del proxy: sin
+  PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER todos los visitantes comparten una sola cuota (5
+  solicitudes por hora en total). Railway documenta `X-Real-IP` "for identifying client's
+  remote IP" ([specs and limits](https://docs.railway.com/networking/public-networking/specs-and-limits));
+  no documenta X-Forwarded-For ni si reemplaza un X-Real-IP enviado por el cliente.
+* Antes de abrir la compuerta, en el servicio desplegado: enviar peticiones con un
+  `X-Real-IP` falso y confirmar que la cuota no cambia (el proxy debe reemplazarlo o
+  agregar el suyo al final). Si Railway lo deja pasar tal cual, no configurar la cabecera.
+* No activar `server.forward-headers-strategy` (NATIVE o FRAMEWORK): reescribe la IP del
+  socket con X-Forwarded-For y anularia esta defensa. Configurar la cabecera solo si el
+  puerto de la app no es alcanzable sin pasar por el proxy.
 
 ### Suspension y revocacion de tenants (5A)
 
