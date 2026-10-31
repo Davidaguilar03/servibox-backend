@@ -1,9 +1,11 @@
 package com.servibox.backend.platform;
 
 import com.servibox.backend.auth.InvalidCredentialsException;
+import com.servibox.backend.auth.LoginThrottle;
 import com.servibox.backend.platform.dto.PlatformIdentityResponse;
 import com.servibox.backend.platform.dto.PlatformLoginRequest;
 import com.servibox.backend.platform.dto.PlatformLoginResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
@@ -20,9 +22,14 @@ public class PlatformAuthController {
     private final PlatformAdminRepository repository;
     private final PasswordEncoder passwordEncoder;
     private final PlatformJwtService jwtService;
+    private final LoginThrottle loginThrottle;
 
     @PostMapping("/login")
-    public PlatformLoginResponse login(@Valid @RequestBody PlatformLoginRequest request) {
+    public PlatformLoginResponse login(@Valid @RequestBody PlatformLoginRequest request, HttpServletRequest http) {
+        return loginThrottle.attempt(http, LoginThrottle.platformAccount(request.email()), () -> authenticate(request));
+    }
+
+    private PlatformLoginResponse authenticate(PlatformLoginRequest request) {
         PlatformAdmin admin = repository.findByEmail(request.email().strip().toLowerCase(Locale.ROOT))
                 .filter(PlatformAdmin::isActive).orElseThrow(InvalidCredentialsException::new);
         if (request.password().getBytes(StandardCharsets.UTF_8).length > 72

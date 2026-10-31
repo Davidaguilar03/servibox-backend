@@ -67,7 +67,8 @@ public class PublicRateLimiter {
         }
     }
 
-    String clientIp(HttpServletRequest request) {
+    /** IP del cliente con la misma regla para todos los limites (tambien los logins). */
+    public String clientIp(HttpServletRequest request) {
         String remote = request.getRemoteAddr();
         if (clientIpHeader.isEmpty()) {
             return remote;

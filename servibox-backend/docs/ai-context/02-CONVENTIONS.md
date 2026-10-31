@@ -59,8 +59,9 @@ valores permitidos. Un campo NOT NULL en la base es `@NotNull` / `@NotBlank` en 
 `Request`, para que falte con 400 y no con el error crudo de la base. Enlace de activacion
 (4B): no valido **400**, vencido o reemplazado **410**, ya usado **409**; limite de reenvio
 de activacion **429**. No confundir este 429 de dominio con el limite de tasa por IP de las
-rutas publicas de solicitudes (tarea 49): tambien **429**, con mensaje propio y cabecera
-`Retry-After` en segundos. Panel de plataforma (5A): version esperada distinta o transicion de
+rutas publicas de solicitudes (tarea 49) ni con el bloqueo de logins por fallos (tarea 50):
+tambien **429**, cada uno con mensaje propio y cabecera `Retry-After` en segundos. Un login
+fallido sigue siendo siempre el mismo **401** generico, sin distinguir la causa. Panel de plataforma (5A): version esperada distinta o transicion de
 estado del tenant no permitida es **409** (no 400 como en documentos comerciales: lo pide
 el contrato de plataforma, igual que 4A).
 

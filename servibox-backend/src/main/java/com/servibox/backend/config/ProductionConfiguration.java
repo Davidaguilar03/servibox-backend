@@ -1,5 +1,6 @@
 package com.servibox.backend.config;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -8,9 +9,16 @@ import org.springframework.core.env.Environment;
 
 import java.nio.charset.StandardCharsets;
 
+@Slf4j
 @Configuration
 @Profile("prod")
 public class ProductionConfiguration {
+
+    static final String CLIENT_IP_HEADER_WARNING = "PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER esta vacia: los limites por IP"
+            + " (rutas publicas de solicitudes y logins) usan la IP del socket. Detras de un proxy (Railway) esa IP es"
+            + " la del proxy y todos los visitantes compartirian una sola cuota: un atacante bloquearia el login de"
+            + " todos. En Railway configura PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER=X-Real-IP y comprueba con un X-Real-IP"
+            + " falso que la cuota no cambia. Ver DEPLOYMENT.md";
 
     @Bean
     static BeanFactoryPostProcessor productionJwtValidation(Environment environment) {
@@ -37,6 +45,11 @@ public class ProductionConfiguration {
             }
             if (!environment.getProperty("servibox.activation.base-url", "").startsWith("https://")) {
                 throw new IllegalStateException("ACTIVATION_BASE_URL es obligatoria en prod y debe usar https");
+            }
+            boolean limitsOn = environment.getProperty("servibox.rate-limit.enabled", Boolean.class, true)
+                    || environment.getProperty("servibox.login-throttle.enabled", Boolean.class, true);
+            if (limitsOn && environment.getProperty("servibox.rate-limit.client-ip-header", "").isBlank()) {
+                log.warn(CLIENT_IP_HEADER_WARNING);
             }
         };
     }

@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * tope). Con el tope de claves lleno y sin nada vencido, una clave nueva se rechaza: el
  * limite falla cerrado en vez de dejar crecer la memoria. Ver 03-DECISIONS.md.
  */
-final class FixedWindowRateLimiter {
+public final class FixedWindowRateLimiter {
 
     private record Window(Instant start, int count) {
     }
@@ -24,7 +24,7 @@ final class FixedWindowRateLimiter {
     private final ConcurrentHashMap<String, Window> windows = new ConcurrentHashMap<>();
     private volatile Instant lastPurge = Instant.MIN;
 
-    FixedWindowRateLimiter(int limit, Duration window, int maxEntries, Clock clock) {
+    public FixedWindowRateLimiter(int limit, Duration window, int maxEntries, Clock clock) {
         if (limit < 1 || window == null || !window.isPositive() || maxEntries < 1) {
             throw new IllegalStateException("Configuracion del limite de tasa invalida");
         }
@@ -53,6 +53,49 @@ final class FixedWindowRateLimiter {
             return 0;
         }
         return seconds(Duration.between(now, w.start().plus(window)));
+    }
+
+    /**
+     * Reserva una unidad de la clave sin pasarse del limite (uso de los logins: cada intento
+     * reserva antes de evaluar y luego confirma o devuelve). Devuelve 0 si la reserva entra,
+     * o los segundos de Retry-After si la clave ya esta en el limite; en ese caso no cuenta.
+     */
+    public long reserve(String key) {
+        Instant now = clock.instant();
+        if (!now.isBefore(lastPurge.plus(window))) {
+            purge(now);
+        }
+        if (!windows.containsKey(key) && windows.size() >= maxEntries) {
+            purge(now);
+            if (windows.size() >= maxEntries) {
+                return seconds(window);
+            }
+        }
+        long[] retryAfter = {0};
+        windows.compute(key, (k, prev) -> {
+            if (prev == null || expired(prev, now)) {
+                return new Window(now, 1);
+            }
+            if (prev.count() >= limit) {
+                retryAfter[0] = seconds(Duration.between(now, prev.start().plus(window)));
+                return prev;
+            }
+            return new Window(prev.start(), prev.count() + 1);
+        });
+        return retryAfter[0];
+    }
+
+    /** Devuelve una unidad reservada; si la clave queda en cero (o vencio) se borra. */
+    public void release(String key) {
+        Instant now = clock.instant();
+        windows.computeIfPresent(key, (k, prev) -> expired(prev, now) || prev.count() <= 1
+                ? null
+                : new Window(prev.start(), prev.count() - 1));
+    }
+
+    /** Borra el contador de la clave. */
+    public void reset(String key) {
+        windows.remove(key);
     }
 
     int size() {

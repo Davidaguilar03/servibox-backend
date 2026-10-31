@@ -12,6 +12,38 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-31: Proteccion de los logins contra fuerza bruta (tarea 50)
+
+* Decision: POST `/api/auth/login` y POST `/api/platform/auth/login` cuentan solo los fallos
+  (401), en memoria y por instancia, con tres cuotas en una ventana fija de 15 minutos: 5 por
+  IP + cuenta, 20 por cuenta en cualquier IP y 30 por IP en total (compartida por ambos
+  logins). Cuenta tenant: codigo de serviteca + usuario; plataforma: correo; minusculas, sin
+  espacios y acotados a 150 caracteres por parte (la memoria no depende del cliente).
+  Configurables por `servibox.login-throttle.*` con interruptor; el perfil test lo apaga.
+* Cuota llena: 429 con `Retry-After` y `Demasiados intentos de inicio de sesion, espera unos
+  minutos e intenta de nuevo`, antes de consultar la base y sin evaluar la contrasena.
+* Reserva antes de evaluar: cada intento toma una unidad de las tres cuotas; un 401 la deja,
+  un exito limpia el par y devuelve las de cuenta e IP (los exitos no cuentan), cualquier otro
+  error las devuelve. Asi intentos simultaneos no pasan del limite (con chequear y contar
+  despues, N peticiones a la vez evaluarian N contrasenas).
+* Sin filtrar informacion: usuario inexistente, contrasena incorrecta, usuario inactivo y
+  tenant suspendido siguen en el mismo 401 y cuentan igual; las cuentas inexistentes se
+  bloquean igual. Sin bloqueo persistente ni cambios en cuentas o base.
+* IP con la regla de la tarea 49 (`PublicRateLimiter.clientIp`). Memoria: mismo
+  `FixedWindowRateLimiter` con tope por tipo de clave (default 20000) que falla cerrado.
+* Prod: con algun limite encendido y `PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER` vacia,
+  `ProductionConfiguration` registra un WARN al arrancar sin impedirlo (en local o detras de
+  un proxy que no la ponga, la IP del socket es valida). Comprobaciones de Railway en
+  DEPLOYMENT.md.
+* Valores: 5 por par frena la adivinanza dirigida sin molestar a quien se equivoca un par de
+  veces; 20 por cuenta frena el ataque distribuido a una cuenta con margen para varios
+  dispositivos; 30 por IP frena el rociado de muchas cuentas desde una IP y deja espacio a una
+  oficina con NAT. Tope 20000 (y no 10000 como la tarea 49): llenarlo bloquea logins nuevos,
+  asi que se sube el costo de ese ataque; son unos pocos MB por tipo.
+* Alternativas descartadas: filtro de servlet que lea el codigo de respuesta (tendria que
+  leer el cuerpo para la cuenta), bloqueo en base (fuera de alcance), retraso progresivo
+  (mantiene hilos ocupados), Bucket4j o Caffeine (dependencia nueva).
+
 ## 2026-10-31: Limite de tasa por IP en las rutas publicas de solicitudes (tarea 49)
 
 * Decision: POST `/api/registration-requests` y POST `/api/registration-requests/activate`
