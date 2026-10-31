@@ -275,6 +275,12 @@ class RegistrationRequestTest {
         String a = crear("clave-l001", "taller-l1");
         crear("clave-l002", "taller-l2");
         enviar("clave-l003", cuerpo("taller-l3", "900111222-3", "ANA@uno.co ")).andExpect(status().isAccepted());
+        // Dos solicitudes creadas en el mismo tic del reloj empatan en fecha_creacion y el
+        // desempate es por UUID aleatorio: se fija l3 un segundo despues de l2.
+        LocalDateTime l2 = jdbc.queryForObject(
+                "SELECT fecha_creacion FROM solicitudes_registro WHERE slug_solicitado = 'taller-l2'", LocalDateTime.class);
+        jdbc.update("UPDATE solicitudes_registro SET fecha_creacion = ? WHERE slug_solicitado = 'taller-l3'",
+                l2.plusSeconds(1));
         revisar(a, "reject", "{\"expectedVersion\":0,\"reason\":\"Duplicada\"}").andExpect(status().isOk());
 
         mvc.perform(get(PLATAFORMA).param("status", "PENDING").param("size", "1")

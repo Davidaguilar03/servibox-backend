@@ -45,12 +45,18 @@ No poner secretos dentro de src; nunca pasarlos mediante COPY, ARG o ENV de buil
 | REGISTRATION_ACTIVATION_RESEND_COOLDOWN | No | Duracion no negativa, default 60s entre enlaces de una solicitud. Confirmado por David el 2026-10-31 |
 | REGISTRATION_ACTIVATION_RESEND_DAILY_LIMIT | No | Entero positivo, default 5 reenvios por solicitud en 24 h moviles. Confirmado por David el 2026-10-31 |
 | PUBLIC_RATE_LIMIT_ENABLED | No | Booleano, default true. false apaga el limite de tasa por IP de las dos rutas publicas de solicitudes (solo para pruebas) |
-| PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER | Si en Railway | Nombre de la cabecera con la IP del cliente que pone el proxy de confianza; vacia (default) usa la IP del socket e ignora X-Forwarded-For y X-Real-IP. En Railway: `X-Real-IP`. Se toma la ultima entrada; un valor que no parece IP vuelve a la del socket |
+| PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER | Si en Railway | Nombre de la cabecera con la IP del cliente que pone el proxy de confianza; vacia (default) usa la IP del socket e ignora X-Forwarded-For y X-Real-IP. En Railway: `X-Real-IP`. Se toma la ultima entrada; un valor que no parece IP vuelve a la del socket. La usan tambien los logins (tarea 50). En prod, vacia con algun limite encendido registra un WARN al arrancar (no impide arrancar) |
 | PUBLIC_RATE_LIMIT_MAX_ENTRIES | No | Entero positivo, default 10000 IP por ruta. Lleno y sin ventanas vencidas, una IP nueva recibe 429 (falla cerrado) |
 | PUBLIC_RATE_LIMIT_REQUESTS_LIMIT | No | Entero positivo, default 5 POST /api/registration-requests por IP y ventana |
 | PUBLIC_RATE_LIMIT_REQUESTS_WINDOW | No | Duracion positiva, default 1h |
 | PUBLIC_RATE_LIMIT_ACTIVATION_LIMIT | No | Entero positivo, default 10 POST /api/registration-requests/activate por IP y ventana |
 | PUBLIC_RATE_LIMIT_ACTIVATION_WINDOW | No | Duracion positiva, default 15m |
+| LOGIN_THROTTLE_ENABLED | No | Booleano, default true. false apaga la proteccion contra fuerza bruta de los dos logins (solo para pruebas) |
+| LOGIN_THROTTLE_WINDOW | No | Duracion positiva, default 15m: ventana fija de las tres cuotas de fallos de login |
+| LOGIN_THROTTLE_IP_ACCOUNT_LIMIT | No | Entero positivo, default 5 fallos por IP + cuenta y ventana |
+| LOGIN_THROTTLE_ACCOUNT_LIMIT | No | Entero positivo, default 20 fallos por cuenta desde cualquier IP y ventana |
+| LOGIN_THROTTLE_IP_LIMIT | No | Entero positivo, default 30 fallos por IP en total (ambos logins) y ventana |
+| LOGIN_THROTTLE_MAX_ENTRIES | No | Entero positivo, default 20000 claves por tipo (par, cuenta, IP). Lleno y sin ventanas vencidas, una clave nueva recibe 429 (falla cerrado) |
 | MAIL_OUTBOX_ENCRYPTION_KEY | Si | Clave aleatoria privada de al menos 32 bytes UTF-8 que cifra el cuerpo pendiente del outbox; distinta de JWT_SECRET y PLATFORM_JWT_SECRET, sin valores dev/test ni fallback productivo. Rotarla deja lo pendiente en FAILED (PAYLOAD_INVALIDO): reenviar la activacion |
 | MAIL_OUTBOX_POLL_INTERVAL | No | Duracion positiva, default 30s entre lotes del worker |
 | MAIL_OUTBOX_MAX_ATTEMPTS | No | Entero positivo, default 6 intentos antes de FAILED |
@@ -148,7 +154,7 @@ sus JWT y no cambia JWT_SECRET tenant.
 POST /api/registration-requests y POST /api/registration-requests/activate tienen cada una
 su cuota por IP (defaults 5 por hora y 10 por 15 minutos). Al superarla: 429, cabecera
 Retry-After en segundos y `{"error","status"}`. Con la compuerta apagada siguen en 404 sin
-consumir cuota. Ninguna otra ruta tiene limite (tampoco los logins).
+consumir cuota. Los logins tienen su propia proteccion (ver abajo); ninguna otra ruta tiene limite.
 
 * En memoria y por instancia: con varias replicas cada una cuenta por su lado (el limite
   efectivo se multiplica) y un reinicio o despliegue borra los contadores.
@@ -164,6 +170,42 @@ consumir cuota. Ninguna otra ruta tiene limite (tampoco los logins).
 * No activar `server.forward-headers-strategy` (NATIVE o FRAMEWORK): reescribe la IP del
   socket con X-Forwarded-For y anularia esta defensa. Configurar la cabecera solo si el
   puerto de la app no es alcanzable sin pasar por el proxy.
+
+### Proteccion de los logins contra fuerza bruta (tarea 50)
+
+POST /api/auth/login (tenant) y POST /api/platform/auth/login cuentan solo los intentos
+fallidos (401), en memoria y por instancia, con tres cuotas en una ventana fija de 15
+minutos: 5 por IP + cuenta, 20 por cuenta desde cualquier IP y 30 por IP en total (ambos
+logins suman). Cuenta tenant: codigo de serviteca + usuario; cuenta plataforma: correo;
+ambos en minusculas y sin espacios. Con una cuota llena: 429, Retry-After en segundos y
+`Demasiados intentos de inicio de sesion, espera unos minutos e intenta de nuevo`, sin
+evaluar la contrasena. Un exito limpia el par IP + cuenta (no la IP total). Las cuentas que
+no existen se cuentan y bloquean igual. Los 401 no cambian. Un 400 (cuerpo invalido) no cuenta.
+
+* La IP sale de la misma regla que el limite publico (PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER).
+  Sin esa cabecera en Railway, todos los visitantes comparten la IP del proxy: 30 fallos de
+  cualquiera bloquean el login de todos durante 15 minutos. Es obligatorio configurarla.
+* La cuota por cuenta permite a un tercero bloquear el login de una cuenta concreta durante
+  la ventana con 20 fallos (el usuario legitimo incluido). No hay bloqueo permanente: se
+  libera sola al vencer la ventana o al reiniciar la instancia.
+* Por instancia: con varias replicas el limite efectivo se multiplica; un reinicio borra
+  los contadores.
+
+### Comprobaciones obligatorias del despliegue en Railway
+
+Antes de abrir la compuerta de solicitudes (REGISTRATION_REQUESTS_ENABLED=true) y antes de
+dar acceso publico a los logins:
+
+1. Configurar `PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER=X-Real-IP` en el servicio backend.
+2. Revisar el log de arranque: no debe aparecer el WARN `PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER
+   esta vacia...`. Si aparece, la variable no llego al proceso.
+3. Contra el servicio desplegado, desde una misma conexion, enviar logins fallidos con un
+   `X-Real-IP` falso distinto en cada peticion (por ejemplo una cuenta de prueba inexistente
+   en un tenant inexistente): al sexto intento debe llegar el 429. Si cada X-Real-IP falso
+   obtiene cuota nueva, Railway deja pasar el valor del cliente: quitar la variable y no
+   abrir la compuerta hasta resolverlo. Repetir con POST /api/registration-requests/activate
+   (token falso) si se va a abrir la compuerta.
+4. Confirmar que un login correcto desde otra conexion sigue funcionando.
 
 ### Suspension y revocacion de tenants (5A)
 

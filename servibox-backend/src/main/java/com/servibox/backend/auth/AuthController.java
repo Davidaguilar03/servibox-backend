@@ -7,6 +7,7 @@ import com.servibox.backend.auth.entity.User;
 import com.servibox.backend.auth.repository.UserRepository;
 import com.servibox.backend.tenant.Tenant;
 import com.servibox.backend.tenant.TenantRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -29,14 +30,21 @@ public class AuthController {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final TenantRegistrationService tenantRegistrationService;
+    private final LoginThrottle loginThrottle;
 
     /**
      * Tenant inexistente o inactivo, usuario inexistente o inactivo y contrasena
      * incorrecta lanzan todos la misma excepcion. GlobalExceptionHandler la convierte en
-     * un 401 con el mismo mensaje generico para los cuatro casos.
+     * un 401 con el mismo mensaje generico para los cuatro casos, y LoginThrottle los cuenta
+     * igual (tambien para cuentas que no existen).
      */
     @PostMapping("/login")
-    public LoginResponse login(@Valid @RequestBody LoginRequest request) {
+    public LoginResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
+        return loginThrottle.attempt(http, LoginThrottle.tenantAccount(request.tenantSlug(), request.username()),
+                () -> authenticate(request));
+    }
+
+    private LoginResponse authenticate(LoginRequest request) {
         Tenant tenant = tenantRepository.findBySlug(request.tenantSlug())
                 .filter(t -> Boolean.TRUE.equals(t.getActive()))
                 .orElseThrow(InvalidCredentialsException::new);

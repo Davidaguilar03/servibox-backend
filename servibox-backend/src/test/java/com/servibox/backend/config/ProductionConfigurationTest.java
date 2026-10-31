@@ -1,11 +1,15 @@
 package com.servibox.backend.config;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ExtendWith(OutputCaptureExtension.class)
 class ProductionConfigurationTest {
 
     private static final String PLATFORM_TEST_KEY = "PLATFORM_JWT_SECRET=unit-config-platform-only-key-2026";
@@ -116,5 +120,20 @@ class ProductionConfigurationTest {
                     .run(context -> assertThat(context.getStartupFailure())
                             .hasMessageContaining("ACTIVATION_BASE_URL es obligatoria en prod y debe usar https"));
         }
+    }
+
+    @Test
+    void avisaSinCabeceraDeIpDelClienteSinFallarElArranque(CapturedOutput output) {
+        runner.withPropertyValues(PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL, "JWT_SECRET=" + "x".repeat(32))
+                .run(context -> assertThat(context).hasNotFailed());
+        assertThat(output).contains("WARN").contains(ProductionConfiguration.CLIENT_IP_HEADER_WARNING);
+    }
+
+    @Test
+    void noAvisaConCabeceraDeIpDelClienteConfigurada(CapturedOutput output) {
+        runner.withPropertyValues(PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL, "JWT_SECRET=" + "x".repeat(32),
+                        "PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER=X-Real-IP")
+                .run(context -> assertThat(context).hasNotFailed());
+        assertThat(output).doesNotContain(ProductionConfiguration.CLIENT_IP_HEADER_WARNING);
     }
 }

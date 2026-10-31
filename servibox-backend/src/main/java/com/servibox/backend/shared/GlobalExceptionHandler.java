@@ -198,7 +198,7 @@ public class GlobalExceptionHandler {
         return construir(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
     }
 
-    /** Limite de tasa por IP de una ruta publica de solicitudes de registro. */
+    /** Limite de tasa por IP de una ruta publica de solicitudes de registro o bloqueo de login. */
     @ExceptionHandler(RateLimitExceededException.class)
     public ResponseEntity<ErrorResponse> manejarLimiteTasa(RateLimitExceededException ex) {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
