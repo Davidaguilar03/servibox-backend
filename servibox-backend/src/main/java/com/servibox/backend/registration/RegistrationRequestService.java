@@ -30,7 +30,8 @@ import java.util.regex.Pattern;
 
 /**
  * Solicitudes de registro (tarea 4A): recibir con reserva de slug e idempotencia, y la
- * revision de la plataforma. Aprobar no crea tenant, no envia correo ni da acceso (4B).
+ * revision de la plataforma. Aprobar no crea tenant ni da acceso: emite el enlace de
+ * activacion y encola su correo (RegistrationActivationService, 4B).
  * Las reservas vencidas no se cancelan con un proceso: se liberan cuando otra solicitud pide
  * el mismo slug, y aprobar las rechaza. Ver 03-DECISIONS.md.
  */
@@ -41,6 +42,7 @@ public class RegistrationRequestService {
 
     private final RegistrationRequestRepository repository;
     private final TenantRepository tenantRepository;
+    private final RegistrationActivationService activationService;
     private final Duration pendingReservation;
     private final Duration approvedReservation;
     private final Duration idempotencyRetention;
@@ -48,6 +50,7 @@ public class RegistrationRequestService {
     public RegistrationRequestService(
             RegistrationRequestRepository repository,
             TenantRepository tenantRepository,
+            RegistrationActivationService activationService,
             @Value("${servibox.registration-requests.pending-reservation}") Duration pendingReservation,
             @Value("${servibox.registration-requests.approved-reservation}") Duration approvedReservation,
             @Value("${servibox.registration-requests.idempotency-retention}") Duration idempotencyRetention) {
@@ -56,6 +59,7 @@ public class RegistrationRequestService {
         }
         this.repository = repository;
         this.tenantRepository = tenantRepository;
+        this.activationService = activationService;
         this.pendingReservation = pendingReservation;
         this.approvedReservation = approvedReservation;
         this.idempotencyRetention = idempotencyRetention;
@@ -165,6 +169,8 @@ public class RegistrationRequestService {
         r.setReviewerId(adminId);
         r.setReservationExpiresAt(now.plus(approvedReservation));
         repository.saveAndFlush(r);
+        // Misma transaccion: primer enlace y su correo en el outbox. El reintento de arriba no emite otro.
+        activationService.issue(r, 1, now);
         return detalle(r);
     }
 

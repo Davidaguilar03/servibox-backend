@@ -12,6 +12,62 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-30: Activacion de cuenta, outbox y envio de correo (tarea 4B)
+
+* Decision: V10 agrega ACTIVATED a SOLICITUDES_REGISTRO con `id_tenant_activado` (UNIQUE,
+  FK a TENANTS, CHECK solo y siempre en ACTIVATED; slug_reservado NULL porque el slug pasa
+  al tenant), ACTIVACIONES_REGISTRO (solicitud, generacion, digest SHA-256 UNIQUE,
+  emision, caducidad, consumo, revocacion) y CORREOS_SALIENTES (outbox). V1 a V9 y las
+  tablas comerciales sin cambios. Sin UNIQUE compuesto (solicitud, generacion): lo
+  garantiza el bloqueo de la solicitud y el diccionario no expresa UK compuestas globales.
+* Aprobar, en la misma transaccion: token opaco de 32 bytes (Base64 URL, 43 caracteres),
+  solo su digest en la base, y un mensaje en el outbox con el enlace
+  `ACTIVATION_BASE_URL/activar#token=...`. La base la fija la configuracion, nunca el
+  header Host; prod exige https. El reintento de aprobar no emite otro enlace. El token
+  crudo no se guarda, no se registra en logs ni vuelve en ninguna respuesta.
+* El cuerpo del correo (con el enlace) va cifrado en el outbox con AES-256-GCM y la clave
+  MAIL_OUTBOX_ENCRYPTION_KEY (al menos 32 bytes; en prod obligatoria, distinta de las
+  firmas JWT y sin valores dev/test). Vida limitada: solo existe mientras el mensaje esta
+  PENDING; se borra al enviarse, fallar, revocarse, consumirse o vencer (vence con el
+  token). Cambiar la clave deja lo pendiente en FAILED PAYLOAD_INVALIDO: se reenvia.
+* POST `/api/registration-requests/activate` publico, solo POST, con la compuerta de 4A.
+  Bloquea la solicitud y despues lee la activacion (mismo orden que reenviar). Valida
+  formato, existencia, consumo, revocacion y caducidad del token, solicitud APPROVED con
+  reserva vigente, y usuario/contrasena con las reglas y mensajes del registro. En una
+  transaccion crea tenant y ADMIN con `TenantRegistrationService.provisionar` (extraido
+  de registrar, sin duplicar), marca ACTIVATED, consume el token y cancela su correo
+  pendiente. Sin JWT ni sesion: acuse `{status,tenantSlug,message}`. Si algo falla se
+  revierte todo y el token sigue sirviendo hasta vencer.
+* Carrera tenant contra reserva (pendiente de 4A): el registro inmediato ahora tambien
+  rechaza un slug con reserva vigente de una solicitud (409 existente), por si la compuerta
+  se cierra con aprobadas sin activar. La activacion comprueba el slug y uk_tenant_slug
+  es la defensa final (409 "El codigo solicitado no esta disponible", sin crear nada).
+* POST `/api/platform/registration-requests/{id}/resend-activation` (plataforma): solo
+  APPROVED vigente; revoca las generaciones abiertas, cancela sus correos pendientes y
+  emite una nueva. 202 con el detalle, sin enlace. Limites: 60 s desde el ultimo enlace y
+  5 reenvios en 24 h moviles (la generacion de aprobar no cuenta), 429. Un reenvio
+  ambiguo puede duplicar el correo, nunca el tenant ni el usuario.
+* Worker: tarea programada (servibox.mail.outbox.poll-interval) solo en contexto web. Por
+  lote: vence lo caducado, reclama con `SELECT ... FOR UPDATE SKIP LOCKED` (PostgreSQL 16
+  y H2 2.4 lo admiten igual, no hizo falta simulacion) y un UPDATE condicional que fija
+  `reclamado_hasta` (lease 5 min); envia fuera de transaccion y cierra solo si el lease
+  sigue siendo propio y el mensaje sigue PENDING. Retroceso exponencial desde 1 min con
+  tope 1 h, maximo 6 intentos, FAILED con categoria sin datos sensibles. Si una instancia
+  cae tras enviar, el lease vence y puede duplicarse el correo.
+* Transporte: interfaz `MailTransport`; SMTP con spring-boot-starter-mail (unica
+  dependencia nueva) por SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD y MAIL_FROM,
+  STARTTLS obligatorio. Sin SMTP_HOST no hay bean: el outbox queda PENDING y la app
+  arranca. SENT significa aceptado por el transporte, no entregado al buzon. Transporte
+  falso solo en pruebas. Envio real no verificado; proveedor sin elegir.
+* Plazos configurables con defaults PROPUESTOS, no confirmados por David: token 24 h,
+  reenvio cada 60 s y 5 por dia. Sin cambio en los plazos de 4A.
+* Palabras reservadas de slug: se agregan `plataforma` y `activar`, con el mismo mensaje;
+  aplican tambien al registro inmediato. `platform` (mencionada en la nota 4A) no se agrego
+  porque la tarea pidio solo esas dos.
+* Alternativas descartadas: generar el token en el worker (enlace y outbox descoordinados),
+  guardar el token cifrado en ACTIVACIONES_REGISTRO, consumir por GET, devolver JWT al
+  activar, un booleano de bloqueo en vez de lease con fecha, y elegir proveedor de correo.
+
 ## 2026-10-30: Solicitudes de registro y revision de plataforma (tarea 4A)
 
 * Decision: V9 agrega SOLICITUDES_REGISTRO, global y sin contrasena, usuario ni tenant.
@@ -42,9 +98,9 @@ Formato de cada entrada:
   como no disponible y el registro inmediato sigue igual. Encendida, el registro inmediato
   responde 403: nunca dos vias publicas activas. Se eligio ruta nueva en vez de cambiar
   `/api/auth/register` (propuesta de la auditoria) porque la tarea fija la ruta exacta.
-* Corte 4A/4B: 4B agrega token de activacion, correo/outbox, reenvio, creacion atomica de
+* Corte 4A/4B (resuelto en la entrada 4B de arriba): 4B agrega token de activacion, correo/outbox, reenvio, creacion atomica de
   tenant/ADMIN y el estado ACTIVATED (exigira ampliar ck_solicitud_estado). La solicitud no
-  guarda username: 4B debe pedirlo al activar o agregarlo. No abrir solicitudes en publico
+  guarda username: 4B debe pedirlo al activar o agregarlo (4B lo pide al activar). No abrir solicitudes en publico
   antes de 4B verificada.
 * Alternativas descartadas: indice parcial solo en PostgreSQL (esquemas distintos por
   motor), tabla de reservas separada (dos tablas con exists separados), UNIQUE de NIT o

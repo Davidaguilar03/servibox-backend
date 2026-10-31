@@ -1,5 +1,7 @@
 package com.servibox.backend.registration;
 
+import com.servibox.backend.registration.dto.ActivationAcknowledgment;
+import com.servibox.backend.registration.dto.ActivationBody;
 import com.servibox.backend.registration.dto.RegistrationAcknowledgment;
 import com.servibox.backend.registration.dto.RegistrationRequestBody;
 import com.servibox.backend.shared.ResourceNotFoundException;
@@ -13,12 +15,13 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Solicitud publica de registro, sin contrasena ni sesion. Apagada responde 404 como ruta no disponible. */
+/** Solicitud publica de registro y su activacion, sin sesion. Apagadas responden 404 como ruta no disponible. */
 @RestController
 @RequiredArgsConstructor
 public class RegistrationRequestController {
 
     private final RegistrationRequestService service;
+    private final RegistrationActivationService activationService;
 
     @Value("${servibox.registration-requests.enabled}")
     private boolean enabled;
@@ -36,5 +39,14 @@ public class RegistrationRequestController {
         } catch (DataIntegrityViolationException ex) {
             return service.afterConflict(key, body);
         }
+    }
+
+    /** Consume el enlace de activacion: crea tenant y ADMIN. Sin JWT; el cliente sigue al login. */
+    @PostMapping("/api/registration-requests/activate")
+    public ActivationAcknowledgment activate(@RequestBody ActivationBody body) {
+        if (!enabled) {
+            throw new ResourceNotFoundException("Recurso no encontrado");
+        }
+        return activationService.activate(body);
     }
 }

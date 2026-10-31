@@ -40,6 +40,16 @@ class RegistrationRequestsDisabledTest {
     }
 
     @Test
+    void conLaCompuertaApagadaActivarRespondeComoNoDisponible() throws Exception {
+        long antes = tenants.count();
+        mvc.perform(post(RegistrationActivationTest.ACTIVAR).contentType(MediaType.APPLICATION_JSON)
+                        .content(RegistrationActivationTest.activacion("A".repeat(43), "dueno", "clave-segura-1")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("Recurso no encontrado"));
+        assertThat(tenants.count()).isEqualTo(antes);
+    }
+
+    @Test
     void elRegistroInmediatoSigueCreandoTenantYSesion() throws Exception {
         mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON).content("""
                         {"businessName":"Serviteca","nit":"900123456-7","phone":"3001234567",

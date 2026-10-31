@@ -152,9 +152,10 @@ entrada oculta/pipe y operacion local/contenedor en [DEPLOYMENT.md](../DEPLOYMEN
 
 Dos cadenas ordenadas y stateless. Primera: `/api/platform/**`, solo POST
 `/api/platform/auth/login` publico; GET `/api/platform/auth/me`, GET
-`/api/platform/registration-requests` y `/{id}`, POST `/{id}/approve` y `/{id}/reject` con
-PLATFORM_IDENTITY; resto denegado. Segunda: login/registro tenant, POST
-`/api/registration-requests` y GET salud publicos, familias comerciales
+`/api/platform/registration-requests` y `/{id}`, POST `/{id}/approve`, `/{id}/reject` y
+`/{id}/resend-activation` (4B) con PLATFORM_IDENTITY; resto denegado. Segunda: login/registro
+tenant, POST `/api/registration-requests` y POST `/api/registration-requests/activate` (4B),
+y GET salud publicos, familias comerciales
 actuales con TENANT_IDENTITY y resto denegado. El filtro tenant tiene registro servlet
 automatico deshabilitado: solo corre dentro de su cadena, nunca en plataforma.
 Ambos filtros limpian TenantContext al entrar y en finally, y no conservan SecurityContext.
@@ -304,6 +305,8 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | `DuplicateTenantSlugException` (slug ya registrado) | 409 | "Ya existe una serviteca con el identificador X" |
 | `RegistrationDisabledException` (`servibox.registration.enabled=false`, o solicitudes de registro abiertas) | 403 | "El registro de nuevas servitecas esta deshabilitado" |
 | `RegistrationRequestConflictException` (solicitudes de registro) | 409 | "El codigo solicitado no esta disponible", "La clave de reintento ya se uso con otros datos", "La solicitud ya no permite esta operacion" o "El recurso cambio; actualiza e intenta de nuevo" |
+| `ActivationException` (enlace de activacion, 4B) | 400, 410 o 409 | "El enlace de activacion no es valido" (400), "El enlace de activacion vencio o fue reemplazado" (410), "El enlace de activacion ya fue utilizado; inicia sesion" (409) |
+| `ResendLimitException` (reenvio de activacion, 4B) | 429 | "Espera un momento antes de reenviar la activacion" o "Se alcanzo el limite diario de reenvios de esta solicitud" |
 | `AdminRequiredException` (sin rol ADMIN: perfil del tenant, configuracion financiera, alta o edicion de categorias) | 403 | "Solo un administrador puede editar los datos de la serviteca", "...editar la configuracion financiera" o "...crear o editar categorias" |
 | `SystemCounterpartyException` (editar el Consumidor final o usar su documento) | 409 | mensaje de la excepcion |
 | `InsufficientStockException`, `InsufficientBalanceException` | 409 | mensaje de la excepcion; los montos de saldo con `Moneda.formatear` ("hay $ 3.250.000 y se requieren $ 4.212.600") |
@@ -352,6 +355,15 @@ servibox.registration.enabled=${REGISTRATION_ENABLED:true}
 abre POST `/api/registration-requests` y, mientras esta abierta, el registro inmediato
 responde 403: nunca hay dos vias publicas activas. Plazos configurables en
 [DEPLOYMENT.md](../DEPLOYMENT.md); contrato en la sesion 2026-10-30-registration-requests.
+La misma compuerta abre POST `/api/registration-requests/activate` (4B); apagada, 404.
+
+Activacion y correo (4B): aprobar y reenviar emiten un token opaco, guardan su SHA-256 en
+ACTIVACIONES_REGISTRO y encolan el correo en CORREOS_SALIENTES en la misma transaccion;
+nunca envian. `mail.OutboxWorker` (tarea programada solo en el servidor HTTP) reclama con
+`FOR UPDATE SKIP LOCKED` mas lease condicional y envia por `mail.MailTransport` fuera de
+transaccion; sin SMTP_HOST no hay transporte y lo pendiente espera. Activar provisiona con
+`TenantRegistrationService.provisionar`, el mismo codigo del registro inmediato. Contrato en
+la sesion 2026-10-30-activation-outbox-email.
 
 `servibox.business.time-zone` es la zona de negocio: `config.BusinessClockConfiguration`
 expone con ella el bean `Clock` (`businessClock`) del que sale todo "hoy" de negocio. Ver
@@ -400,7 +412,8 @@ Base: `com.servibox.backend`. Un paquete por modulo de negocio, mas tres transve
 | `tenant` | `Tenant`, `TenantRepository`, `TenantContext`, `TenantAwareJpaTransactionManager`, `TenantFilterConfiguration` |
 | `shared` | `TenantAwareEntity`, `ErrorResponse`, `GlobalExceptionHandler`, `ResourceNotFoundException` |
 | `auth` | `JwtService`, `JwtAuthenticationFilter`, `AuthController`, `TenantRegistrationService`, `InvalidCredentialsException` y las tres excepciones del registro, mas `entity` / `repository` / `dto` |
-| `registration` | solicitudes de registro (4A): `RegistrationRequest`, su servicio, el controlador publico y el de revision de plataforma; global, sin tenant |
+| `registration` | solicitudes de registro (4A): `RegistrationRequest`, su servicio, el controlador publico y el de revision de plataforma; activacion (4B): `RegistrationActivation` y `RegistrationActivationService`; global, sin tenant |
+| `mail` | outbox de correo (4B): `OutboxMessage`, `MailOutbox` (encolar), `OutboxWorker` (enviar), `OutboxCipher` (AES-GCM), `MailTransport` y `SmtpMailTransport`; global, sin tenant |
 | `inventory` | primer modulo de negocio migrado, ver abajo |
 | `treasury` | segundo modulo de negocio migrado, ver abajo |
 | `counterparties` | terceros (`Counterparty`): clientes y proveedores en una sola entidad, compartida por `sales` y `purchases`, ver abajo |

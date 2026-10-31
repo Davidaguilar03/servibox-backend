@@ -9,6 +9,7 @@ import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.inventory.entity.ProductCategory;
 import com.servibox.backend.inventory.entity.TaxType;
 import com.servibox.backend.inventory.service.InventoryService;
+import com.servibox.backend.registration.RegistrationRequestRepository;
 import com.servibox.backend.shared.TenantAwareEntity;
 import com.servibox.backend.tenant.Tenant;
 import com.servibox.backend.tenant.TenantContext;
@@ -27,6 +28,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -45,7 +48,8 @@ public class TenantRegistrationService {
     static final Set<String> SLUGS_RESERVADOS = Set.of(
             "api", "admin", "www", "app", "login", "registro", "register", "servibox", "soporte",
             "static", "assets", "health",
-            "auth", "inventory", "treasury", "counterparties", "sales", "purchases", "reporting", "demo");
+            "auth", "inventory", "treasury", "counterparties", "sales", "purchases", "reporting", "demo",
+            "plataforma", "activar");
 
     /** Categorias base con su color de chip (los de la siembra dev para las que coinciden). */
     private static final Map<String, String> CATEGORIAS_BASE = new LinkedHashMap<>();
@@ -70,6 +74,7 @@ public class TenantRegistrationService {
     private final InventoryService inventoryService;
     private final TreasuryService treasuryService;
     private final CounterpartyService counterpartyService;
+    private final RegistrationRequestRepository requestRepository;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -87,7 +92,26 @@ public class TenantRegistrationService {
             throw new RegistrationDisabledException();
         }
         validar(request);
+        // Una solicitud aprobada o pendiente con reserva vigente tambien ocupa el slug, aunque
+        // la compuerta se haya cerrado despues: su activacion no debe chocar con este registro.
+        if (requestRepository.existsByReservedSlugAndReservationExpiresAtAfter(request.slug(),
+                LocalDateTime.now(ZoneOffset.UTC))) {
+            throw new DuplicateTenantSlugException(request.slug());
+        }
+        Provisioned p = provisionar(request);
+        return LoginResponse.from(jwtService.generateToken(p.admin()), p.admin(), p.tenant());
+    }
 
+    public record Provisioned(Tenant tenant, User admin) {
+    }
+
+    /**
+     * Crea el tenant activo y su ADMIN con lo minimo para operar (IVA, categorias base, Caja
+     * General y Consumidor final), en la transaccion de quien llama. No valida ni emite
+     * sesion: lo usan el registro inmediato y la activacion de solicitudes (tarea 4B).
+     */
+    @Transactional
+    public Provisioned provisionar(RegisterRequest request) {
         String slug = request.slug();
         if (tenantRepository.existsBySlugIgnoreCase(slug)) {
             throw new DuplicateTenantSlugException(slug);
@@ -148,7 +172,7 @@ public class TenantRegistrationService {
 
             counterpartyService.consumidorFinal();
 
-            return LoginResponse.from(jwtService.generateToken(admin), admin, tenant);
+            return new Provisioned(tenant, admin);
         } finally {
             TenantContext.clear();
         }
@@ -164,13 +188,20 @@ public class TenantRegistrationService {
         validarTelefono(r.phone());
         validarSlug(r.slug());
         validarResponsable(r.adminFullName(), r.adminEmail());
+        validarUsuario(r.adminUsername());
+        validarContrasena(r.password());
+    }
 
-        if (r.adminUsername() == null || !USERNAME.matcher(r.adminUsername()).matches()) {
+    // Tambien para la activacion de solicitudes (RegistrationActivationService), con los mismos mensajes.
+
+    public static void validarUsuario(String username) {
+        if (username == null || !USERNAME.matcher(username).matches()) {
             throw new InvalidRegistrationException(
                     "El usuario debe tener de 3 a 50 caracteres con letras, números, punto, guion y guion bajo");
         }
+    }
 
-        String password = r.password();
+    public static void validarContrasena(String password) {
         if (password == null || password.length() < 8) {
             throw new InvalidRegistrationException("La contrasena debe tener al menos 8 caracteres");
         }

@@ -56,7 +56,15 @@ configuracion (registro publico) o sin el rol necesario es **403**; recurso de r
 ver Busqueda por id mas abajo. Un cuerpo que no se puede leer (JSON mal formado, valor de
 enum que no existe) es **400**, nunca 500; si es un enum, el mensaje nombra el campo y los
 valores permitidos. Un campo NOT NULL en la base es `@NotNull` / `@NotBlank` en su
-`Request`, para que falte con 400 y no con el error crudo de la base.
+`Request`, para que falte con 400 y no con el error crudo de la base. Enlace de activacion
+(4B): no valido **400**, vencido o reemplazado **410**, ya usado **409**; limite de reenvio
+de activacion **429**. No confundir este 429 de dominio con el limite de tasa por IP, que
+sigue pendiente.
+
+* **Secretos de un solo uso**: tokens de activacion y similares se guardan solo como
+  SHA-256; el valor crudo no va a la base, logs ni respuestas. Si un mensaje pendiente
+  necesita llevarlo, va cifrado (`mail.OutboxCipher`) y se borra al cerrar el mensaje.
+  Los logs del outbox llevan id y categoria, nunca destinatario, cuerpo ni credenciales.
 
 * **Validaciones de dominio**: rangos, largos de columna, fechas y formatos se comprueban en
   el service con un mensaje especifico en espanol, compatible con el mapa frontend, y **400** (la excepcion de

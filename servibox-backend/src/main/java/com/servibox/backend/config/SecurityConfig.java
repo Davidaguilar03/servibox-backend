@@ -41,7 +41,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/platform/registration-requests",
                                 "/api/platform/registration-requests/*").hasAuthority("PLATFORM_IDENTITY")
                         .requestMatchers(HttpMethod.POST, "/api/platform/registration-requests/*/approve",
-                                "/api/platform/registration-requests/*/reject").hasAuthority("PLATFORM_IDENTITY")
+                                "/api/platform/registration-requests/*/reject",
+                                "/api/platform/registration-requests/*/resend-activation").hasAuthority("PLATFORM_IDENTITY")
                         .anyRequest().denyAll())
                 .exceptionHandling(handling -> handling.authenticationEntryPoint(entryPoint)
                         .accessDeniedHandler((request, response, error) -> {
@@ -73,7 +74,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, "/api/health").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register",
-                                "/api/registration-requests").permitAll()
+                                "/api/registration-requests", "/api/registration-requests/activate").permitAll()
                         .requestMatchers("/api/tenant", "/api/inventory/**", "/api/treasury/**",
                                 "/api/counterparties/**", "/api/sales/**", "/api/purchases/**", "/api/reporting/**")
                         .hasAuthority("TENANT_IDENTITY")
