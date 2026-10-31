@@ -14,7 +14,9 @@ import com.servibox.backend.inventory.service.ProductCodeLockedException;
 import com.servibox.backend.purchases.service.DuplicatePurchaseInvoiceNumberException;
 import com.servibox.backend.purchases.service.InsufficientBalanceException;
 import com.servibox.backend.purchases.service.InvalidPurchaseOperationException;
+import com.servibox.backend.registration.ActivationException;
 import com.servibox.backend.registration.RegistrationRequestConflictException;
+import com.servibox.backend.registration.ResendLimitException;
 import com.servibox.backend.sales.service.DuplicateInvoiceNumberException;
 import com.servibox.backend.sales.service.InsufficientStockException;
 import com.servibox.backend.sales.service.InvalidSaleOperationException;
@@ -174,6 +176,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RegistrationRequestConflictException.class)
     public ResponseEntity<ErrorResponse> manejarConflictoSolicitud(RegistrationRequestConflictException ex) {
         return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** Enlace de activacion no valido (400), vencido o reemplazado (410) o ya usado (409). */
+    @ExceptionHandler(ActivationException.class)
+    public ResponseEntity<ErrorResponse> manejarActivacion(ActivationException ex) {
+        return construir(ex.getStatus(), ex.getMessage());
+    }
+
+    /** Reenvio de activacion antes del intervalo minimo o sobre el cupo diario. */
+    @ExceptionHandler(ResendLimitException.class)
+    public ResponseEntity<ErrorResponse> manejarLimiteReenvio(ResendLimitException ex) {
+        return construir(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
     }
 
     /** servibox.registration.enabled=false. */

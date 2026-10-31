@@ -28,6 +28,16 @@ public class ProductionConfiguration {
                 throw new IllegalStateException(
                         "PLATFORM_JWT_SECRET es obligatorio en prod, requiere al menos 32 bytes, debe ser exclusivo y no de desarrollo o pruebas");
             }
+            String outboxKey = environment.getProperty("servibox.mail.outbox.encryption-key", "");
+            if (outboxKey.isBlank() || outboxKey.getBytes(StandardCharsets.UTF_8).length < 32
+                    || outboxKey.equals(secret) || outboxKey.equals(platformSecret)
+                    || outboxKey.startsWith("dev-") || outboxKey.startsWith("test-")) {
+                throw new IllegalStateException(
+                        "MAIL_OUTBOX_ENCRYPTION_KEY es obligatoria en prod, requiere al menos 32 bytes, debe ser exclusiva y no de desarrollo o pruebas");
+            }
+            if (!environment.getProperty("servibox.activation.base-url", "").startsWith("https://")) {
+                throw new IllegalStateException("ACTIVATION_BASE_URL es obligatoria en prod y debe usar https");
+            }
         };
     }
 }

@@ -86,6 +86,9 @@ class RegistrationRequestTest {
 
     @AfterEach
     void cleanup() {
+        // Aprobar emite activacion y correo (4B): se borran antes por sus FK.
+        jdbc.update("DELETE FROM correos_salientes");
+        jdbc.update("DELETE FROM activaciones_registro");
         requests.deleteAll();
         users.deleteById(user.getId());
         tenants.deleteById(tenant.getId());
@@ -308,7 +311,7 @@ class RegistrationRequestTest {
 
     @Test
     void filtrosYPaginacionInvalidosSon400YIdInexistente404() throws Exception {
-        mvc.perform(get(PLATAFORMA).param("status", "ACTIVATED").header("Authorization", "Bearer " + platformToken))
+        mvc.perform(get(PLATAFORMA).param("status", "ARCHIVED").header("Authorization", "Bearer " + platformToken))
                 .andExpect(status().isBadRequest());
         mvc.perform(get(PLATAFORMA).param("size", "101").header("Authorization", "Bearer " + platformToken))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("Paginacion invalida"));

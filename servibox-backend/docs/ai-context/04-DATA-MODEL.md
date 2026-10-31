@@ -2,11 +2,11 @@
 
 Fuente: Diccionario de Datos de ServiBox (informe UPTC-EISC-SB-01) y su diagrama entidad-relacion, 14 entidades en tercera forma normal. Este archivo es la especificacion del esquema al que debe converger el codigo.
 
-**Estado.** El refactor de normalizacion termino (ver `sessions/2026-10-06-refactor-normalizacion.md`): las 14 tablas comerciales parten de Flyway `V1__init_schema.sql`, escrita desde este archivo; V2 a V7 las evolucionan. V8 agrega la identidad global de plataforma y V9 las solicitudes de registro, para 16 tablas. `schema.SchemaConformanceTest` compara la base con este archivo. Donde el codigo y este archivo difieran, este archivo manda, salvo lo anotado en "Decisiones de implementacion" y "Pendientes" al final.
+**Estado.** El refactor de normalizacion termino (ver `sessions/2026-10-06-refactor-normalizacion.md`): las 14 tablas comerciales parten de Flyway `V1__init_schema.sql`, escrita desde este archivo; V2 a V7 las evolucionan. V8 agrega la identidad global de plataforma, V9 las solicitudes de registro y V10 la activacion de cuentas y el outbox de correo, para 18 tablas. `schema.SchemaConformanceTest` compara la base con este archivo. Donde el codigo y este archivo difieran, este archivo manda, salvo lo anotado en "Decisiones de implementacion" y "Pendientes" al final.
 
 ## Reglas generales
 
-* Multi-tenant: base compartida y esquema compartido. La columna `id_tenant` esta en todas las tablas excepto `TENANTS`, `CATEGORIA_IMPUESTOS`, `ADMINISTRADORES_PLATAFORMA` (V8, identidad global adicional a las 14 tablas comerciales) y `SOLICITUDES_REGISTRO` (V9, global, sin datos comerciales). En la capa JPA el aislamiento lo da el `@Filter` de Hibernate.
+* Multi-tenant: base compartida y esquema compartido. La columna `id_tenant` esta en todas las tablas excepto `TENANTS`, `CATEGORIA_IMPUESTOS`, `ADMINISTRADORES_PLATAFORMA` (V8, identidad global adicional a las 14 tablas comerciales) `SOLICITUDES_REGISTRO` (V9, global, sin datos comerciales), `ACTIVACIONES_REGISTRO` y `CORREOS_SALIENTES` (V10, globales). En la capa JPA el aislamiento lo da el `@Filter` de Hibernate.
 * Unicos compuestos con `id_tenant`: `(id_tenant, username)` en USUARIOS, `(id_tenant, nombre_cuenta)` en CUENTAS, `(id_tenant, numero_documento)` en TERCEROS, `(id_tenant, id_tercero, numero_factura_compra)` en COMPRAS (desde V3; antes `(id_tenant, numero_factura_compra)`), `(id_tenant, numero_factura_venta)` en VENTAS, `(id_tenant, codigo_producto)` en PRODUCTOS.
 * Motor: PostgreSQL 16. Tipos fisicos: identificadores y claves foraneas `BIGINT`; texto `VARCHAR(n)`; valores de enum `VARCHAR(n)` con su longitud, no tipo ENUM; montos en COP `NUMERIC(14,2)`; tasas y porcentajes como fraccion `NUMERIC(8,6)` (0.19 es 19 por ciento); fechas de negocio (`fecha_movimiento`, `fecha_compra`, `fecha_vencimiento_compra`, `fecha_venta`, `fecha_vencimiento_venta`) `DATE`; fechas de auditoria (`created_at`, `updated_at`, `fecha_creacion_tenant`) `TIMESTAMP WITHOUT TIME ZONE` en UTC; banderas `BOOLEAN`.
 * Integridad referencial: `ON DELETE RESTRICT` en todas las claves foraneas: nada con historial transaccional se elimina.
@@ -72,8 +72,8 @@ Modulo: Solicitudes de registro, V9 (tarea 4A). Global, sin tenant, sin contrase
 | correo_responsable | VARCHAR | 150 | NOT NULL | - | Correo de entrega tal como llego, recortado. |
 | correo_normalizado | VARCHAR | 150 | NOT NULL | - | Correo en minusculas para coincidencias indicativas; no es unico. CHECK LOWER(TRIM). |
 | slug_solicitado | VARCHAR | 30 | NOT NULL | - | Slug normalizado (recortado, minusculas) con las reglas del registro. Se conserva siempre. |
-| slug_reservado | VARCHAR | 30 | NULL | UK | Reserva vigente: igual a slug_solicitado en PENDING y APPROVED, NULL en REJECTED y CANCELLED (CHECK ck_solicitud_reserva). Su UNIQUE equivale al indice unico parcial por estado. |
-| estado | VARCHAR | 20 | NOT NULL | - | PENDING, APPROVED, REJECTED o CANCELLED (CHECK). |
+| slug_reservado | VARCHAR | 30 | NULL | UK | Reserva vigente: igual a slug_solicitado en PENDING y APPROVED, NULL en REJECTED, CANCELLED y ACTIVATED (CHECK ck_solicitud_reserva). Su UNIQUE equivale al indice unico parcial por estado. |
+| estado | VARCHAR | 20 | NOT NULL | - | PENDING, APPROVED, REJECTED, CANCELLED o ACTIVATED (CHECK, ACTIVATED desde V10). ACTIVATED deja slug_reservado NULL: el slug pasa al tenant. |
 | version | BIGINT | 8 bytes | NOT NULL | - | Version optimista para expectedVersion; sube en cada cambio. No negativa. |
 | clave_idempotencia | VARCHAR | 100 | NULL | UK | Header Idempotency-Key del envio. Se pone NULL cuando vence y se reutiliza. |
 | hash_cuerpo | VARCHAR | 64 | NOT NULL | - | SHA-256 hexadecimal del cuerpo recibido; distingue reintento de cuerpo distinto. |
@@ -83,6 +83,42 @@ Modulo: Solicitudes de registro, V9 (tarea 4A). Global, sin tenant, sin contrase
 | fecha_revision | TIMESTAMP (D) | 8 bytes | NULL | - | Fecha y hora de aprobacion o rechazo. |
 | id_revisor | BIGINT | 8 bytes | NULL | FK | FK a ADMINISTRADORES_PLATAFORMA(id_administrador) que aprobo o rechazo. |
 | motivo_rechazo | VARCHAR | 500 | NULL | - | Obligatorio en REJECTED (CHECK). |
+| id_tenant_activado | BIGINT | 8 bytes | NULL | UK, FK | V10. FK a TENANTS(id_tenant) creado al activar; solo y siempre en ACTIVATED (CHECK ck_solicitud_activada). Unico: una solicitud crea un tenant. |
+
+### ACTIVACIONES_REGISTRO
+
+Modulo: Activacion de cuentas, V10 (tarea 4B). Global, sin tenant. Una fila por enlace emitido (aprobar o reenviar). Fechas en UTC.
+
+| Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
+|-|-|-|-|-|-|
+| id_activacion | BIGINT | 8 bytes | NOT NULL | PK | Identificador autoincremental. |
+| id_solicitud | VARCHAR | 36 | NOT NULL | FK | FK a SOLICITUDES_REGISTRO. |
+| generacion | INTEGER | 4 bytes | NOT NULL | - | 1 al aprobar, +1 por reenvio (CHECK >= 1). La unicidad por solicitud la da el bloqueo de la solicitud al emitir. |
+| digest_token | VARCHAR | 64 | NOT NULL | UK | SHA-256 hexadecimal del token opaco de 32 bytes. El token crudo no se guarda en ninguna tabla. |
+| fecha_creacion | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Emision; base del intervalo y del cupo de reenvios. |
+| expira_en | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Emision mas la vigencia del token (propuesta 24 h). |
+| fecha_consumo | TIMESTAMP (D) | 8 bytes | NULL | - | Activacion exitosa. Excluyente con fecha_revocacion (CHECK). |
+| fecha_revocacion | TIMESTAMP (D) | 8 bytes | NULL | - | Reemplazado por un reenvio. |
+
+### CORREOS_SALIENTES
+
+Modulo: Outbox de correo, V10 (tarea 4B). Global, sin tenant. Fechas en UTC.
+
+| Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
+|-|-|-|-|-|-|
+| id_correo | BIGINT | 8 bytes | NOT NULL | PK | Identificador autoincremental. |
+| id_activacion | BIGINT | 8 bytes | NOT NULL | FK | FK a ACTIVACIONES_REGISTRO: enlace que lleva el correo; reenviar o activar cancela lo pendiente. |
+| destinatario | VARCHAR | 150 | NOT NULL | - | Correo del responsable de la solicitud. |
+| plantilla | VARCHAR | 30 | NOT NULL | - | ACTIVATION (CHECK). El asunto sale de la plantilla. |
+| payload_cifrado | VARCHAR | 4000 | NULL | - | Cuerpo con el enlace, AES-256-GCM con MAIL_OUTBOX_ENCRYPTION_KEY, Base64. Solo en PENDING (CHECK); se borra al enviar, fallar, revocar, consumir o vencer. |
+| estado | VARCHAR | 10 | NOT NULL | - | PENDING, SENT (aceptado por el transporte, no entregado al buzon) o FAILED (CHECK). |
+| intentos | INTEGER | 4 bytes | NOT NULL | - | Reclamos del worker; no negativo. |
+| proximo_intento | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Reintento con retroceso exponencial. |
+| reclamado_hasta | TIMESTAMP (D) | 8 bytes | NULL | - | Lease del worker que lo reclamo; vencido, otro worker puede retomarlo. |
+| expira_en | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Igual al vencimiento del token: despues el mensaje pasa a FAILED sin cuerpo. |
+| ultimo_error | VARCHAR | 100 | NULL | - | Categoria sin datos sensibles: TRANSPORTE_TEMPORAL, TRANSPORTE_PERMANENTE, INTENTOS_AGOTADOS, PAYLOAD_INVALIDO, VENCIDO, REVOCADO, CONSUMIDO. |
+| fecha_creacion | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Encolado, en la transaccion de aprobar o reenviar. |
+| fecha_envio | TIMESTAMP (D) | 8 bytes | NULL | - | Aceptacion por el transporte; solo en SENT (CHECK). |
 
 ### CONFIGURACION_FINANCIERA
 
@@ -318,6 +354,9 @@ Modulo: Tributario.
 | CATEGORIA_IMPUESTOS | id_categoria_producto | CATEGORIA_PRODUCTOS | N:1 | Parte 1 de tabla asociativa; vincula la familia de articulos. |
 | CATEGORIA_IMPUESTOS | id_impuesto | TIPOS_IMPUESTO | N:1 | Parte 2 de tabla asociativa; vincula el tributo aplicable. |
 | SOLICITUDES_REGISTRO | id_revisor | ADMINISTRADORES_PLATAFORMA | N:1 (0..1) | Revisor de plataforma que aprobo o rechazo la solicitud. |
+| SOLICITUDES_REGISTRO | id_tenant_activado | TENANTS | 1:1 (0..1) | Tenant creado al activar la solicitud (V10). |
+| ACTIVACIONES_REGISTRO | id_solicitud | SOLICITUDES_REGISTRO | N:1 | Enlaces emitidos para la solicitud (V10). |
+| CORREOS_SALIENTES | id_activacion | ACTIVACIONES_REGISTRO | N:1 | Correo que entrega ese enlace (V10). |
 
 ## Decisiones de implementacion
 

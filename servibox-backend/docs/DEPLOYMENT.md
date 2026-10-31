@@ -36,18 +36,32 @@ No poner secretos dentro de src; nunca pasarlos mediante COPY, ARG o ENV de buil
 | PLATFORM_JWT_SECRET | Si | Clave aleatoria privada exclusiva de plataforma, al menos 32 bytes UTF-8; distinta de JWT_SECRET, sin valores dev/test ni fallback productivo |
 | PLATFORM_JWT_EXPIRATION_MS | No | Entre 1 y 86400000 milisegundos, default 900000 (15 minutos); sin refresh |
 | REGISTRATION_ENABLED | No | Booleano, default true; false responde 403 al registro. Decidir politica antes de publicar |
-| REGISTRATION_REQUESTS_ENABLED | No | Booleano, default false. false: POST /api/registration-requests responde 404. true: abre solicitudes y cierra el registro inmediato (403). No activar en publico hasta que 4B (activacion y correo) este verificada |
+| REGISTRATION_REQUESTS_ENABLED | No | Booleano, default false. false: POST /api/registration-requests y POST /api/registration-requests/activate responden 404. true: abre ambas y cierra el registro inmediato (403). No activar en publico sin limite de tasa (tarea 7 u 8) ni sin verificar un envio real de correo |
 | REGISTRATION_REQUESTS_PENDING_RESERVATION | No | Duracion Spring positiva (7d, 48h, P7D), default 7d: vigencia de la reserva de slug en PENDING. Propuesta, no confirmada |
 | REGISTRATION_REQUESTS_APPROVED_RESERVATION | No | Duracion positiva, default 30d desde la aprobacion. Propuesta, no confirmada |
 | REGISTRATION_REQUESTS_IDEMPOTENCY_RETENTION | No | Duracion positiva, default 48h de retencion de Idempotency-Key. Propuesta, no confirmada. Un plazo no positivo impide arrancar |
+| ACTIVATION_BASE_URL | Si | URL publica del frontend para el enlace `/activar#token=...`, sin query ni fragmento, maximo 200 caracteres. prod exige `https://`; nunca se toma del header Host. Dev: http://localhost:5173 |
+| REGISTRATION_ACTIVATION_TOKEN_TTL | No | Duracion positiva, default 24h de vigencia del enlace. Propuesta, no confirmada |
+| REGISTRATION_ACTIVATION_RESEND_COOLDOWN | No | Duracion no negativa, default 60s entre enlaces de una solicitud. Propuesta, no confirmada |
+| REGISTRATION_ACTIVATION_RESEND_DAILY_LIMIT | No | Entero positivo, default 5 reenvios por solicitud en 24 h moviles. Propuesta, no confirmada |
+| MAIL_OUTBOX_ENCRYPTION_KEY | Si | Clave aleatoria privada de al menos 32 bytes UTF-8 que cifra el cuerpo pendiente del outbox; distinta de JWT_SECRET y PLATFORM_JWT_SECRET, sin valores dev/test ni fallback productivo. Rotarla deja lo pendiente en FAILED (PAYLOAD_INVALIDO): reenviar la activacion |
+| MAIL_OUTBOX_POLL_INTERVAL | No | Duracion positiva, default 30s entre lotes del worker |
+| MAIL_OUTBOX_MAX_ATTEMPTS | No | Entero positivo, default 6 intentos antes de FAILED |
+| MAIL_OUTBOX_RETRY_BACKOFF | No | Duracion positiva, default 1m; se duplica por intento con tope 1 h |
+| SMTP_HOST | No | Servidor SMTP. Sin valor no hay transporte: los correos quedan PENDING y la app arranca igual (aviso en log). Proveedor sin elegir |
+| SMTP_PORT | No | Entero, default 587. Se exige STARTTLS; SMTPS implicito (465) no esta soportado |
+| SMTP_USERNAME | No | Usuario SMTP; vacio desactiva la autenticacion SMTP |
+| SMTP_PASSWORD | No | Secreto de ejecucion del proveedor; nunca en codigo, logs, evidencia ni chat |
+| MAIL_FROM | Si con SMTP_HOST | Remitente; con SMTP_HOST y sin MAIL_FROM la app no arranca |
 | BUSINESS_TIME_ZONE | No | Id de java.time.ZoneId, default America/Bogota. Auditoria UTC |
 | REPORTING_MAX_EXPORT_ROWS | No | Entero positivo, default 20000 movimientos por exportacion; superarlo responde 400 |
 
 Exportacion: rango maximo existente de 366 dias para PDF/XLSX; acotar fechas y filas.
 `DEV_DEMO_DATA` es exclusivo de dev, no se usa en prod. No hay siembra demo en prod.
 El JAR conserva bibliotecas H2 de desarrollo por el pom existente, pero prod fija el
-driver PostgreSQL y exige DB_URL; no arranca una base H2. Flyway aplica V1 a V9 (V9:
-SOLICITUDES_REGISTRO, sin tocar tablas comerciales),
+driver PostgreSQL y exige DB_URL; no arranca una base H2. Flyway aplica V1 a V10 (V9:
+SOLICITUDES_REGISTRO; V10: ACTIVATED, ACTIVACIONES_REGISTRO y CORREOS_SALIENTES; ninguna
+toca tablas comerciales),
 Hibernate valida con `ddl-auto=validate` y `open-in-view=false`. No usar repair, baseline
 ni ddl-auto=update para esquivar errores. Conservar el mismo JWT_SECRET al reiniciar;
 cambiarlo invalida tokens previos. Ninguna variable secreta lleva un ejemplo real aqui.
@@ -106,6 +120,15 @@ una propiedad externa intenta sobreescribirlo. Siempre cierra contexto/pool al s
 codigo 0 solo al crear y 1 ante rechazo/error. Dev excluye siembra demo durante bootstrap.
 Para persistencia local de pruebas usar una base desechable explicitamente configurada;
 el H2 en memoria por defecto no persiste entre comandos. No crear una cuenta real como QA.
+
+### Correo de activacion
+
+Aprobar o reenviar solo encola; el worker del outbox envia cada MAIL_OUTBOX_POLL_INTERVAL.
+Estado SENT significa que el transporte acepto el mensaje, no que llego al buzon ni que se
+leyo; el buzon real y los filtros de spam del proveedor no estan verificados. Varias
+instancias pueden correr el worker a la vez (SKIP LOCKED mas lease); una caida entre el
+envio y el cierre puede duplicar un correo. Consultar `correos_salientes` (estado,
+intentos, ultimo_error) por SQL para diagnostico; nunca exportar `payload_cifrado`.
 
 Cada peticion de plataforma revalida activo/authVersion. La recuperacion privada auditada
 y un mecanismo operativo de rotacion/revocacion no tienen comando en esta entrega;

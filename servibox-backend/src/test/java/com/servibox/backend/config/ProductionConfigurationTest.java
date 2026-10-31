@@ -9,6 +9,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ProductionConfigurationTest {
 
     private static final String PLATFORM_TEST_KEY = "PLATFORM_JWT_SECRET=unit-config-platform-only-key-2026";
+    private static final String OUTBOX_TEST_KEY = "MAIL_OUTBOX_ENCRYPTION_KEY=unit-config-outbox-only-key-2026-xx";
+    private static final String ACTIVATION_TEST_URL = "ACTIVATION_BASE_URL=https://app.example.invalid";
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withInitializer(new ConfigDataApplicationContextInitializer())
@@ -45,7 +47,7 @@ class ProductionConfigurationTest {
 
     @Test
     void aceptaSecretoYResuelveConfiguracionProd() {
-        runner.withPropertyValues(PLATFORM_TEST_KEY, "JWT_SECRET=" + "x".repeat(32), "PORT=9123",
+        runner.withPropertyValues(PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL, "JWT_SECRET=" + "x".repeat(32), "PORT=9123",
                 "DB_URL=jdbc:postgresql://db:5432/servibox", "DB_USERNAME=owner", "DB_PASSWORD=ephemeral")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
@@ -63,13 +65,13 @@ class ProductionConfigurationTest {
 
     @Test
     void puertoLocalPorDefecto() {
-        runner.withPropertyValues(PLATFORM_TEST_KEY, "JWT_SECRET=" + "x".repeat(32))
+        runner.withPropertyValues(PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL, "JWT_SECRET=" + "x".repeat(32))
                 .run(context -> assertThat(context.getEnvironment().getProperty("server.port")).isEqualTo("8080"));
     }
 
     @Test
     void serverPortDelEntornoTienePrecedenciaSobrePort() {
-        runner.withPropertyValues(PLATFORM_TEST_KEY, "JWT_SECRET=" + "x".repeat(32), "PORT=9123")
+        runner.withPropertyValues(PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL, "JWT_SECRET=" + "x".repeat(32), "PORT=9123")
                 .withInitializer(context -> context.getEnvironment().getPropertySources().addFirst(
                         new org.springframework.core.env.SystemEnvironmentPropertySource(
                                 "provider", java.util.Map.of("SERVER_PORT", "9234"))))
@@ -97,6 +99,22 @@ class ProductionConfigurationTest {
                         assertThat(context).hasFailed();
                         assertThat(context.getStartupFailure()).hasMessageContaining("PLATFORM_JWT_SECRET es obligatorio");
                     });
+        }
+    }
+
+    @Test
+    void outboxRechazaClaveAusenteCortaCompartidaODeDesarrolloYUrlSinHttps() {
+        String jwt = "JWT_SECRET=" + "x".repeat(32);
+        for (String key : java.util.List.of("", "short", "x".repeat(32), "unit-config-platform-only-key-2026",
+                "dev-only-outbox-key-never-for-production-2026", "test-only-outbox-key-never-for-production-2026")) {
+            runner.withPropertyValues(jwt, PLATFORM_TEST_KEY, ACTIVATION_TEST_URL, "MAIL_OUTBOX_ENCRYPTION_KEY=" + key)
+                    .run(context -> assertThat(context.getStartupFailure())
+                            .hasMessageContaining("MAIL_OUTBOX_ENCRYPTION_KEY es obligatoria en prod"));
+        }
+        for (String url : java.util.List.of("", "http://app.example.invalid")) {
+            runner.withPropertyValues(jwt, PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, "ACTIVATION_BASE_URL=" + url)
+                    .run(context -> assertThat(context.getStartupFailure())
+                            .hasMessageContaining("ACTIVATION_BASE_URL es obligatoria en prod y debe usar https"));
         }
     }
 }

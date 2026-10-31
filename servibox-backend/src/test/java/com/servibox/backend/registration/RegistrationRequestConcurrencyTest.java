@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -45,6 +46,7 @@ class RegistrationRequestConcurrencyTest {
     @Autowired PlatformAdminRepository admins;
     @Autowired PlatformBootstrapService bootstrap;
     @Autowired PlatformJwtService platformJwt;
+    @Autowired JdbcTemplate jdbc;
 
     private String platformToken;
 
@@ -56,6 +58,9 @@ class RegistrationRequestConcurrencyTest {
 
     @AfterEach
     void cleanup() {
+        // Aprobar emite activacion y correo (4B): se borran antes por sus FK.
+        jdbc.update("DELETE FROM correos_salientes");
+        jdbc.update("DELETE FROM activaciones_registro");
         requests.deleteAll();
         admins.deleteAll();
     }

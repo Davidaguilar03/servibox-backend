@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 public interface RegistrationRequestRepository extends JpaRepository<RegistrationRequest, String> {
@@ -27,4 +28,7 @@ public interface RegistrationRequestRepository extends JpaRepository<Registratio
     long countByNitAndIdNot(String nit, String id);
 
     long countByNormalizedEmailAndIdNot(String normalizedEmail, String id);
+
+    /** Reserva vigente de una solicitud sobre el slug; la consulta el registro inmediato. */
+    boolean existsByReservedSlugAndReservationExpiresAtAfter(String slug, LocalDateTime now);
 }

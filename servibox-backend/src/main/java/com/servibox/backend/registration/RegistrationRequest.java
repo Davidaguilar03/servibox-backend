@@ -79,4 +79,8 @@ public class RegistrationRequest {
 
     @Column(name = "motivo_rechazo", length = 500)
     private String rejectionReason;
+
+    /** Tenant creado al activar (V10); solo en ACTIVATED. */
+    @Column(name = "id_tenant_activado", unique = true)
+    private Long activatedTenantId;
 }
