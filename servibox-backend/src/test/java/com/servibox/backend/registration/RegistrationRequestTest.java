@@ -444,7 +444,8 @@ class RegistrationRequestTest {
                 .andExpect(status().isForbidden());
         mvc.perform(post(PLATAFORMA + "/" + id + "/cancel").header("Authorization", "Bearer " + platformToken))
                 .andExpect(status().isForbidden());
-        mvc.perform(get("/api/platform/tenants").header("Authorization", "Bearer " + platformToken))
+        // GET /api/platform/tenants se abrio en 5A; el borrado (5B) sigue cerrado.
+        mvc.perform(delete("/api/platform/tenants/1").header("Authorization", "Bearer " + platformToken))
                 .andExpect(status().isForbidden());
         // La plataforma no entra a las rutas comerciales.
         mvc.perform(get("/api/inventory/products").header("Authorization", "Bearer " + platformToken))

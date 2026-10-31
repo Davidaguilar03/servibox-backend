@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.fail;
 
 /**
  * El esquema real de la base de pruebas (el que crea Flyway con db/migration y Hibernate
- * valida) tiene que coincidir con docs/ai-context/04-DATA-MODEL.md: las 18 tablas y ninguna
+ * valida) tiene que coincidir con docs/ai-context/04-DATA-MODEL.md: las 19 tablas y ninguna
  * otra (flyway_schema_history no cuenta), sus columnas exactas, tipos, nulabilidad, longitud
  * de los VARCHAR, precision y escala de los NUMERIC, claves primarias, claves foraneas con
  * ON DELETE RESTRICT y restricciones unicas. Se lee el esquema por DatabaseMetaData, sin
@@ -145,8 +145,8 @@ class SchemaConformanceTest {
         List<String> diferencias = new ArrayList<>();
         Map<String, String> desviacionesVistas = new TreeMap<>();
 
-        if (tablas.size() != 18) {
-            diferencias.add("El diccionario deberia tener 18 tablas de entidades y el parseo encontro "
+        if (tablas.size() != 19) {
+            diferencias.add("El diccionario deberia tener 19 tablas de entidades y el parseo encontro "
                     + tablas.size() + ": " + tablas.keySet());
         }
 

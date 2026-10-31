@@ -3,6 +3,7 @@ package com.servibox.backend.auth;
 import com.servibox.backend.auth.entity.User;
 import com.servibox.backend.auth.repository.UserRepository;
 import com.servibox.backend.tenant.TenantContext;
+import com.servibox.backend.tenant.TenantRepository;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
@@ -34,6 +35,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final UserRepository userRepository;
+    private final TenantRepository tenantRepository;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
@@ -68,7 +70,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // actual del usuario. Sin esta consulta, desactivar a alguien no surtiria
             // efecto hasta que su token expirara.
             Optional<User> user = userRepository.findByUsernameAndTenantId(username, tenantId);
-            if (user.isEmpty() || !user.get().isActive()) {
+            if (user.isEmpty() || !user.get().isActive()
+                    || user.get().getAuthVersion() != jwtService.extractAuthVersion(claims)) {
+                rechazar();
+                return;
+            }
+            // Tenant suspendido por la plataforma: sus tokens dejan de servir de inmediato,
+            // no al expirar. TENANTS es global, se lee por PK.
+            if (!tenantRepository.findById(tenantId).map(t -> Boolean.TRUE.equals(t.getActive())).orElse(false)) {
                 rechazar();
                 return;
             }

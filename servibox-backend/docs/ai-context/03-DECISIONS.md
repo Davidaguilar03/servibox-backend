@@ -12,6 +12,38 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-30: Panel de plataforma sobre tenants y usuarios (tarea 5A)
+
+* Decision: V11 agrega a TENANTS `version_tenant`, `fecha_suspension_tenant` y
+  `motivo_suspension_tenant`; a USUARIOS `auth_version`; y la tabla AUDITORIA_PLATAFORMA.
+  `activo_tenant` sigue siendo el estado (true ACTIVE, false SUSPENDED); el enum
+  `TenantStatus` lo deriva y define las transiciones validas. No se agrego columna de estado
+  para no duplicar la verdad ni tocar el registro, el login y las ~40 pruebas que crean
+  tenants con `setActive`.
+* Revocacion inmediata: claim `authVersion` en el JWT tenant comparado por peticion con
+  `usuarios.auth_version` (mismo patron que el administrador de plataforma, tarea 3), mas
+  lectura de `activo_tenant` por PK en cada peticion. Ausencia del claim cuenta como 0:
+  tokens heredados o emitidos antes de V11 siguen hasta vencer o hasta la primera
+  revocacion. Reemplaza el pendiente de la tarea 3 ("version y revocacion por
+  suspension/reactivacion del tenant pendientes para tarea 5").
+* Suspender sube tambien la version de todos los usuarios del tenant, para que al
+  reactivar no revivan tokens viejos. La lectura del tenant por peticion cubre la carrera
+  login contra suspension.
+* Revocar es un UPDATE directo sin tocar updated_at; repetirlo responde lo mismo y deja
+  invalidos los mismos tokens (todo lo emitido antes). Cada llamada sube la version y queda
+  auditada. Revocar todo el tenant es la misma pieza en bloque (`revoke-sessions`).
+* Auditoria: la tarea 3 no dejo tabla de auditoria (solo `id_revisor` de 4A); David eligio
+  crearla en V11. Solo insercion, sin endpoint de lectura. FK solo al administrador; tenant
+  y usuario sin FK para que el rastro sobreviva al borrado permanente de 5B.
+* Concurrencia como 4A: PESSIMISTIC_WRITE sobre la fila del tenant, luego expectedVersion
+  (409 "El recurso cambio; actualiza e intenta de nuevo") y luego la transicion (409 "El
+  tenant ya esta suspendido" o "El tenant ya esta activo"). A diferencia de 4A no hay
+  reintento idempotente de suspender: repetir con la misma version es 409.
+* Alternativas descartadas: columna `estado_tenant` nueva (dos fuentes de verdad), lista
+  de tokens revocados o `jti` (tabla nueva y limpieza), fecha "sesiones validas desde"
+  comparada con iat (resolucion de segundos, ambigua en el mismo segundo), cache del
+  estado (retrasa la revocacion), y FK de la auditoria al tenant (bloquearia 5B).
+
 ## 2026-10-30: Activacion de cuenta, outbox y envio de correo (tarea 4B)
 
 * Decision: V10 agrega ACTIVATED a SOLICITUDES_REGISTRO con `id_tenant_activado` (UNIQUE,

@@ -59,9 +59,10 @@ No poner secretos dentro de src; nunca pasarlos mediante COPY, ARG o ENV de buil
 Exportacion: rango maximo existente de 366 dias para PDF/XLSX; acotar fechas y filas.
 `DEV_DEMO_DATA` es exclusivo de dev, no se usa en prod. No hay siembra demo en prod.
 El JAR conserva bibliotecas H2 de desarrollo por el pom existente, pero prod fija el
-driver PostgreSQL y exige DB_URL; no arranca una base H2. Flyway aplica V1 a V10 (V9:
+driver PostgreSQL y exige DB_URL; no arranca una base H2. Flyway aplica V1 a V11 (V9:
 SOLICITUDES_REGISTRO; V10: ACTIVATED, ACTIVACIONES_REGISTRO y CORREOS_SALIENTES; ninguna
-toca tablas comerciales),
+toca tablas comerciales; V11: version y suspension en TENANTS, auth_version en USUARIOS y
+AUDITORIA_PLATAFORMA, con valores por defecto sobre filas existentes),
 Hibernate valida con `ddl-auto=validate` y `open-in-view=false`. No usar repair, baseline
 ni ddl-auto=update para esquivar errores. Conservar el mismo JWT_SECRET al reiniciar;
 cambiarlo invalida tokens previos. Ninguna variable secreta lleva un ejemplo real aqui.
@@ -133,7 +134,17 @@ intentos, ultimo_error) por SQL para diagnostico; nunca exportar `payload_cifrad
 Cada peticion de plataforma revalida activo/authVersion. La recuperacion privada auditada
 y un mecanismo operativo de rotacion/revocacion no tienen comando en esta entrega;
 deben definirse antes de operar publicamente. Rotar PLATFORM_JWT_SECRET invalida todos
-sus JWT y no cambia JWT_SECRET tenant. Suspension/reactivacion tenant pendiente de tarea 5.
+sus JWT y no cambia JWT_SECRET tenant.
+
+### Suspension y revocacion de tenants (5A)
+
+Sin variables nuevas. Suspender, reactivar y revocar se hacen solo por la API de plataforma
+y quedan en `auditoria_plataforma` (accion, administrador, tenant, usuario, motivo, fecha).
+Surten efecto en la siguiente peticion: cada peticion tenant consulta activo_tenant y
+compara el claim authVersion con `usuarios.auth_version`. Los JWT tenant emitidos antes
+de desplegar V11 no traen el claim y cuentan como version 0: siguen validos hasta vencer o
+hasta la primera revocacion. No editar `activo_tenant` ni `auth_version` a mano por SQL:
+se salta la version, el motivo y la auditoria.
 
 ### Disponibilidad HTTP
 
