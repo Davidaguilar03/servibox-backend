@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,8 +20,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
 import java.util.Locale;
@@ -39,6 +43,8 @@ import java.util.regex.Pattern;
 public class RegistrationRequestService {
 
     private static final Pattern CLAVE = Pattern.compile("[A-Za-z0-9._:-]{8,100}");
+    private static final int MAX_FILTRO_TEXTO = 100;
+    private static final ZoneId BOGOTA = ZoneId.of("America/Bogota");
 
     private final RegistrationRequestRepository repository;
     private final TenantRepository tenantRepository;
@@ -131,18 +137,77 @@ public class RegistrationRequestService {
     }
 
     @Transactional(readOnly = true)
-    public RegistrationRequestPage list(RegistrationRequestStatus status, int page, int size) {
+    public RegistrationRequestPage list(RegistrationRequestStatus status, String tenantName, String contactName,
+            String receivedFrom, String receivedTo, int page, int size) {
         if (page < 0 || size < 1 || size > 100) {
             throw new InvalidRegistrationException("Paginacion invalida");
         }
+        String nombre = textoFiltro(tenantName);
+        String responsable = textoFiltro(contactName);
+        LocalDate desde = fechaFiltro(receivedFrom);
+        LocalDate hasta = fechaFiltro(receivedTo);
+        if (desde != null && hasta != null && desde.isAfter(hasta)) {
+            throw new InvalidRegistrationException("La fecha inicial no puede ser posterior a la final");
+        }
+        // Cada filtro presente agrega un predicado AND; los ausentes no aparecen en el SQL.
+        Specification<RegistrationRequest> filtro = Specification.unrestricted();
+        if (status != null) {
+            filtro = filtro.and((root, q, cb) -> cb.equal(root.get("status"), status));
+        }
+        if (nombre != null) {
+            filtro = filtro.and(contiene("businessName", nombre));
+        }
+        if (responsable != null) {
+            filtro = filtro.and(contiene("contactName", responsable));
+        }
+        if (desde != null) {
+            LocalDateTime inicio = inicioDelDiaUtc(desde);
+            filtro = filtro.and((root, q, cb) -> cb.greaterThanOrEqualTo(root.get("createdAt"), inicio));
+        }
+        if (hasta != null) {
+            LocalDateTime finExclusivo = inicioDelDiaUtc(hasta.plusDays(1));
+            filtro = filtro.and((root, q, cb) -> cb.lessThan(root.get("createdAt"), finExclusivo));
+        }
         PageRequest pageable = PageRequest.of(page, size,
                 Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
-        Page<RegistrationRequest> result = status == null
-                ? repository.findAll(pageable) : repository.findByStatus(status, pageable);
+        Page<RegistrationRequest> result = repository.findAll(filtro, pageable);
         LocalDateTime now = now();
         return new RegistrationRequestPage(
                 result.getContent().stream().map(r -> PlatformRegistrationRequestResponse.from(r, now, null)).toList(),
                 page, size, result.getTotalElements(), result.getTotalPages());
+    }
+
+    /** Recortado; vacio equivale a ausente. Mas de 100 caracteres (tras recortar) es 400. */
+    private static String textoFiltro(String valor) {
+        String texto = valor == null ? "" : valor.trim();
+        if (texto.length() > MAX_FILTRO_TEXTO) {
+            throw new InvalidRegistrationException("El filtro de texto no puede superar 100 caracteres");
+        }
+        return texto.isEmpty() ? null : texto.toLowerCase(Locale.ROOT);
+    }
+
+    /** AAAA-MM-DD estricto (ISO, rechaza 2026-02-30); vacio equivale a ausente. */
+    private static LocalDate fechaFiltro(String valor) {
+        String texto = valor == null ? "" : valor.trim();
+        if (texto.isEmpty()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(texto);
+        } catch (DateTimeParseException e) {
+            throw new InvalidRegistrationException("La fecha debe tener formato AAAA-MM-DD");
+        }
+    }
+
+    /** fecha_creacion se guarda en UTC sin zona; el dia del filtro es de America/Bogota. */
+    private static LocalDateTime inicioDelDiaUtc(LocalDate dia) {
+        return dia.atStartOfDay(BOGOTA).withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
+    }
+
+    /** Contiene sin distinguir mayusculas; %, _ y \ del usuario son literales (ESCAPE '\'). */
+    private static Specification<RegistrationRequest> contiene(String atributo, String textoMinusculas) {
+        String patron = "%" + textoMinusculas.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+        return (root, q, cb) -> cb.like(cb.lower(root.get(atributo)), patron, '\\');
     }
 
     @Transactional(readOnly = true)

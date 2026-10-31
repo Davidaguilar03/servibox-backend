@@ -12,6 +12,26 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-31: Filtros del listado de solicitudes de registro (tarea 48)
+
+* Decision: GET `/api/platform/registration-requests` acepta ademas `tenantName`,
+  `contactName`, `receivedFrom` y `receivedTo`, opcionales y combinados con AND junto a
+  `status`. Texto: recortado, vacio equivale a ausente, contiene sin distinguir mayusculas
+  sobre `nombre_comercial` y `nombre_responsable`, con `%`, `_` y `\` literales (ESCAPE
+  `\`), hasta 100 caracteres. Fechas AAAA-MM-DD estrictas, dias de America/Bogota sobre
+  `fecha_creacion` (UTC sin zona): desde `>=` inicio del dia, hasta `<` inicio del dia
+  siguiente; cada extremo es opcional. Orden, desempate, paginacion y respuesta sin cambios.
+* Construccion con `Specification` (JpaSpecificationExecutor en el repositorio): cada filtro
+  presente agrega su predicado y los ausentes no llegan al SQL. Reemplaza `findByStatus`.
+* Fechas recibidas como texto y validadas en el servicio, para responder el mensaje propio en
+  vez del 400 generico de conversion de Spring.
+* Alternativas consideradas: consulta JPQL fija con `(:x is null or ...)` (en PostgreSQL los
+  parametros nulos de texto fallan por tipo); `LocalDate` en `@RequestParam` (mensaje
+  generico); indices por nombre o funcionales (especulativos con el volumen actual; el
+  `contiene` con comodin inicial no usa indice B-tree). Sin migracion.
+* Motivo: el revisor necesita encontrar solicitudes por serviteca, responsable y dia de
+  recepcion local sin cambiar el contrato existente.
+
 ## 2026-10-30: Panel de plataforma sobre tenants y usuarios (tarea 5A)
 
 * Decision: V11 agrega a TENANTS `version_tenant`, `fecha_suspension_tenant` y

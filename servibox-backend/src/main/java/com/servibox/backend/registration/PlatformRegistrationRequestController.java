@@ -27,9 +27,13 @@ public class PlatformRegistrationRequestController {
     @GetMapping
     public RegistrationRequestPage list(
             @RequestParam(required = false) RegistrationRequestStatus status,
+            @RequestParam(required = false) String tenantName,
+            @RequestParam(required = false) String contactName,
+            @RequestParam(required = false) String receivedFrom,
+            @RequestParam(required = false) String receivedTo,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "25") int size) {
-        return service.list(status, page, size);
+        return service.list(status, tenantName, contactName, receivedFrom, receivedTo, page, size);
     }
 
     @GetMapping("/{id}")
