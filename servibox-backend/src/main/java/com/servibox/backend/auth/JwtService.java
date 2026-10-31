@@ -19,6 +19,7 @@ public class JwtService {
 
     public static final String CLAIM_TENANT_ID = "tenantId";
     public static final String CLAIM_ROLE = "role";
+    public static final String CLAIM_AUTH_VERSION = "authVersion";
 
     private final SecretKey key;
     private final long expirationMs;
@@ -36,6 +37,7 @@ public class JwtService {
                 .subject(user.getUsername())
                 .claim(CLAIM_TENANT_ID, user.getTenantId())
                 .claim(CLAIM_ROLE, user.getRole().name())
+                .claim(CLAIM_AUTH_VERSION, user.getAuthVersion())
                 .issuer("servibox-tenant").audience().add("tenant").and()
                 .claim("identityType", "TENANT")
                 .issuedAt(ahora)
@@ -62,6 +64,12 @@ public class JwtService {
             throw new JwtException("JWT tenant invalido");
         }
         Role.valueOf(extractRole(claims) == null ? "" : extractRole(claims));
+        // authVersion es opcional (tokens anteriores a V11 cuentan como 0), pero si viene es un entero no negativo.
+        Object authVersion = claims.get(CLAIM_AUTH_VERSION);
+        if (authVersion != null && (!(authVersion instanceof Integer || authVersion instanceof Long)
+                || ((Number) authVersion).longValue() < 0)) {
+            throw new JwtException("JWT tenant invalido");
+        }
         // Heredado: ausencia conjunta de tipo, audiencia e issuer, firmado con la clave tenant.
         boolean legacy = !claims.containsKey("identityType") && !claims.containsKey("aud") && !claims.containsKey("iss");
         if (!legacy && (!"TENANT".equals(claims.get("identityType"))
@@ -77,6 +85,11 @@ public class JwtService {
 
     public String extractUsername(Claims claims) {
         return claims.getSubject();
+    }
+
+    public long extractAuthVersion(Claims claims) {
+        Number authVersion = claims.get(CLAIM_AUTH_VERSION, Number.class);
+        return authVersion == null ? 0 : authVersion.longValue();
     }
 
     public String extractRole(Claims claims) {

@@ -43,6 +43,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/platform/registration-requests/*/approve",
                                 "/api/platform/registration-requests/*/reject",
                                 "/api/platform/registration-requests/*/resend-activation").hasAuthority("PLATFORM_IDENTITY")
+                        .requestMatchers(HttpMethod.GET, "/api/platform/tenants", "/api/platform/tenants/*",
+                                "/api/platform/tenants/*/users", "/api/platform/metrics").hasAuthority("PLATFORM_IDENTITY")
+                        .requestMatchers(HttpMethod.POST, "/api/platform/tenants/*/suspend",
+                                "/api/platform/tenants/*/reactivate", "/api/platform/tenants/*/revoke-sessions",
+                                "/api/platform/tenants/*/users/*/revoke").hasAuthority("PLATFORM_IDENTITY")
                         .anyRequest().denyAll())
                 .exceptionHandling(handling -> handling.authenticationEntryPoint(entryPoint)
                         .accessDeniedHandler((request, response, error) -> {

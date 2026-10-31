@@ -153,7 +153,9 @@ entrada oculta/pipe y operacion local/contenedor en [DEPLOYMENT.md](../DEPLOYMEN
 Dos cadenas ordenadas y stateless. Primera: `/api/platform/**`, solo POST
 `/api/platform/auth/login` publico; GET `/api/platform/auth/me`, GET
 `/api/platform/registration-requests` y `/{id}`, POST `/{id}/approve`, `/{id}/reject` y
-`/{id}/resend-activation` (4B) con PLATFORM_IDENTITY; resto denegado. Segunda: login/registro
+`/{id}/resend-activation` (4B); GET `/api/platform/tenants`, `/{id}`, `/{id}/users` y
+`/api/platform/metrics`, POST `/{id}/suspend`, `/{id}/reactivate`, `/{id}/revoke-sessions` y
+`/{id}/users/{userId}/revoke` (5A), todo con PLATFORM_IDENTITY; resto denegado. Segunda: login/registro
 tenant, POST `/api/registration-requests` y POST `/api/registration-requests/activate` (4B),
 y GET salud publicos, familias comerciales
 actuales con TENANT_IDENTITY y resto denegado. El filtro tenant tiene registro servlet
@@ -173,8 +175,23 @@ aud=[tenant], identityType=TENANT. Heredado se admite hasta expirar solo si falt
 iss, aud e identityType, con firma tenant, sub no blanco, tenantId entero positivo, rol
 comercial conocido, iat y exp validos. Un contrato parcialmente marcado se rechaza.
 Roles efectivos y usuario activo siguen viniendo de BD. Ninguna de las dos formas entra
-en plataforma. La version y revocacion por suspension/reactivacion del tenant siguen
-pendientes para tarea 5; esta entrega no agrega version tenant ni resuelve esa limitacion.
+en plataforma. Desde 5A (V11) el JWT tenant nuevo lleva `authVersion` (entero no negativo;
+ausente cuenta como 0, asi siguen sirviendo heredados y emitidos antes de V11) y el filtro
+exige que coincida con `usuarios.auth_version` y que el tenant siga activo (lectura de
+TENANTS por PK). Revocar o suspender sube la version: los tokens ya emitidos fallan en la
+siguiente peticion, sin esperar a que expiren.
+
+### Panel de plataforma sobre tenants (5A)
+
+`platform.PlatformTenantController` y `PlatformTenantService`, sin TenantContext: USUARIOS
+se consulta siempre con id_tenant explicito. Estado del tenant: enum `tenant.TenantStatus`
+(ACTIVE, SUSPENDED) derivado de `activo_tenant`, con las transiciones validas; las demas son
+409. Suspender exige expectedVersion y motivo, bloquea la fila (PESSIMISTIC_WRITE como 4A),
+sube `version_tenant` y la version de sesion de todos los usuarios del tenant (al reactivar
+no reviven los tokens viejos). Reactivar exige expectedVersion y limpia fecha y motivo.
+Revocar (un usuario o todo el tenant) es un UPDATE directo de auth_version, idempotente en
+efecto y sin tocar updated_at. Toda escritura inserta una fila en AUDITORIA_PLATAFORMA.
+Contrato y ejemplos en la sesion 2026-10-30-platform-tenants-users.
 
 Autenticacion por token, sin sesion de servidor. El tenant no lo elige el cliente: viaja
 firmado dentro del token.
@@ -278,7 +295,8 @@ siguiente login y en el encabezado de los reportes.
 La firma de un JWT solo prueba que el token se emitio en algun momento; no dice nada del
 estado actual del usuario. Sin la consulta del paso 6, desactivar a un empleado no surtiria
 efecto hasta que su token venciera, hasta 24 horas despues. Por eso cada request protegido
-paga una consulta a `USUARIOS`. Motivo completo en [03-DECISIONS.md](03-DECISIONS.md).
+paga una consulta a `USUARIOS` y, desde 5A, otra a `TENANTS` por PK. Motivo completo en
+[03-DECISIONS.md](03-DECISIONS.md).
 
 **Costo conocido:** es una consulta extra por request autenticado. Hoy es irrelevante, es
 una lectura por clave unica `(id_tenant, username)` con indice. Si algun dia el volumen lo
@@ -305,6 +323,7 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | `DuplicateTenantSlugException` (slug ya registrado) | 409 | "Ya existe una serviteca con el identificador X" |
 | `RegistrationDisabledException` (`servibox.registration.enabled=false`, o solicitudes de registro abiertas) | 403 | "El registro de nuevas servitecas esta deshabilitado" |
 | `RegistrationRequestConflictException` (solicitudes de registro) | 409 | "El codigo solicitado no esta disponible", "La clave de reintento ya se uso con otros datos", "La solicitud ya no permite esta operacion" o "El recurso cambio; actualiza e intenta de nuevo" |
+| `PlatformTenantConflictException` (suspender o reactivar, 5A) | 409 | "El recurso cambio; actualiza e intenta de nuevo", "El tenant ya esta suspendido" o "El tenant ya esta activo" |
 | `ActivationException` (enlace de activacion, 4B) | 400, 410 o 409 | "El enlace de activacion no es valido" (400), "El enlace de activacion vencio o fue reemplazado" (410), "El enlace de activacion ya fue utilizado; inicia sesion" (409) |
 | `ResendLimitException` (reenvio de activacion, 4B) | 429 | "Espera un momento antes de reenviar la activacion" o "Se alcanzo el limite diario de reenvios de esta solicitud" |
 | `AdminRequiredException` (sin rol ADMIN: perfil del tenant, configuracion financiera, alta o edicion de categorias) | 403 | "Solo un administrador puede editar los datos de la serviteca", "...editar la configuracion financiera" o "...crear o editar categorias" |
@@ -409,7 +428,8 @@ Base: `com.servibox.backend`. Un paquete por modulo de negocio, mas tres transve
 | Paquete | Contenido |
 |-|-|
 | `config` | `SecurityConfig`, `JpaAuditingConfiguration`, `JsonAuthenticationEntryPoint`, `DevDataInitializer` |
-| `tenant` | `Tenant`, `TenantRepository`, `TenantContext`, `TenantAwareJpaTransactionManager`, `TenantFilterConfiguration` |
+| `tenant` | `Tenant`, `TenantStatus`, `TenantRepository`, `TenantContext`, `TenantAwareJpaTransactionManager`, `TenantFilterConfiguration` |
+| `platform` | identidad de plataforma (tarea 3) y panel de tenants (5A): `PlatformTenantController`, `PlatformTenantService`, `PlatformAuditEntry`; global, sin tenant |
 | `shared` | `TenantAwareEntity`, `ErrorResponse`, `GlobalExceptionHandler`, `ResourceNotFoundException` |
 | `auth` | `JwtService`, `JwtAuthenticationFilter`, `AuthController`, `TenantRegistrationService`, `InvalidCredentialsException` y las tres excepciones del registro, mas `entity` / `repository` / `dto` |
 | `registration` | solicitudes de registro (4A): `RegistrationRequest`, su servicio, el controlador publico y el de revision de plataforma; activacion (4B): `RegistrationActivation` y `RegistrationActivationService`; global, sin tenant |

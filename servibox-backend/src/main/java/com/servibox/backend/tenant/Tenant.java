@@ -38,6 +38,16 @@ public class Tenant {
     @Column(name = "activo_tenant", nullable = false)
     private Boolean active = Boolean.TRUE;
 
+    /** Desde V11. Sube solo al suspender o reactivar; es el expectedVersion de la plataforma. */
+    @Column(name = "version_tenant", nullable = false)
+    private Long version = 0L;
+
+    @Column(name = "fecha_suspension_tenant")
+    private LocalDateTime suspendedAt;
+
+    @Column(name = "motivo_suspension_tenant", length = 500)
+    private String suspensionReason;
+
     /** En UTC, igual que created_at y updated_at de las entidades de negocio. */
     @Column(name = "fecha_creacion_tenant", nullable = false, updatable = false)
     private LocalDateTime createdAt;

@@ -2,11 +2,11 @@
 
 Fuente: Diccionario de Datos de ServiBox (informe UPTC-EISC-SB-01) y su diagrama entidad-relacion, 14 entidades en tercera forma normal. Este archivo es la especificacion del esquema al que debe converger el codigo.
 
-**Estado.** El refactor de normalizacion termino (ver `sessions/2026-10-06-refactor-normalizacion.md`): las 14 tablas comerciales parten de Flyway `V1__init_schema.sql`, escrita desde este archivo; V2 a V7 las evolucionan. V8 agrega la identidad global de plataforma, V9 las solicitudes de registro y V10 la activacion de cuentas y el outbox de correo, para 18 tablas. `schema.SchemaConformanceTest` compara la base con este archivo. Donde el codigo y este archivo difieran, este archivo manda, salvo lo anotado en "Decisiones de implementacion" y "Pendientes" al final.
+**Estado.** El refactor de normalizacion termino (ver `sessions/2026-10-06-refactor-normalizacion.md`): las 14 tablas comerciales parten de Flyway `V1__init_schema.sql`, escrita desde este archivo; V2 a V7 las evolucionan. V8 agrega la identidad global de plataforma, V9 las solicitudes de registro y V10 la activacion de cuentas y el outbox de correo, y V11 la auditoria de plataforma, para 19 tablas. `schema.SchemaConformanceTest` compara la base con este archivo. Donde el codigo y este archivo difieran, este archivo manda, salvo lo anotado en "Decisiones de implementacion" y "Pendientes" al final.
 
 ## Reglas generales
 
-* Multi-tenant: base compartida y esquema compartido. La columna `id_tenant` esta en todas las tablas excepto `TENANTS`, `CATEGORIA_IMPUESTOS`, `ADMINISTRADORES_PLATAFORMA` (V8, identidad global adicional a las 14 tablas comerciales) `SOLICITUDES_REGISTRO` (V9, global, sin datos comerciales), `ACTIVACIONES_REGISTRO` y `CORREOS_SALIENTES` (V10, globales). En la capa JPA el aislamiento lo da el `@Filter` de Hibernate.
+* Multi-tenant: base compartida y esquema compartido. La columna `id_tenant` esta en todas las tablas excepto `TENANTS`, `CATEGORIA_IMPUESTOS`, `ADMINISTRADORES_PLATAFORMA` (V8, identidad global adicional a las 14 tablas comerciales) `SOLICITUDES_REGISTRO` (V9, global, sin datos comerciales), `ACTIVACIONES_REGISTRO` y `CORREOS_SALIENTES` (V10, globales) y `AUDITORIA_PLATAFORMA` (V11, global; nombra al tenant afectado en `id_tenant_objetivo`, sin FK). En la capa JPA el aislamiento lo da el `@Filter` de Hibernate.
 * Unicos compuestos con `id_tenant`: `(id_tenant, username)` en USUARIOS, `(id_tenant, nombre_cuenta)` en CUENTAS, `(id_tenant, numero_documento)` en TERCEROS, `(id_tenant, id_tercero, numero_factura_compra)` en COMPRAS (desde V3; antes `(id_tenant, numero_factura_compra)`), `(id_tenant, numero_factura_venta)` en VENTAS, `(id_tenant, codigo_producto)` en PRODUCTOS.
 * Motor: PostgreSQL 16. Tipos fisicos: identificadores y claves foraneas `BIGINT`; texto `VARCHAR(n)`; valores de enum `VARCHAR(n)` con su longitud, no tipo ENUM; montos en COP `NUMERIC(14,2)`; tasas y porcentajes como fraccion `NUMERIC(8,6)` (0.19 es 19 por ciento); fechas de negocio (`fecha_movimiento`, `fecha_compra`, `fecha_vencimiento_compra`, `fecha_venta`, `fecha_vencimiento_venta`) `DATE`; fechas de auditoria (`created_at`, `updated_at`, `fecha_creacion_tenant`) `TIMESTAMP WITHOUT TIME ZONE` en UTC; banderas `BOOLEAN`.
 * Integridad referencial: `ON DELETE RESTRICT` en todas las claves foraneas: nada con historial transaccional se elimina.
@@ -26,7 +26,10 @@ Modulo: Multi-tenancy y administracion.
 | slug_tenant | VARCHAR | 100 | NOT NULL | UK | Identificador alfanumerico unico para subdominio web y enrutamiento. |
 | nit_tenant | VARCHAR | 25 | NULL | - | NIT de la serviteca, digitos con guion y digito de verificacion opcionales (900123456-7). Obligatorio en el registro y en PUT /api/tenant, pero NULL en la base: null en los tenants anteriores (V2) hasta que editen su perfil. |
 | telefono_tenant | VARCHAR | 25 | NULL | - | Telefono de contacto de la serviteca: digitos, espacios, +, - y parentesis. Obligatorio en el registro y en PUT /api/tenant, pero NULL en la base: null en los tenants anteriores (V2) hasta que editen su perfil. |
-| activo_tenant | BOOLEAN | 1 byte | NOT NULL | - | Estado de la cuenta: true para activa, false para suspendida. |
+| activo_tenant | BOOLEAN | 1 byte | NOT NULL | - | Estado de la cuenta: true para activa (ACTIVE), false para suspendida (SUSPENDED). Lo cambia la plataforma (V11). |
+| version_tenant | BIGINT | 8 bytes | NOT NULL | - | V11. Version para expectedVersion de la plataforma; sube solo al suspender o reactivar. No negativa (CHECK). |
+| fecha_suspension_tenant | TIMESTAMP (D) | 8 bytes | NULL | - | V11. Fecha de la suspension vigente (UTC). NULL si el tenant esta activo (CHECK ck_tenant_suspension). |
+| motivo_suspension_tenant | VARCHAR | 500 | NULL | - | V11. Motivo de la suspension vigente. NULL si el tenant esta activo; NULL tambien en un tenant inactivo desde antes de V11. |
 | fecha_creacion_tenant | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de registro de la suscripcion (UTC). |
 
 ### USUARIOS
@@ -43,6 +46,7 @@ Modulo: Multi-tenancy y administracion.
 | nombre_completo | VARCHAR | 150 | NULL | - | Nombre para mostrar del usuario. Lo pide el registro publico para el administrador; null en los usuarios anteriores (V2). |
 | activo | BOOLEAN | 1 byte | NOT NULL | - | Indica si la cuenta esta habilitada para autenticacion e inicio de sesion. |
 | rol | VARCHAR | 30 | NOT NULL | - | Rol RBAC asignado para autorizacion de funciones (ADMIN, MECANICO, CAJERO). |
+| auth_version | BIGINT | 8 bytes | NOT NULL | - | V11. Version de sesion, inicial 0, no negativa (CHECK). Debe coincidir con el claim authVersion del JWT en cada peticion; revocar o suspender la sube. Nunca se devuelve por HTTP. |
 | created_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de registro del usuario (UTC). |
 | updated_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de ultima modificacion en credenciales o perfil (UTC). |
 
@@ -119,6 +123,20 @@ Modulo: Outbox de correo, V10 (tarea 4B). Global, sin tenant. Fechas en UTC.
 | ultimo_error | VARCHAR | 100 | NULL | - | Categoria sin datos sensibles: TRANSPORTE_TEMPORAL, TRANSPORTE_PERMANENTE, INTENTOS_AGOTADOS, PAYLOAD_INVALIDO, VENCIDO, REVOCADO, CONSUMIDO. |
 | fecha_creacion | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Encolado, en la transaccion de aprobar o reenviar. |
 | fecha_envio | TIMESTAMP (D) | 8 bytes | NULL | - | Aceptacion por el transporte; solo en SENT (CHECK). |
+
+### AUDITORIA_PLATAFORMA
+
+Modulo: Auditoria de plataforma, V11 (tarea 5A). Global, solo insercion. Fechas en UTC.
+
+| Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
+|-|-|-|-|-|-|
+| id_auditoria | BIGINT | 8 bytes | NOT NULL | PK | Identificador autoincremental. |
+| accion | VARCHAR | 30 | NOT NULL | - | SUSPEND_TENANT, REACTIVATE_TENANT, REVOKE_USER_SESSIONS o REVOKE_TENANT_SESSIONS (CHECK). |
+| id_administrador | BIGINT | 8 bytes | NOT NULL | FK | FK a ADMINISTRADORES_PLATAFORMA(id_administrador) que ejecuto la accion. |
+| id_tenant_objetivo | BIGINT | 8 bytes | NOT NULL | - | Tenant afectado. Sin FK a proposito: el registro sobrevive a un borrado permanente. |
+| id_usuario_objetivo | BIGINT | 8 bytes | NULL | - | Usuario afectado en REVOKE_USER_SESSIONS; NULL en las demas. Sin FK por el mismo motivo. |
+| motivo | VARCHAR | 500 | NULL | - | Motivo recortado; obligatorio solo al suspender (lo exige el servicio). |
+| fecha_auditoria | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Momento de la accion. |
 
 ### CONFIGURACION_FINANCIERA
 
@@ -357,6 +375,7 @@ Modulo: Tributario.
 | SOLICITUDES_REGISTRO | id_tenant_activado | TENANTS | 1:1 (0..1) | Tenant creado al activar la solicitud (V10). |
 | ACTIVACIONES_REGISTRO | id_solicitud | SOLICITUDES_REGISTRO | N:1 | Enlaces emitidos para la solicitud (V10). |
 | CORREOS_SALIENTES | id_activacion | ACTIVACIONES_REGISTRO | N:1 | Correo que entrega ese enlace (V10). |
+| AUDITORIA_PLATAFORMA | id_administrador | ADMINISTRADORES_PLATAFORMA | N:1 | Administrador que ejecuto la accion (V11). |
 
 ## Decisiones de implementacion
 

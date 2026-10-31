@@ -47,6 +47,10 @@ public class User extends TenantAwareEntity {
     @Column(name = "activo", nullable = false)
     private boolean active = true;
 
+    /** Desde V11. Debe coincidir con el claim authVersion del JWT; revocar sesiones la sube. */
+    @Column(name = "auth_version", nullable = false)
+    private long authVersion;
+
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "rol", length = 30, nullable = false)

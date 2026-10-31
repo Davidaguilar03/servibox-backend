@@ -59,7 +59,9 @@ valores permitidos. Un campo NOT NULL en la base es `@NotNull` / `@NotBlank` en 
 `Request`, para que falte con 400 y no con el error crudo de la base. Enlace de activacion
 (4B): no valido **400**, vencido o reemplazado **410**, ya usado **409**; limite de reenvio
 de activacion **429**. No confundir este 429 de dominio con el limite de tasa por IP, que
-sigue pendiente.
+sigue pendiente. Panel de plataforma (5A): version esperada distinta o transicion de
+estado del tenant no permitida es **409** (no 400 como en documentos comerciales: lo pide
+el contrato de plataforma, igual que 4A).
 
 * **Secretos de un solo uso**: tokens de activacion y similares se guardan solo como
   SHA-256; el valor crudo no va a la base, logs ni respuestas. Si un mensaje pendiente

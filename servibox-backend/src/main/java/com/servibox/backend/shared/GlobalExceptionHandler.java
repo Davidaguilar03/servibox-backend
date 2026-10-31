@@ -14,6 +14,7 @@ import com.servibox.backend.inventory.service.ProductCodeLockedException;
 import com.servibox.backend.purchases.service.DuplicatePurchaseInvoiceNumberException;
 import com.servibox.backend.purchases.service.InsufficientBalanceException;
 import com.servibox.backend.purchases.service.InvalidPurchaseOperationException;
+import com.servibox.backend.platform.PlatformTenantConflictException;
 import com.servibox.backend.registration.ActivationException;
 import com.servibox.backend.registration.RegistrationRequestConflictException;
 import com.servibox.backend.registration.ResendLimitException;
@@ -175,6 +176,12 @@ public class GlobalExceptionHandler {
     /** Solicitud de registro: slug no disponible, clave de reintento reutilizada, estado o version. */
     @ExceptionHandler(RegistrationRequestConflictException.class)
     public ResponseEntity<ErrorResponse> manejarConflictoSolicitud(RegistrationRequestConflictException ex) {
+        return construir(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** Suspender o reactivar un tenant con version vieja o desde un estado que no lo permite. */
+    @ExceptionHandler(PlatformTenantConflictException.class)
+    public ResponseEntity<ErrorResponse> manejarConflictoTenant(PlatformTenantConflictException ex) {
         return construir(HttpStatus.CONFLICT, ex.getMessage());
     }
 

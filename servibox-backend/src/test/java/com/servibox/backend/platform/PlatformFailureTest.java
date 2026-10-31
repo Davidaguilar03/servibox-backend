@@ -6,6 +6,7 @@ import com.servibox.backend.auth.entity.Role;
 import com.servibox.backend.auth.entity.User;
 import com.servibox.backend.auth.repository.UserRepository;
 import com.servibox.backend.tenant.TenantContext;
+import com.servibox.backend.tenant.TenantRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -48,7 +49,7 @@ class PlatformFailureTest {
         user.setRole(Role.ADMIN);
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("Authorization", "Bearer " + jwt.generateToken(user));
-        new JwtAuthenticationFilter(jwt, repository).doFilter(request, new MockHttpServletResponse(), (req, res) -> {
+        new JwtAuthenticationFilter(jwt, repository, mock(TenantRepository.class)).doFilter(request, new MockHttpServletResponse(), (req, res) -> {
             assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
             assertThat(TenantContext.getTenantId()).isNull();
         });
