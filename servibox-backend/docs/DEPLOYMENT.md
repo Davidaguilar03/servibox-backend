@@ -1,5 +1,10 @@
 # Backend en contenedor Linux
 
+Despliegue real: VPS con Docker Compose, PostgreSQL 16 y Caddy, guia en
+[deploy/VPS.md](deploy/VPS.md) (2026-11-01). Railway quedo descartado: las menciones a
+Railway de abajo son historia; donde digan Railway, el proxy es Caddy y la cabecera de IP
+ya va fijada en deploy/docker-compose.prod.yml.
+
 Preparacion local de la tarea 3, sin publicar. Contexto Docker: raiz Git exterior;
 Maven: carpeta `servibox-backend/` interior. No usar esa carpeta como contexto Docker.
 
@@ -45,7 +50,7 @@ No poner secretos dentro de src; nunca pasarlos mediante COPY, ARG o ENV de buil
 | REGISTRATION_ACTIVATION_RESEND_COOLDOWN | No | Duracion no negativa, default 60s entre enlaces de una solicitud. Confirmado por David el 2026-10-31 |
 | REGISTRATION_ACTIVATION_RESEND_DAILY_LIMIT | No | Entero positivo, default 5 reenvios por solicitud en 24 h moviles. Confirmado por David el 2026-10-31 |
 | PUBLIC_RATE_LIMIT_ENABLED | No | Booleano, default true. false apaga el limite de tasa por IP de las dos rutas publicas de solicitudes (solo para pruebas) |
-| PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER | Si en Railway | Nombre de la cabecera con la IP del cliente que pone el proxy de confianza; vacia (default) usa la IP del socket e ignora X-Forwarded-For y X-Real-IP. En Railway: `X-Real-IP`. Se toma la ultima entrada; un valor que no parece IP vuelve a la del socket. La usan tambien los logins (tarea 50). En prod, vacia con algun limite encendido registra un WARN al arrancar (no impide arrancar) |
+| PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER | Si detras de proxy (fijada en X-Real-IP por el compose del VPS) | Nombre de la cabecera con la IP del cliente que pone el proxy de confianza; vacia (default) usa la IP del socket e ignora X-Forwarded-For y X-Real-IP. En Railway: `X-Real-IP`. Se toma la ultima entrada; un valor que no parece IP vuelve a la del socket. La usan tambien los logins (tarea 50). En prod, vacia con algun limite encendido registra un WARN al arrancar (no impide arrancar) |
 | PUBLIC_RATE_LIMIT_MAX_ENTRIES | No | Entero positivo, default 10000 IP por ruta. Lleno y sin ventanas vencidas, una IP nueva recibe 429 (falla cerrado) |
 | PUBLIC_RATE_LIMIT_REQUESTS_LIMIT | No | Entero positivo, default 5 POST /api/registration-requests por IP y ventana |
 | PUBLIC_RATE_LIMIT_REQUESTS_WINDOW | No | Duracion positiva, default 1h |
@@ -72,6 +77,7 @@ No poner secretos dentro de src; nunca pasarlos mediante COPY, ARG o ENV de buil
 | SMTP_USERNAME | No | Usuario SMTP; vacio desactiva la autenticacion SMTP |
 | SMTP_PASSWORD | No | Secreto de ejecucion del proveedor; nunca en codigo, logs, evidencia ni chat |
 | MAIL_FROM | Si con SMTP_HOST | Remitente; con SMTP_HOST y sin MAIL_FROM la app no arranca |
+| CORS_ALLOWED_ORIGINS | Si con frontend en otro origen (VPS: `https://servibox.co`) | Origenes exactos separados por coma. Vacia: sin CORS. En prod cada uno debe ser `https://host[:puerto]` sin comodin ni ruta; si no, no arranca con `CORS_ALLOWED_ORIGINS acepta solo origenes https exactos separados por coma, sin comodines ni rutas` |
 | BUSINESS_TIME_ZONE | No | Id de java.time.ZoneId, default America/Bogota. Auditoria UTC |
 | REPORTING_MAX_EXPORT_ROWS | No | Entero positivo, default 20000 movimientos por exportacion; superarlo responde 400 |
 

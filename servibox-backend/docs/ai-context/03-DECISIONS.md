@@ -12,6 +12,33 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-11-01: Despliegue en VPS con Docker Compose y Caddy (despliegue 1)
+
+* Decision: produccion en un VPS Linux (Ubuntu 24.04, 2 GB) con Docker Compose:
+  PostgreSQL 16 y backend sin puertos publicados, Caddy con 80 y 443 y HTTPS automatico.
+  Frontend en https://servibox.co como archivos estaticos servidos por Caddy (SPA fallback),
+  API en https://api.servibox.co. Reemplaza el plan de Railway (REEMPLAZADO: las notas de
+  Railway en DEPLOYMENT.md y en las entradas de las tareas 43, 49, 50 y 52 quedan como
+  historia). Archivos en deploy/ y guia en ../deploy/VPS.md.
+* CORS: CORS_ALLOWED_ORIGINS (servibox.cors.allowed-origins), lista exacta de origenes
+  separada por coma, en ambas cadenas de seguridad; metodos GET, POST, PUT, DELETE; cabeceras
+  Authorization, Content-Type, Idempotency-Key; expone Retry-After y Content-Disposition; sin
+  credenciales (el JWT va en Authorization). Vacia: sin CORS, igual que antes. En prod cada
+  origen debe ser https sin comodin ni ruta o la app no arranca. REEMPLAZA "No habilitar
+  CORS: frontend/proxy futuro usara /api y mismo origen" (entrada 2026-10-29). Alternativa
+  descartada: proxy /api en el dominio del frontend (mismo origen), porque el prompt fija la
+  API en su propio subdominio.
+* IP del cliente: Caddy fija `X-Real-IP {remote_host}` (reemplaza lo que mande el cliente) y
+  el compose fija PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER=X-Real-IP. Sigue sin
+  forward-headers-strategy. HSTS: Caddy pone una sola cabecera `max-age=15552000` en ambos
+  dominios (header_down reemplaza la del backend, mismo valor).
+* Memoria: limites del compose (postgres 512 MB, backend 900 MB, Caddy 128 MB) y la JVM con
+  MaxRAMPercentage=75 y ExitOnOutOfMemoryError en el Dockerfile. Healthcheck del compose con
+  curl sobre GET /api/health (la imagen JRE trae curl).
+* Respaldo: deploy/backup.sh (pg_dump formato custom comprimido, retencion 14 dias, cron) y
+  deploy/restore.sh (base limpia, confirmacion escribiendo RESTAURAR base). Copia fuera del
+  servidor a mano. Alternativa descartada: servicio de respaldo administrado (sin contratar).
+
 ## 2026-11-01: Errores, logs y cabeceras de produccion (tarea 52)
 
 * Sin usuario en memoria: `@SpringBootApplication(exclude = UserDetailsServiceAutoConfiguration.class)`.
@@ -349,7 +376,8 @@ Formato de cada entrada:
   de la tarea 2 (16.15, migraciones vacio/V2 a V7, 228 comprobaciones HTTP/estado,
   15 JUnit de concurrencia y seis exportados); no implica suite completa sobre PG16.
 * Motivo: preparar build y arranque verificables localmente sin desplegar ni contratar.
-  No habilitar CORS: frontend/proxy futuro usara /api y mismo origen. Contrato operativo
+  No habilitar CORS: frontend/proxy futuro usara /api y mismo origen (REEMPLAZADO el
+  2026-11-01 por CORS_ALLOWED_ORIGINS, despliegue VPS). Contrato operativo
   y fuentes oficiales Railway en ../DEPLOYMENT.md; resultados en la sesion de hoy.
 
 ## 2026-10-27: Color opcional de cuentas

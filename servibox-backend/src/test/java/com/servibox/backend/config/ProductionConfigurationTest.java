@@ -152,4 +152,24 @@ class ProductionConfigurationTest {
                 .run(context -> assertThat(context).hasNotFailed());
         assertThat(output).doesNotContain(ProductionConfiguration.CLIENT_IP_HEADER_WARNING);
     }
+
+    @Test
+    void corsAceptaOrigenesHttpsExactos() {
+        runner.withPropertyValues(PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL, "JWT_SECRET=" + "x".repeat(32),
+                        "CORS_ALLOWED_ORIGINS=https://servibox.co, https://www.servibox.co")
+                .run(context -> assertThat(context).hasNotFailed());
+        runner.withPropertyValues(PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL, "JWT_SECRET=" + "x".repeat(32))
+                .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test
+    void corsRechazaComodinesHttpYRutas() {
+        for (String origen : new String[] {"*", "https://*.servibox.co", "http://servibox.co", "https://servibox.co/",
+                "https://servibox.co/app", "servibox.co"}) {
+            runner.withPropertyValues(PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL, "JWT_SECRET=" + "x".repeat(32),
+                            "CORS_ALLOWED_ORIGINS=https://servibox.co," + origen)
+                    .run(context -> assertThat(context.getStartupFailure()).hasMessageContaining(
+                            "CORS_ALLOWED_ORIGINS acepta solo origenes https exactos separados por coma, sin comodines ni rutas"));
+        }
+    }
 }

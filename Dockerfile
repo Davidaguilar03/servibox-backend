@@ -13,4 +13,6 @@ COPY --from=build --chown=10001:10001 /build/target/servibox-backend-0.0.1-SNAPS
 USER 10001:10001
 ENV SPRING_PROFILES_ACTIVE=prod
 EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+# VPS de 2 GB compartido con PostgreSQL y Caddy: el compose limita el contenedor y el heap
+# sigue ese limite. Sin limite tomaria el 75% de toda la RAM del servidor.
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-XX:+ExitOnOutOfMemoryError", "-jar", "/app/app.jar"]
