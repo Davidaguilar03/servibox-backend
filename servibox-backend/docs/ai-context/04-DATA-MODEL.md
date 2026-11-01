@@ -23,6 +23,7 @@ Modulo: Multi-tenancy y administracion.
 |-|-|-|-|-|-|
 | id_tenant | BIGINT (I) | 8 bytes | NOT NULL | PK | Identificador unico de la empresa o taller registrado. |
 | nombre_tenant | VARCHAR | 150 | NOT NULL | - | Razon social o denominacion comercial de la serviteca. |
+| nombre_busqueda_tenant | VARCHAR | 450 | NOT NULL | - | V13. nombre_tenant normalizado con SearchText (sin marcas diacriticas, minusculas, espacios colapsados; la enie queda como n). Lo mantiene la aplicacion en setName; es contra lo que busca la plataforma. No se expone en la API. |
 | slug_tenant | VARCHAR | 100 | NOT NULL | UK | Identificador alfanumerico unico para subdominio web y enrutamiento. |
 | nit_tenant | VARCHAR | 25 | NULL | - | NIT de la serviteca, digitos con guion y digito de verificacion opcionales (900123456-7). Obligatorio en el registro y en PUT /api/tenant, pero NULL en la base: null en los tenants anteriores (V2) hasta que editen su perfil. |
 | telefono_tenant | VARCHAR | 25 | NULL | - | Telefono de contacto de la serviteca: digitos, espacios, +, - y parentesis. Obligatorio en el registro y en PUT /api/tenant, pero NULL en la base: null en los tenants anteriores (V2) hasta que editen su perfil. |
@@ -70,9 +71,11 @@ Modulo: Solicitudes de registro, V9 (tarea 4A). Global, sin tenant, sin contrase
 |-|-|-|-|-|-|
 | id_solicitud | VARCHAR | 36 | NOT NULL | PK | UUID aleatorio generado por la aplicacion; opaco, no revela volumen. |
 | nombre_comercial | VARCHAR | 150 | NOT NULL | - | Razon social o nombre comercial, recortado. Mismas reglas que el registro. |
+| nombre_comercial_busqueda | VARCHAR | 450 | NOT NULL | - | V13. nombre_comercial normalizado con SearchText; lo mantiene la aplicacion. Filtro tenantName. No se expone en la API. |
 | nit | VARCHAR | 25 | NOT NULL | - | NIT recortado, mismas reglas que el registro. No es unico: solo coincidencia indicativa. |
 | telefono | VARCHAR | 25 | NOT NULL | - | Telefono recortado, mismas reglas que el registro. |
 | nombre_responsable | VARCHAR | 150 | NOT NULL | - | Nombre completo del responsable que sera administrador. |
+| nombre_responsable_busqueda | VARCHAR | 450 | NOT NULL | - | V13. nombre_responsable normalizado con SearchText; lo mantiene la aplicacion. Filtro contactName. No se expone en la API. |
 | correo_responsable | VARCHAR | 150 | NOT NULL | - | Correo de entrega tal como llego, recortado. |
 | correo_normalizado | VARCHAR | 150 | NOT NULL | - | Correo en minusculas para coincidencias indicativas; no es unico. CHECK LOWER(TRIM). |
 | slug_solicitado | VARCHAR | 30 | NOT NULL | - | Slug normalizado (recortado, minusculas) con las reglas del registro. Se conserva siempre. |

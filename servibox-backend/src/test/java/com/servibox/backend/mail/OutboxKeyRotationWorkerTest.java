@@ -49,9 +49,9 @@ class OutboxKeyRotationWorkerTest {
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         jdbc.update("INSERT INTO solicitudes_registro (id_solicitud, nombre_comercial, nit, telefono, nombre_responsable,"
                 + " correo_responsable, correo_normalizado, slug_solicitado, slug_reservado, estado, hash_cuerpo,"
-                + " idempotencia_expira_en, fecha_creacion, reserva_expira_en) VALUES (?, 'Taller Rotacion', '900123456-7',"
+                + " idempotencia_expira_en, fecha_creacion, reserva_expira_en, nombre_comercial_busqueda, nombre_responsable_busqueda) VALUES (?, 'Taller Rotacion', '900123456-7',"
                 + " '3001234567', 'Ana', 'ana@example.invalid', 'ana@example.invalid', 'taller-rotacion', 'taller-rotacion',"
-                + " 'APPROVED', ?, ?, ?, ?)", SOLICITUD, "0".repeat(64), now.plusDays(1), now, now.plusDays(1));
+                + " 'APPROVED', ?, ?, ?, ?, 'taller rotacion', 'ana')", SOLICITUD, "0".repeat(64), now.plusDays(1), now, now.plusDays(1));
         jdbc.update("INSERT INTO activaciones_registro (id_solicitud, generacion, digest_token, fecha_creacion, expira_en)"
                 + " VALUES (?, 1, ?, ?, ?)", SOLICITUD, "b".repeat(64), now, now.plusDays(1));
         long activacion = jdbc.queryForObject("SELECT id_activacion FROM activaciones_registro", Long.class);

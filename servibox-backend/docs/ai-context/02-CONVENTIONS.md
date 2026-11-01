@@ -26,6 +26,8 @@
 
 * Todo cambio de tablas, columnas, tipos o restricciones es una **migracion nueva**
   `src/main/resources/db/migration/V<n>__<descripcion>.sql`, con `<n>` el siguiente numero.
+  Solo si el backfill necesita logica que SQL no da igual en H2 y PostgreSQL, va en Java en
+  `src/main/java/db/migration` con la misma numeracion (como V13).
   Nunca se edita una migracion ya aplicada: Flyway guarda su checksum y una base que ya la
   corrio no arranca.
 * En el mismo cambio: la entidad (Hibernate valida con `ddl-auto=validate`) y

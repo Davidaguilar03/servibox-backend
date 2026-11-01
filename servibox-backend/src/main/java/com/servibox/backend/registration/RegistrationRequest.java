@@ -1,5 +1,6 @@
 package com.servibox.backend.registration;
 
+import com.servibox.backend.shared.SearchText;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -7,6 +8,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -26,6 +28,11 @@ public class RegistrationRequest {
     @Column(name = "nombre_comercial", length = 150, nullable = false)
     private String businessName;
 
+    /** Desde V13. Se mantiene solo desde setBusinessName; el filtro tenantName compara contra esta columna. */
+    @Column(name = "nombre_comercial_busqueda", length = 450, nullable = false)
+    @Setter(AccessLevel.NONE)
+    private String businessNameSearch;
+
     @Column(name = "nit", length = 25, nullable = false)
     private String nit;
 
@@ -34,6 +41,11 @@ public class RegistrationRequest {
 
     @Column(name = "nombre_responsable", length = 150, nullable = false)
     private String contactName;
+
+    /** Desde V13. Se mantiene solo desde setContactName; el filtro contactName compara contra esta columna. */
+    @Column(name = "nombre_responsable_busqueda", length = 450, nullable = false)
+    @Setter(AccessLevel.NONE)
+    private String contactNameSearch;
 
     @Column(name = "correo_responsable", length = 150, nullable = false)
     private String contactEmail;
@@ -83,4 +95,14 @@ public class RegistrationRequest {
     /** Tenant creado al activar (V10); solo en ACTIVATED. */
     @Column(name = "id_tenant_activado", unique = true)
     private Long activatedTenantId;
+
+    public void setBusinessName(String businessName) {
+        this.businessName = businessName;
+        this.businessNameSearch = SearchText.normalize(businessName);
+    }
+
+    public void setContactName(String contactName) {
+        this.contactName = contactName;
+        this.contactNameSearch = SearchText.normalize(contactName);
+    }
 }

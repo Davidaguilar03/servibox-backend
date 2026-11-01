@@ -208,7 +208,7 @@ POSTGRES_PASSWORD no se pueden usar los respaldos ni lo pendiente del outbox.
    docker compose -f docker-compose.prod.yml logs backend | grep -E "Successfully applied|Current version|Started ServiboxApplication|WARN|ERROR"
    ```
 
-   Debe aparecer Flyway en la versión 12 (`Successfully applied 12 migrations` la primera vez),
+   Debe aparecer Flyway en la versión 13 (`Successfully applied 13 migrations` la primera vez),
    `Started ServiboxApplication`, y ningún WARN de `PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER`. El
    único WARN esperado sin SMTP es el del outbox sin transporte.
 6. Certificados:
