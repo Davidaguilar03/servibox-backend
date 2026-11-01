@@ -12,6 +12,17 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-11-01: Cache y cabeceras de seguridad del frontend en Caddy (tarea 56)
+
+* Decision: `/assets/*` existente con `public, max-age=31536000, immutable` y sin fallback SPA, un
+  archivo inexistente da 404. Todo lo demas, incluido ese 404, con `no-cache` y fallback a index.html.
+  Todas las respuestas del frontend llevan HSTS, `nosniff`, `strict-origin-when-cross-origin` y
+  `X-Frame-Options: DENY`. El bloque del API no cambia.
+* Alternativas consideradas: `immutable` en todo `/assets/*` sin matcher (la cabecera tambien saldria
+  en el 404 y el navegador podria guardarlo un ano); Content-Security-Policy (fuera por ahora).
+* Motivo: un dist nuevo debe verse de inmediato sin que un index.html viejo apunte a hashes borrados, y
+  los assets con hash no necesitan revalidarse. Operacion en [VPS.md](../deploy/VPS.md), seccion 7.
+
 ## 2026-11-01: Consentimiento de tratamiento de datos en la solicitud de registro (tarea 55)
 
 * Decision: POST `/api/registration-requests` exige `policyVersion` (AAAA-MM-DD, fecha real, sin

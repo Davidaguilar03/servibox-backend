@@ -12,7 +12,7 @@ Archivos (en la raíz del repo servibox-backend):
 |-|-|
 | `Dockerfile` | Imagen del backend: compila con JDK 21 y corre con JRE 21, usuario 10001 sin privilegios, perfil prod |
 | `deploy/docker-compose.prod.yml` | Servicios `postgres`, `backend` y `caddy`. Solo Caddy publica puertos (80 y 443) |
-| `deploy/Caddyfile` | HTTPS, proxy hacia el backend con `X-Real-IP`, HSTS y frontend con SPA fallback |
+| `deploy/Caddyfile` | HTTPS, proxy hacia el backend con `X-Real-IP`, HSTS y frontend con SPA fallback, caché y cabeceras de seguridad |
 | `deploy/.env.example` | Plantilla de variables, sin secretos |
 | `deploy/backup.sh` / `deploy/restore.sh` | Respaldo diario y restauración |
 
@@ -284,6 +284,88 @@ Volver atrás: `rm -rf frontend && mv frontend-anterior frontend`. Caddy monta l
 `deploy/frontend`; si se reemplaza la carpeta (no su contenido), reiniciar Caddy:
 `docker compose -f docker-compose.prod.yml restart caddy`.
 
+### Cabeceras y caché del frontend
+
+| Ruta | Cache-Control | Por qué |
+|-|-|-|
+| `/assets/*` que existe | `public, max-age=31536000, immutable` | El nombre lleva un hash: si el contenido cambia, cambia el nombre. El navegador no vuelve a pedirlo |
+| Todo lo demás (`index.html`, rutas SPA, favicon, robots) | `no-cache` | El navegador revalida siempre con el ETag; si no cambió recibe 304 y no descarga de nuevo. Así un `dist` nuevo se ve de inmediato |
+| `/assets/*` que no existe | `no-cache`, con 404 | Sin fallback a `index.html`. No se marca `immutable` para que el 404 no quede guardado |
+
+Todas las respuestas del frontend llevan además:
+
+* `Strict-Transport-Security: max-age=15552000`: solo HTTPS durante 180 días.
+* `X-Content-Type-Options: nosniff`: el navegador respeta el tipo declarado del archivo.
+* `Referrer-Policy: strict-origin-when-cross-origin`: a otros sitios solo se envía el origen, no la ruta.
+* `X-Frame-Options: DENY`: la aplicación no se puede incrustar en un iframe.
+
+Content-Security-Policy queda fuera por ahora (decisión tomada).
+
+### Reemplazar el frontend
+
+En el PC, desde servibox-frontend:
+
+```powershell
+npm ci
+npm run build
+```
+
+En el servidor, confirmar antes de borrar que el montaje de Caddy es esa carpeta. Debe decir
+`/home/david/servibox-backend/deploy/frontend -> /srv/frontend`:
+
+```bash
+cd ~/servibox-backend/deploy
+docker inspect "$(docker compose -f docker-compose.prod.yml ps -q caddy)" --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' | grep srv/frontend
+```
+
+Borrar el contenido anterior para no dejar assets viejos (el contenido, no la carpeta, para que
+Caddy no pierda el montaje):
+
+```bash
+find ~/servibox-backend/deploy/frontend -mindepth 1 -delete
+```
+
+En el PC, copiar el `dist` nuevo:
+
+```powershell
+scp -r dist/* david@IP_DEL_SERVIDOR:~/servibox-backend/deploy/frontend/
+```
+
+No hace falta reiniciar Caddy. Entre el borrado y el final de la copia el sitio no responde
+bien, y este método no deja copia para volver atrás; para evitar las dos cosas, usar el cambio
+de carpeta descrito arriba.
+
+### Aplicar un cambio del Caddyfile
+
+Tras un `git pull`, reiniciar Caddy (corte de unos segundos; los certificados se conservan) y
+comprobar que el contenedor ve el archivo nuevo:
+
+```bash
+cd ~/servibox-backend/deploy
+docker compose -f docker-compose.prod.yml restart caddy
+docker compose -f docker-compose.prod.yml exec -T caddy cat /etc/caddy/Caddyfile | diff - Caddyfile && echo IGUALES
+```
+
+No usar `caddy reload` tras un `git pull`: en el servidor Linux el montaje del archivo puede
+seguir mostrando la versión anterior, y un reload releería el Caddyfile viejo sin dar error.
+
+### Verificar las cabeceras
+
+`curl -I` (HEAD) sirve para el frontend estático. Para el API usar GET con
+`curl -sS -o /dev/null -D - URL`.
+
+```bash
+curl -sSI https://servibox.co/
+curl -sSI https://servibox.co/login
+ASSET=$(curl -sS https://servibox.co/ | grep -oE '/assets/[^"]+\.js' | head -n 1)
+curl -sSI "https://servibox.co$ASSET"
+curl -sSI https://servibox.co/assets/no-existe.js
+```
+
+Esperado: `/` y `/login` con `200`, `text/html` y `cache-control: no-cache`; el asset con
+`200` y `cache-control: public, max-age=31536000, immutable`; `/assets/no-existe.js` con `404`
+y sin `text/html`. Las cuatro respuestas llevan las cuatro cabeceras de seguridad.
+
 ## 8. Respaldos
 
 `deploy/backup.sh` guarda `deploy/backups/servibox-AAAAMMDD-HHMMSS.dump` (pg_dump formato
@@ -456,6 +538,15 @@ Desde el PC o el servidor (bash; en PowerShell usar `curl.exe` con las mismas op
 
    Esperado: `0`.
 10. Respaldo manual y comprobación (sección 8) antes de dar acceso a clientes.
+11. Caché y cabeceras de seguridad del frontend: los comandos de "Verificar las cabeceras"
+    (sección 7) dan lo esperado.
+12. Un asset inexistente da 404 real:
+
+    ```bash
+    curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' https://servibox.co/assets/no-existe.js
+    ```
+
+    Esperado: `404` sin `text/html`. Si da `200 text/html`, sigue activo el Caddyfile anterior.
 
 Antes de abrir el registro (`REGISTRATION_REQUESTS_ENABLED=true`): configurar SMTP, verificar
 un correo real en un buzón y repetir el punto 7 con `POST /api/registration-requests/activate`
