@@ -53,11 +53,12 @@ public class PlatformRegistrationRequestController {
         return service.reject(id, body.expectedVersion(), body.reason(), (Long) authentication.getPrincipal());
     }
 
-    /** Revoca el enlace vigente y encola uno nuevo. No devuelve enlace ni token. */
+    /** Revoca el enlace vigente y encola uno nuevo, auditado con el administrador. No devuelve enlace ni token. */
     @PostMapping("/{id}/resend-activation")
     @ResponseStatus(HttpStatus.ACCEPTED)
-    public PlatformRegistrationRequestResponse resendActivation(@PathVariable String id) {
-        activationService.resend(id);
+    public PlatformRegistrationRequestResponse resendActivation(@PathVariable String id,
+            Authentication authentication) {
+        activationService.resend(id, (Long) authentication.getPrincipal());
         return service.detail(id);
     }
 }

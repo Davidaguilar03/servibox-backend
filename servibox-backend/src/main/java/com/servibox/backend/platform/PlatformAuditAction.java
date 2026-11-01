@@ -5,5 +5,7 @@ public enum PlatformAuditAction {
     SUSPEND_TENANT,
     REACTIVATE_TENANT,
     REVOKE_USER_SESSIONS,
-    REVOKE_TENANT_SESSIONS
+    REVOKE_TENANT_SESSIONS,
+    /** Reenvio del enlace de activacion de una solicitud (V12): apunta a la solicitud, no a un tenant. */
+    RESEND_ACTIVATION
 }

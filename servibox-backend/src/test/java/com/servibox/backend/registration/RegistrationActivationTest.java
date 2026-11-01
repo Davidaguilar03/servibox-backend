@@ -61,6 +61,7 @@ class RegistrationActivationTest {
     @Autowired PlatformBootstrapService bootstrap;
     @Autowired PlatformJwtService platformJwt;
     @Autowired OutboxWorker worker;
+    @Autowired RegistrationActivationService activationService;
     @Autowired FakeMailTransport transport;
     @Autowired JdbcTemplate jdbc;
 
@@ -80,6 +81,8 @@ class RegistrationActivationTest {
     }
 
     static void limpiar(JdbcTemplate jdbc, RegistrationRequestRepository requests, PlatformAdminRepository admins) {
+        // El reenvio deja auditoria con FK al administrador (V12): se borra antes que el administrador.
+        jdbc.update("DELETE FROM auditoria_plataforma");
         jdbc.update("DELETE FROM correos_salientes");
         jdbc.update("DELETE FROM activaciones_registro");
         requests.deleteAll();
@@ -355,6 +358,48 @@ class RegistrationActivationTest {
         esperarError(plataforma("no-existe", "resend-activation", null), 404, "Solicitud no encontrada");
         mvc.perform(post(RegistrationRequestTest.PLATAFORMA + "/" + id + "/resend-activation"))
                 .andExpect(status().isUnauthorized());
+        // Solo los 5 reenvios exitosos quedan auditados; los 429, 409, 404 y 401 no dejan fila.
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM auditoria_plataforma", Long.class)).isEqualTo(5);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM auditoria_plataforma WHERE id_solicitud_objetivo = ?",
+                Long.class, id)).isEqualTo(5);
+    }
+
+    @Test
+    void reenvioExitosoQuedaAuditadoConElAdministradorYLaSolicitud() throws Exception {
+        String id = aprobada("taller-auditado");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM auditoria_plataforma", Long.class)).isZero();
+        retrasarEmision(id);
+        LocalDateTime antes = ahora().minusSeconds(1);
+        plataforma(id, "resend-activation", null).andExpect(status().isAccepted());
+
+        var fila = jdbc.queryForMap("SELECT accion, id_administrador, id_solicitud_objetivo, id_tenant_objetivo,"
+                + " id_usuario_objetivo, motivo, fecha_auditoria FROM auditoria_plataforma");
+        assertThat(fila.get("accion")).isEqualTo("RESEND_ACTIVATION");
+        assertThat(((Number) fila.get("id_administrador")).longValue()).isEqualTo(1L);
+        assertThat(fila.get("id_solicitud_objetivo")).isEqualTo(id);
+        assertThat(fila.get("id_tenant_objetivo")).isNull();
+        assertThat(fila.get("id_usuario_objetivo")).isNull();
+        assertThat(fila.get("motivo")).isNull();
+        assertThat(((java.sql.Timestamp) fila.get("fecha_auditoria")).toLocalDateTime()).isAfter(antes);
+        // La fecha de la auditoria es la misma de la generacion emitida en esa transaccion.
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM activaciones_registro a JOIN auditoria_plataforma p"
+                + " ON p.id_solicitud_objetivo = a.id_solicitud AND p.fecha_auditoria = a.fecha_creacion"
+                + " WHERE a.generacion = 2", Long.class)).isEqualTo(1);
+    }
+
+    @Test
+    void siLaAuditoriaFallaElReenvioSeDeshaceCompleto() throws Exception {
+        String id = aprobada("taller-sin-auditoria");
+        retrasarEmision(id);
+        long correos = jdbc.queryForObject("SELECT COUNT(*) FROM correos_salientes", Long.class);
+        // Un administrador inexistente viola la FK de la auditoria: misma transaccion, nada queda.
+        assertThatThrownBy(() -> activationService.resend(id, 987654L)).isInstanceOf(RuntimeException.class);
+        assertThat(activations.findByRequestIdOrderByGenerationDesc(id)).hasSize(1);
+        assertThat(activations.findByRequestIdOrderByGenerationDesc(id).getFirst().getRevokedAt()).isNull();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM correos_salientes", Long.class)).isEqualTo(correos);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM correos_salientes WHERE estado = 'PENDING'", Long.class))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM auditoria_plataforma", Long.class)).isZero();
     }
 
     @Test

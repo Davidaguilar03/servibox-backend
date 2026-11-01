@@ -31,6 +31,7 @@ public class AuthController {
     private final JwtService jwtService;
     private final TenantRegistrationService tenantRegistrationService;
     private final LoginThrottle loginThrottle;
+    private final LoginTimingEqualizer timingEqualizer;
 
     /**
      * Tenant inexistente o inactivo, usuario inexistente o inactivo y contrasena
@@ -44,14 +45,20 @@ public class AuthController {
                 () -> authenticate(request));
     }
 
+    /** Sin contrasena real que evaluar, paga una comparacion BCrypt de relleno: mismo tiempo que una incorrecta. */
     private LoginResponse authenticate(LoginRequest request) {
         Tenant tenant = tenantRepository.findBySlug(request.tenantSlug())
                 .filter(t -> Boolean.TRUE.equals(t.getActive()))
-                .orElseThrow(InvalidCredentialsException::new);
+                .orElse(null);
+        if (tenant == null) {
+            timingEqualizer.compareDummy();
+            throw new InvalidCredentialsException();
+        }
 
         Optional<User> user = userRepository.findByUsernameAndTenantId(
                 request.username(), tenant.getId());
         if (user.isEmpty() || !user.get().isActive()) {
+            timingEqualizer.compareDummy();
             throw new InvalidCredentialsException();
         }
         if (!passwordEncoder.matches(request.password(), user.get().getPasswordHash())) {

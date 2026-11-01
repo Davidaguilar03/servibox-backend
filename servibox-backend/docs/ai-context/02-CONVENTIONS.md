@@ -45,6 +45,9 @@
   `AccountRepository` ni `MovementRepository`. El stock si se ajusta directo:
   `SalesService` y `PurchasesService` usan `ProductRepository`, y los calculos de precio e
   IVA los piden a `InventoryService`.
+* Login: todo camino que responde 401 sin comparar una contrasena real llama a
+  `LoginTimingEqualizer.compareDummy()` una sola vez (tarea 51); el camino con contrasena
+  real no la llama. Un login nuevo sigue la misma regla.
 
 ## Manejo de errores
 
@@ -52,7 +55,8 @@ Excepciones de dominio en el paquete `service` de su modulo, traducidas en un so
 `GlobalExceptionHandler`. Tabla de codigos en [01-ARCHITECTURE.md](01-ARCHITECTURE.md)
 (Manejo centralizado de errores). Criterio: duplicado o falta de stock / saldo es **409**;
 operacion no permitida por el estado del documento es **400**; funcionalidad apagada por
-configuracion (registro publico) o sin el rol necesario es **403**; recurso de ruta es **404**,
+configuracion (registro publico) o sin el rol necesario es **403** (en prod el registro
+inmediato no existe: **404**, tarea 51); recurso de ruta es **404**,
 ver Busqueda por id mas abajo. Un cuerpo que no se puede leer (JSON mal formado, valor de
 enum que no existe) es **400**, nunca 500; si es un enum, el mensaje nombra el campo y los
 valores permitidos. Un campo NOT NULL en la base es `@NotNull` / `@NotBlank` en su

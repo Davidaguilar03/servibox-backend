@@ -12,6 +12,51 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-10-31: Endurecimiento previo al despliegue (tarea 51)
+
+* BCrypt de relleno: en ambos logins, los caminos que terminan sin evaluar una contrasena real
+  (tenant inexistente o suspendido, usuario inexistente o inactivo; en plataforma tambien
+  administrador inexistente o inactivo y clave de mas de 72 bytes) ejecutan una comparacion
+  con `auth.LoginTimingEqualizer`: un hash generado una vez al arrancar con el mismo
+  `PasswordEncoder` (mismo costo, 10) contra un candidato fijo, para que la longitud de la
+  entrada no influya. Mismo 401. Reemplaza la limitacion "diferencia de tiempo previa" de la
+  tarea 50. Sin pruebas de tiempo: espias cuentan una comparacion por camino.
+* Registro inmediato en prod: `TenantRegistrationService.registrar` responde 404
+  `Recurso no encontrado` si el perfil prod esta activo, antes de mirar REGISTRATION_ENABLED o
+  la compuerta. Con la compuerta apagada en prod no queda ninguna via publica de alta.
+  Alternativas: `@Profile("!prod")` en el controlador (rompe la inyeccion en AuthController y
+  deja el servicio usable), propiedad nueva (se puede olvidar o sobreescribir). El chequeo en
+  el servicio cubre cualquier llamador; `provisionar` (activacion) no cambia. Reemplaza en prod
+  el 403 de las entradas de la tarea 28 y 4A; dev y test siguen igual.
+* Auditoria del reenvio: accion RESEND_ACTIVATION en AUDITORIA_PLATAFORMA con el
+  administrador y la solicitud, insertada al final de `RegistrationActivationService.resend`
+  en su transaccion (si falla, el reenvio se deshace). V12: `id_solicitud_objetivo`
+  VARCHAR(36) sin FK (mismo criterio de V11 para tenant y usuario), `id_tenant_objetivo`
+  admite NULL, CHECK de accion ampliado y CHECK ck_auditoria_objetivo (reenvio solo con
+  solicitud; acciones de tenant solo con tenant). Reemplaza la limitacion "el revisor del
+  reenvio no se registra" de 4B.
+* Purga del outbox: `mail.OutboxPurger`, programado como el worker (cada
+  MAIL_OUTBOX_PURGE_INTERVAL, default 1h; solo servidor HTTP), borra SENT con `fecha_envio`
+  y FAILED con `expira_en` mas viejos que la retencion (30 y 90 dias, dias enteros
+  positivos). FAILED no tiene fecha de fallo: se mide desde el vencimiento, que es a mas
+  tardar cuando fallo (conservador). Nunca PENDING ni lease vigente. Lotes de 500 con SELECT
+  ... FOR UPDATE SKIP LOCKED y DELETE con la misma condicion: varias instancias no se esperan
+  ni se pisan. Reloj inyectado (Clock de negocio, convertido a UTC). Desactivable con
+  MAIL_OUTBOX_PURGE_ENABLED. No toca activaciones ni solicitudes (no guardan secretos).
+* SMTPS: SMTP_SECURITY `starttls` (default, como antes) o `ssl` (TLS implicito,
+  `mail.smtp.ssl.enable`, sin propiedades STARTTLS). Valor invalido: no arranca con
+  `SMTP_SECURITY debe ser starttls o ssl`. En ambos modos `mail.smtp.ssl.checkserveridentity=true`
+  y nunca `ssl.trust` ni fabricas de socket propias: se verifica certificado y nombre. El
+  puerto no cambia solo: con ssl se fija SMTP_PORT=465. Sin dependencias nuevas.
+* Rotacion de la clave del outbox: MAIL_OUTBOX_ENCRYPTION_KEY_PREVIOUS opcional, solo para
+  descifrar (se intenta la actual y, si falla la etiqueta GCM, la anterior); cifrar usa
+  siempre la actual. Misma derivacion SHA-256. Fuera de prod se exige 32 bytes y distinta de
+  la actual; en prod ademas distinta de las claves JWT y sin prefijo dev-/test-. Reemplaza
+  "rotarla deja lo pendiente en FAILED" de 4B cuando se usa la anterior.
+* Alternativas descartadas: version de clave en el payload (cambio de formato y de datos
+  existentes), purga por `fecha_creacion` en FAILED (borraria antes de la retencion contada
+  desde el fallo), FK de la auditoria a la solicitud (impediria purgar solicitudes en el futuro).
+
 ## 2026-10-31: Proteccion de los logins contra fuerza bruta (tarea 50)
 
 * Decision: POST `/api/auth/login` y POST `/api/platform/auth/login` cuentan solo los fallos
@@ -170,7 +215,7 @@ Formato de cada entrada:
   cae tras enviar, el lease vence y puede duplicarse el correo.
 * Transporte: interfaz `MailTransport`; SMTP con spring-boot-starter-mail (unica
   dependencia nueva) por SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD y MAIL_FROM,
-  STARTTLS obligatorio. Sin SMTP_HOST no hay bean: el outbox queda PENDING y la app
+  STARTTLS obligatorio (reemplazado: SMTP_SECURITY permite tambien ssl, tarea 51). Sin SMTP_HOST no hay bean: el outbox queda PENDING y la app
   arranca. SENT significa aceptado por el transporte, no entregado al buzon. Transporte
   falso solo en pruebas. Envio real no verificado; proveedor sin elegir.
 * Plazos configurables con defaults PROPUESTOS, no confirmados por David: token 24 h,
@@ -214,6 +259,7 @@ Formato de cada entrada:
   como no disponible y el registro inmediato sigue igual. Encendida, el registro inmediato
   responde 403: nunca dos vias publicas activas. Se eligio ruta nueva en vez de cambiar
   `/api/auth/register` (propuesta de la auditoria) porque la tarea fija la ruta exacta.
+  (Reemplazado en prod: el registro inmediato responde 404 siempre, ver tarea 51.)
 * Corte 4A/4B (resuelto en la entrada 4B de arriba): 4B agrega token de activacion, correo/outbox, reenvio, creacion atomica de
   tenant/ADMIN y el estado ACTIVATED (exigira ampliar ck_solicitud_estado). La solicitud no
   guarda username: 4B debe pedirlo al activar o agregarlo (4B lo pide al activar). No abrir solicitudes en publico
@@ -896,7 +942,7 @@ Formato de cada entrada:
     anteriores (incluidos los de la siembra dev) quedan en null. V1 no se toca.
   * **Interruptor.** `servibox.registration.enabled=${REGISTRATION_ENABLED:true}`. En false
     el endpoint responde 403 "El registro de nuevas servitecas esta deshabilitado" y no
-    crea nada.
+    crea nada. (Reemplazado en prod: 404 sin importar el interruptor, ver tarea 51.)
 * Alternativas consideradas: registrar sin devolver sesion (obliga al frontend a un login
   inmediato con la misma contrasena); `@Valid` con mensajes por anotacion (exige cambiar el
   manejador global); aprovisionar en transacciones separadas como la siembra dev (un fallo

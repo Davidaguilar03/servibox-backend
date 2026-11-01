@@ -15,7 +15,7 @@ import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 
-/** Fila de AUDITORIA_PLATAFORMA (V11). Global, solo insercion; tenant y usuario sin FK. */
+/** Fila de AUDITORIA_PLATAFORMA (V11, V12). Global, solo insercion; tenant, usuario y solicitud sin FK. */
 @Entity
 @Table(name = "auditoria_plataforma")
 @Getter
@@ -35,8 +35,12 @@ public class PlatformAuditEntry {
     @Column(name = "id_administrador", nullable = false)
     private Long adminId;
 
-    @Column(name = "id_tenant_objetivo", nullable = false)
+    /** NULL solo en RESEND_ACTIVATION (CHECK ck_auditoria_objetivo). */
+    @Column(name = "id_tenant_objetivo")
     private Long tenantId;
+
+    @Column(name = "id_solicitud_objetivo", length = 36)
+    private String requestId;
 
     @Column(name = "id_usuario_objetivo")
     private Long userId;
