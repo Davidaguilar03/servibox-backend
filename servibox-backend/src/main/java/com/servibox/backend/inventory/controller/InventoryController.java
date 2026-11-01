@@ -1,5 +1,6 @@
 package com.servibox.backend.inventory.controller;
 
+import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.auth.entity.Role;
 import com.servibox.backend.inventory.dto.CategoryRequest;
 import com.servibox.backend.inventory.dto.CategoryResponse;
@@ -102,7 +103,7 @@ public class InventoryController {
     @ResponseStatus(HttpStatus.CREATED)
     public ProductResponse crearProducto(@Valid @RequestBody ProductRequest request) {
         ProductCategory category = inventoryService.findCategoryById(request.categoryId())
-                .orElseThrow(() -> new IllegalArgumentException("Categoria no encontrada: " + request.categoryId()));
+                .orElseThrow(() -> new DomainValidationException("Categoria no encontrada: " + request.categoryId()));
 
         Product product = new Product();
         product.setCode(request.code());
@@ -119,7 +120,7 @@ public class InventoryController {
         inventoryService.findProductById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado: " + id));
         ProductCategory category = inventoryService.findCategoryById(request.categoryId())
-                .orElseThrow(() -> new IllegalArgumentException("Categoria no encontrada: " + request.categoryId()));
+                .orElseThrow(() -> new DomainValidationException("Categoria no encontrada: " + request.categoryId()));
         return ProductResponse.from(inventoryService.actualizarProducto(id, request.code(), request.description(),
                 request.purchaseCost(), category));
     }
@@ -137,7 +138,7 @@ public class InventoryController {
             throw new AdminRequiredException(mensaje);
         }
         if (!validator.validate(request).isEmpty()) {
-            throw new IllegalArgumentException("Peticion invalida");
+            throw new DomainValidationException("Peticion invalida");
         }
     }
 }

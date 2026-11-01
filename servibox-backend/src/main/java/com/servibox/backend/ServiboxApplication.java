@@ -2,8 +2,14 @@ package com.servibox.backend;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration;
 
-@SpringBootApplication
+/**
+ * Sin UserDetailsServiceAutoConfiguration: la app no usa usuarios en memoria (sus logins son
+ * propios, con JWT) y esa autoconfiguracion crea un usuario con una clave aleatoria que escribe
+ * en el log al arrancar. Ver 03-DECISIONS.md (tarea 52).
+ */
+@SpringBootApplication(exclude = UserDetailsServiceAutoConfiguration.class)
 public class ServiboxApplication {
 
 	public static void main(String[] args) {

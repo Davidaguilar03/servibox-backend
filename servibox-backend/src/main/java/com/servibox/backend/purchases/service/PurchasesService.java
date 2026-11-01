@@ -1,5 +1,6 @@
 package com.servibox.backend.purchases.service;
 
+import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.counterparties.entity.CounterpartyRole;
 import com.servibox.backend.counterparties.repository.CounterpartyRepository;
@@ -182,7 +183,7 @@ public class PurchasesService {
         List<PurchaseDetail> detalles = new ArrayList<>();
         for (LineaCompra linea : lineas) {
             Product producto = inventoryService.findProductById(linea.productId())
-                    .orElseThrow(() -> new IllegalArgumentException(
+                    .orElseThrow(() -> new DomainValidationException(
                             "Producto no encontrado: " + linea.productId()));
 
             int cantidad = linea.quantity() != null ? linea.quantity() : 0;
@@ -281,7 +282,7 @@ public class PurchasesService {
 
         treasuryService.bloquearCuentas(Arrays.asList(accountId));
         Account cuenta = treasuryService.findAccountById(accountId)
-                .orElseThrow(() -> new IllegalArgumentException("Cuenta no encontrada: " + accountId));
+                .orElseThrow(() -> new DomainValidationException("Cuenta no encontrada: " + accountId));
 
         // registrarEgresoDeCompra ya exige saldo suficiente.
         Movement pago = treasuryService.registrarEgresoDeCompra(
@@ -392,7 +393,7 @@ public class PurchasesService {
      */
     private Purchase bloquearCompra(Long purchaseId) {
         Purchase compra = purchaseRepository.findByIdAndTenantIdForUpdate(purchaseId, TenantContext.getTenantId())
-                .orElseThrow(() -> new IllegalArgumentException("Compra no encontrada: " + purchaseId));
+                .orElseThrow(() -> new DomainValidationException("Compra no encontrada: " + purchaseId));
         entityManager.refresh(compra);
         return compra;
     }

@@ -280,8 +280,32 @@ Lista de comprobaciones de despliegue (tarea 51), ademas de las de arriba:
    envio real verificado en un buzon antes de abrir la compuerta.
 9. Un reenvio de activacion de prueba deja su fila RESEND_ACTIVATION en `auditoria_plataforma`.
 10. Purga encendida (MAIL_OUTBOX_PURGE_ENABLED sin definir o true) salvo motivo documentado.
-11. HSTS y cabeceras del lado del proxy o frontend: ver los hallazgos de superficie de la
-    sesion 2026-10-31-backend-hardening.
+11. HSTS: una respuesta del backend por su dominio HTTPS trae
+    `Strict-Transport-Security: max-age=15552000` (sin includeSubDomains ni preload). El
+    frontend debe traer la suya, configurada en el servicio que lo sirve (ver abajo).
+12. Log de arranque sin `Using generated security password` ni ninguna credencial.
+
+### Cabeceras, errores y logs (tarea 52)
+
+* HSTS: en prod el backend envia `Strict-Transport-Security: max-age=15552000` (180 dias),
+  sin includeSubDomains ni preload, en todas sus respuestas. Railway termina TLS y la app ve
+  HTTP; el navegador ignora la cabecera sobre HTTP y la aplica en la respuesta HTTPS que le
+  entrega el proxy. No depende de X-Forwarded-Proto ni de forward-headers-strategy (que siguen
+  sin activarse). El backend solo cubre sus propias respuestas: la aplicacion estatica del
+  frontend necesita su propio HSTS en el servicio o CDN que la sirve (con el mismo origen y
+  `/api` por proxy, la pagina HTML la entrega ese servicio, no el backend). Antes de subir el
+  max-age, agregar includeSubDomains o pedir preload, confirmar que todos los subdominios de
+  servibox.co sirven HTTPS: es dificil de revertir en los navegadores.
+* Mensajes de error: los 400 de reglas de dominio conservan su texto exacto. Una excepcion de
+  libreria o de programacion responde el mismo codigo con un texto generico: 400
+  `Peticion invalida` o 500 `Error interno del servidor`. El detalle queda solo en el log.
+* Regla de logs: sin datos personales, contrasenas, tokens, cuerpos de peticion ni valores de
+  columnas. Los errores registran clase, SQLState y lugar del codigo (no el mensaje); el
+  worker del outbox registra el id del correo, el intento y la respuesta SMTP con el correo
+  enmascarado (j***@dominio) y las secuencias tipo token como [oculto]. El log de errores SQL
+  de Hibernate (categoria `org.hibernate.orm.jdbc.error`) esta apagado. Para diagnosticar un correo, cruzar el id
+  del log con `correos_salientes` por SQL.
+* Sin usuario en memoria de Spring: el arranque ya no escribe `Using generated security password`.
 
 ### Suspension y revocacion de tenants (5A)
 

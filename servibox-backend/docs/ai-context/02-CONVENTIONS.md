@@ -45,8 +45,11 @@
   `AccountRepository` ni `MovementRepository`. El stock si se ajusta directo:
   `SalesService` y `PurchasesService` usan `ProductRepository`, y los calculos de precio e
   IVA los piden a `InventoryService`.
+* Logs sin datos personales (tarea 52): nunca correos, contrasenas, tokens, cuerpos ni
+  valores de columnas. Excepciones con `SafeLog.describe` (clase, SQLState, lugar) y textos de
+  terceros con `SafeLog.mask`; identificar con ids internos (por ejemplo el del correo).
 * Login: todo camino que responde 401 sin comparar una contrasena real llama a
-  `LoginTimingEqualizer.compareDummy()` una sola vez (tarea 51); el camino con contrasena
+  `LoginTimingEqualizer.compareDummy()` una sola vez (tarea 51; tambien con clave de mas de 72 bytes, tarea 52); el camino con contrasena
   real no la llama. Un login nuevo sigue la misma regla.
 
 ## Manejo de errores
@@ -76,7 +79,8 @@ el contrato de plataforma, igual que 4A).
 
 * **Validaciones de dominio**: rangos, largos de columna, fechas y formatos se comprueban en
   el service con un mensaje especifico en espanol, compatible con el mapa frontend, y **400** (la excepcion de
-  dominio del modulo o `IllegalArgumentException`), nunca el "Peticion invalida" generico
+  dominio del modulo o `DomainValidationException`; una `IllegalArgumentException` a secas ya
+  no muestra su mensaje desde la tarea 52), nunca el "Peticion invalida" generico
   ni un 500 por pasar el largo de una columna. Se validan antes de modificar la entidad o
   de cualquier consulta que haga flush.
 * **Rol**: una regla por rol usa la comprobacion de `TenantController` (authority
@@ -278,7 +282,7 @@ entidad `TenantAware`.
 Y el codigo de respuesta: un recurso pedido **por la ruta** que no aparece para el tenant
 activo es `ResourceNotFoundException` (**404**, el mismo para "no existe" y para "es de
 otro tenant"). Un id que llega **dentro del cuerpo** y no resuelve es
-`IllegalArgumentException` (**400**): ahi el problema si es la peticion.
+`DomainValidationException` (**400**): ahi el problema si es la peticion.
 
 ### Bloqueos
 

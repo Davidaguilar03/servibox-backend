@@ -1,5 +1,6 @@
 package com.servibox.backend.reporting.service;
 
+import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.purchases.entity.Purchase;
 import com.servibox.backend.purchases.entity.PurchaseStatus;
 import com.servibox.backend.purchases.repository.PurchaseRepository;
@@ -156,10 +157,10 @@ public class ReportingService {
     /** Paquete: tambien la usa ReportExportService. */
     void validarRango(LocalDate desde, LocalDate hasta) {
         if (desde == null || hasta == null) {
-            throw new IllegalArgumentException("El rango necesita fecha desde y fecha hasta");
+            throw new DomainValidationException("El rango necesita fecha desde y fecha hasta");
         }
         if (desde.isAfter(hasta)) {
-            throw new IllegalArgumentException("La fecha desde no puede ser posterior a la fecha hasta");
+            throw new DomainValidationException("La fecha desde no puede ser posterior a la fecha hasta");
         }
     }
 

@@ -1,5 +1,6 @@
 package com.servibox.backend.sales.service;
 
+import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.counterparties.entity.CounterpartyRole;
 import com.servibox.backend.counterparties.service.CounterpartyService;
@@ -199,7 +200,7 @@ public class SalesService {
 
         for (LineaFactura linea : lineas) {
             Product producto = inventoryService.findProductById(linea.productId())
-                    .orElseThrow(() -> new IllegalArgumentException(
+                    .orElseThrow(() -> new DomainValidationException(
                             "Producto no encontrado: " + linea.productId()));
 
             int cantidad = linea.quantity() != null ? linea.quantity() : 0;
@@ -293,7 +294,7 @@ public class SalesService {
 
         treasuryService.bloquearCuentas(Arrays.asList(accountId));
         Account cuenta = treasuryService.findAccountById(accountId)
-                .orElseThrow(() -> new IllegalArgumentException("Cuenta no encontrada: " + accountId));
+                .orElseThrow(() -> new DomainValidationException("Cuenta no encontrada: " + accountId));
 
         Movement abono = treasuryService.registrarIngresoDeVenta(
                 cuenta, conceptoAbono(venta), monto, venta, fecha);
@@ -371,7 +372,7 @@ public class SalesService {
      */
     private Sale bloquearVenta(Long saleId) {
         Sale venta = saleRepository.findByIdAndTenantIdForUpdate(saleId, TenantContext.getTenantId())
-                .orElseThrow(() -> new IllegalArgumentException("Factura no encontrada: " + saleId));
+                .orElseThrow(() -> new DomainValidationException("Factura no encontrada: " + saleId));
         entityManager.refresh(venta);
         return venta;
     }

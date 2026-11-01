@@ -1,5 +1,6 @@
 package com.servibox.backend.platform;
 
+import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.auth.entity.Role;
 import com.servibox.backend.auth.entity.User;
 import com.servibox.backend.auth.repository.UserRepository;
@@ -53,7 +54,7 @@ public class PlatformTenantService {
         validarPaginacion(page, size);
         String busqueda = q == null ? "" : q.trim().toLowerCase(Locale.ROOT);
         if (busqueda.length() > MAX_BUSQUEDA) {
-            throw new IllegalArgumentException("La busqueda no puede superar 100 caracteres");
+            throw new DomainValidationException("La busqueda no puede superar 100 caracteres");
         }
         String pattern = "%" + busqueda.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
         List<Boolean> actives = status == null ? List.of(true, false) : List.of(status.active());
@@ -87,7 +88,7 @@ public class PlatformTenantService {
     public PlatformTenantDetailResponse suspend(Long id, Long expectedVersion, String reason, Long adminId) {
         String motivo = motivo(reason);
         if (motivo == null) {
-            throw new IllegalArgumentException("El motivo de suspension es obligatorio");
+            throw new DomainValidationException("El motivo de suspension es obligatorio");
         }
         Tenant tenant = bloquear(id, expectedVersion, TenantStatus.SUSPENDED);
         LocalDateTime now = now();
@@ -187,7 +188,7 @@ public class PlatformTenantService {
     /** Bloqueo pesimista de la fila, luego version y transicion, en ese orden. */
     private Tenant bloquear(Long id, Long expectedVersion, TenantStatus destino) {
         if (expectedVersion == null) {
-            throw new IllegalArgumentException("La version esperada es obligatoria");
+            throw new DomainValidationException("La version esperada es obligatoria");
         }
         Tenant tenant = tenantRepository.lockById(id).orElseThrow(PlatformTenantService::tenantNoEncontrado);
         if (!tenant.getVersion().equals(expectedVersion)) {
@@ -222,14 +223,14 @@ public class PlatformTenantService {
     private static String motivo(String reason) {
         String motivo = reason == null ? "" : reason.trim();
         if (motivo.length() > MAX_MOTIVO) {
-            throw new IllegalArgumentException("El motivo no puede superar 500 caracteres");
+            throw new DomainValidationException("El motivo no puede superar 500 caracteres");
         }
         return motivo.isEmpty() ? null : motivo;
     }
 
     private static void validarPaginacion(int page, int size) {
         if (page < 0 || size < 1 || size > 100) {
-            throw new IllegalArgumentException("Paginacion invalida");
+            throw new DomainValidationException("Paginacion invalida");
         }
     }
 

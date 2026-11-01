@@ -44,6 +44,8 @@ class LoginTimingEqualizerTest {
 
     private static final String UNAUTHORIZED = "{\"error\":\"Credenciales invalidas\",\"status\":401}";
     private static final String CLAVE = "clave-correcta-1";
+    /** Exactamente 72 bytes: el maximo que BCrypt evalua. */
+    private static final String LARGA = "a".repeat(72);
 
     @Autowired MockMvc mvc;
     @Autowired TenantRepository tenants;
@@ -59,6 +61,7 @@ class LoginTimingEqualizerTest {
         Long activo = tenant("taller-relleno", true);
         usuario(activo, "activo", true);
         usuario(activo, "inactivo", false);
+        usuario(activo, "largo", true, LARGA);
         Long suspendido = tenant("taller-relleno-susp", false);
         usuario(suspendido, "activo", true);
         bootstrap.create("relleno@example.invalid", CLAVE.toCharArray());
@@ -88,11 +91,15 @@ class LoginTimingEqualizerTest {
     }
 
     private void usuario(Long tenantId, String username, boolean active) {
+        usuario(tenantId, username, active, CLAVE);
+    }
+
+    private void usuario(Long tenantId, String username, boolean active, String clave) {
         TenantContext.setTenantId(tenantId);
         try {
             User u = new User();
             u.setUsername(username);
-            u.setPasswordHash(passwordEncoder.encode(CLAVE));
+            u.setPasswordHash(passwordEncoder.encode(clave));
             u.setEmail(username + "@example.invalid");
             u.setActive(active);
             u.setRole(Role.ADMIN);
@@ -141,6 +148,20 @@ class LoginTimingEqualizerTest {
         tenantLogin("taller-relleno", "no-existe", CLAVE, 401);
         unRelleno();
         tenantLogin("taller-relleno", "inactivo", CLAVE, 401);
+        unRelleno();
+    }
+
+    /**
+     * Tarea 52: con usuario activo y mas de 72 bytes, BCrypt no evaluaria la clave (Spring devuelve
+     * false sin calcular); ahora paga el relleno. Nunca autentica, ni con los 72 primeros bytes correctos.
+     */
+    @Test
+    void tenantConClaveDeMasDe72BytesPagaUnRellenoYNuncaAutentica() throws Exception {
+        tenantLogin("taller-relleno", "largo", LARGA, 200);
+        soloLaReal();
+        tenantLogin("taller-relleno", "largo", LARGA + "b", 401);
+        unRelleno();
+        tenantLogin("taller-relleno", "activo", "ñ".repeat(40), 401);
         unRelleno();
     }
 

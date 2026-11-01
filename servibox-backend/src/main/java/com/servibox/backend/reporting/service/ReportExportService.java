@@ -1,5 +1,6 @@
 package com.servibox.backend.reporting.service;
 
+import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.reporting.dto.KpisResponse;
 import com.servibox.backend.reporting.export.ReportModel;
 import com.servibox.backend.reporting.export.ReportModel.Column;
@@ -78,12 +79,12 @@ public class ReportExportService {
         Account cuenta = null;
         if (accountId != null) {
             cuenta = treasuryService.findAccountById(accountId)
-                    .orElseThrow(() -> new IllegalArgumentException("Cuenta no encontrada: " + accountId));
+                    .orElseThrow(() -> new DomainValidationException("Cuenta no encontrada: " + accountId));
         }
 
         List<FilaReporte> movimientos = treasuryService.listarParaReporte(accountId, desde, hasta, maxFilas + 1);
         if (movimientos.size() > maxFilas) {
-            throw new IllegalArgumentException("El reporte tiene mas de " + maxFilas
+            throw new DomainValidationException("El reporte tiene mas de " + maxFilas
                     + " movimientos: acota el rango de fechas");
         }
 
@@ -127,7 +128,7 @@ public class ReportExportService {
     private void validarRango(LocalDate desde, LocalDate hasta) {
         reportingService.validarRango(desde, hasta);
         if (ChronoUnit.DAYS.between(desde, hasta) + 1 > MAX_DIAS) {
-            throw new IllegalArgumentException("El rango de un reporte no puede pasar de " + MAX_DIAS + " dias");
+            throw new DomainValidationException("El rango de un reporte no puede pasar de " + MAX_DIAS + " dias");
         }
     }
 

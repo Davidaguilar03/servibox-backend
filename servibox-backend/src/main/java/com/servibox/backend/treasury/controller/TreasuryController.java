@@ -1,5 +1,6 @@
 package com.servibox.backend.treasury.controller;
 
+import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.shared.ResourceNotFoundException;
 import com.servibox.backend.treasury.dto.AccountRequest;
 import com.servibox.backend.treasury.dto.AccountResponse;
@@ -154,6 +155,6 @@ public class TreasuryController {
      */
     private Account cuentaObligatoria(Long id) {
         return treasuryService.findAccountById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Cuenta no encontrada: " + id));
+                .orElseThrow(() -> new DomainValidationException("Cuenta no encontrada: " + id));
     }
 }

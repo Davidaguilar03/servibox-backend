@@ -1,5 +1,6 @@
 package com.servibox.backend.treasury.service;
 
+import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.purchases.entity.Purchase;
 import com.servibox.backend.purchases.service.InsufficientBalanceException;
 import com.servibox.backend.sales.entity.Sale;
@@ -97,7 +98,7 @@ public class TreasuryService {
         Account cuenta = findAccountById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Cuenta no encontrada: " + id));
         if (request.type() != null && request.type() != cuenta.getType()) {
-            throw new IllegalArgumentException("El tipo de una cuenta no se puede cambiar");
+            throw new DomainValidationException("El tipo de una cuenta no se puede cambiar");
         }
         validarNombreUnico(cuenta.getId(), request.name());
         double inicial = Moneda.aCentavos(request.initialBalance());
@@ -121,7 +122,7 @@ public class TreasuryService {
 
     private static String normalizarColor(String color) {
         if (color != null && !color.matches("#[0-9A-Fa-f]{6}")) {
-            throw new IllegalArgumentException("El color debe tener el formato #RRGGBB");
+            throw new DomainValidationException("El color debe tener el formato #RRGGBB");
         }
         return color == null ? null : color.toUpperCase(Locale.ROOT);
     }
@@ -374,20 +375,20 @@ public class TreasuryService {
 
     private static void validarManual(Account cuenta, Double monto) {
         if (cuenta == null) {
-            throw new IllegalArgumentException("El movimiento necesita una cuenta");
+            throw new DomainValidationException("El movimiento necesita una cuenta");
         }
         if (monto == null || monto <= 0) {
-            throw new IllegalArgumentException("El monto del movimiento debe ser mayor a cero");
+            throw new DomainValidationException("El monto del movimiento debe ser mayor a cero");
         }
     }
 
     /** Largo de concepto y notas en MOVIMIENTOS (VARCHAR 255): 400 y no un error de columna. */
     private static void validarTextosManual(String concepto, String notas) {
         if (concepto != null && concepto.length() > 255) {
-            throw new IllegalArgumentException("El concepto admite hasta 255 caracteres");
+            throw new DomainValidationException("El concepto admite hasta 255 caracteres");
         }
         if (notas != null && notas.length() > 255) {
-            throw new IllegalArgumentException("Las notas admiten hasta 255 caracteres");
+            throw new DomainValidationException("Las notas admiten hasta 255 caracteres");
         }
     }
 
@@ -668,7 +669,7 @@ public class TreasuryService {
         MovementType tipo = movimiento.getType();
         MovementCategory categoria = movimiento.getCategory();
         if (tipo == null || categoria == null) {
-            throw new IllegalArgumentException("Un movimiento necesita tipo y categoria");
+            throw new DomainValidationException("Un movimiento necesita tipo y categoria");
         }
         boolean coherente = switch (categoria) {
             case GASTO_OPERATIVO, PAGO_COMPRA -> tipo == MovementType.EGRESO;
@@ -676,7 +677,7 @@ public class TreasuryService {
             case TRANSFERENCIA -> true;
         };
         if (!coherente) {
-            throw new IllegalArgumentException("Un movimiento de categoria " + categoria + " no puede ser " + tipo);
+            throw new DomainValidationException("Un movimiento de categoria " + categoria + " no puede ser " + tipo);
         }
         boolean conVenta = movimiento.getSale() != null;
         boolean conCompra = movimiento.getPurchase() != null;
@@ -686,7 +687,7 @@ public class TreasuryService {
             default -> !conVenta && !conCompra;
         };
         if (!facturaCoherente) {
-            throw new IllegalArgumentException("Un movimiento de categoria " + categoria
+            throw new DomainValidationException("Un movimiento de categoria " + categoria
                     + " no puede ir enlazado a esa factura (venta: " + conVenta + ", compra: " + conCompra + ")");
         }
     }

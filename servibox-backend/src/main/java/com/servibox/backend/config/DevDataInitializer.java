@@ -1,5 +1,6 @@
 package com.servibox.backend.config;
 
+import com.servibox.backend.shared.SafeLog;
 import com.servibox.backend.auth.entity.Role;
 import com.servibox.backend.auth.entity.User;
 import com.servibox.backend.auth.repository.UserRepository;
@@ -400,7 +401,7 @@ public class DevDataInitializer implements CommandLineRunner {
                     treasuryService.buscarMovimientos(null, null, null, null).size());
         } catch (RuntimeException ex) {
             log.warn("Perfil dev: fallo la siembra de demostracion en el paso [{}]: {}. El arranque sigue "
-                    + "con los datos creados hasta ese punto.", paso, ex.getMessage());
+                    + "con los datos creados hasta ese punto.", paso, SafeLog.describe(ex));
         } finally {
             TenantContext.clear();
         }
