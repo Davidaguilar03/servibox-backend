@@ -45,6 +45,7 @@ No poner secretos dentro de src; nunca pasarlos mediante COPY, ARG o ENV de buil
 | REGISTRATION_REQUESTS_PENDING_RESERVATION | No | Duracion Spring positiva (7d, 48h, P7D), default 7d: vigencia de la reserva de slug en PENDING. Confirmado por David el 2026-10-31 |
 | REGISTRATION_REQUESTS_APPROVED_RESERVATION | No | Duracion positiva, default 30d desde la aprobacion. Confirmado por David el 2026-10-31 |
 | REGISTRATION_REQUESTS_IDEMPOTENCY_RETENTION | No | Duracion positiva, default 48h de retencion de Idempotency-Key. Confirmado por David el 2026-10-31. Un plazo no positivo impide arrancar |
+| REGISTRATION_POLICY_VERSION | No | Fecha AAAA-MM-DD, default 2026-11-01: version vigente de la politica y terminos. Otro formato o fecha inexistente impide arrancar. Como cambiarla: docs/deploy/VPS.md, seccion 4 |
 | ACTIVATION_BASE_URL | Si | URL publica del frontend para el enlace `/activar#token=...`, sin query ni fragmento, maximo 200 caracteres. prod exige `https://`; nunca se toma del header Host. Dev: http://localhost:5173 |
 | REGISTRATION_ACTIVATION_TOKEN_TTL | No | Duracion positiva, default 24h de vigencia del enlace. Confirmado por David el 2026-10-31 |
 | REGISTRATION_ACTIVATION_RESEND_COOLDOWN | No | Duracion no negativa, default 60s entre enlaces de una solicitud. Confirmado por David el 2026-10-31 |
@@ -84,7 +85,7 @@ No poner secretos dentro de src; nunca pasarlos mediante COPY, ARG o ENV de buil
 Exportacion: rango maximo existente de 366 dias para PDF/XLSX; acotar fechas y filas.
 `DEV_DEMO_DATA` es exclusivo de dev, no se usa en prod. No hay siembra demo en prod.
 El JAR conserva bibliotecas H2 de desarrollo por el pom existente, pero prod fija el
-driver PostgreSQL y exige DB_URL; no arranca una base H2. Flyway aplica V1 a V12 (V9:
+driver PostgreSQL y exige DB_URL; no arranca una base H2. Flyway aplica de V1 en adelante (V9:
 SOLICITUDES_REGISTRO; V10: ACTIVATED, ACTIVACIONES_REGISTRO y CORREOS_SALIENTES; ninguna
 toca tablas comerciales; V11: version y suspension en TENANTS, auth_version en USUARIOS y
 AUDITORIA_PLATAFORMA, con valores por defecto sobre filas existentes; V12: reenvio de

@@ -134,6 +134,7 @@ solo; pero muchos intentos fallidos pueden topar el límite de Let's Encrypt.
 | ACTIVATION_BASE_URL | Sí | `https://servibox.co` | Base del enlace de activación. Falta o sin https: no arranca |
 | CORS_ALLOWED_ORIGINS | Sí con este esquema | `https://servibox.co` | Orígenes exactos separados por coma. Falta: la app arranca pero el navegador bloquea toda llamada del frontend a la API. Con `*`, `http://` o una ruta: no arranca |
 | REGISTRATION_REQUESTS_ENABLED | No (default false) | `false` | false: `/api/registration-requests` y `/activate` dan 404 (registro cerrado). Abrir solo tras verificar un correo real |
+| REGISTRATION_POLICY_VERSION | No (default `2026-11-01`) | `2026-11-01` | Versión vigente de la política y términos, formato `AAAA-MM-DD`. Otro formato o una fecha inexistente: no arranca. Ver "Publicar una política nueva" |
 | SMTP_HOST | No | `smtp.proveedor.com` | Sin él los correos quedan PENDING y la app arranca (aviso en el log) |
 | SMTP_PORT | No (587) | `587` | 465 con `SMTP_SECURITY=ssl` |
 | SMTP_SECURITY | No (starttls) | `starttls` | `starttls` o `ssl`; otro valor con SMTP_HOST: no arranca |
@@ -142,6 +143,27 @@ solo; pero muchos intentos fallidos pueden topar el límite de Let's Encrypt.
 | API_DOMAIN / FRONTEND_DOMAIN | No | `api.servibox.co` / `servibox.co` | Dominios de Caddy |
 | BACKEND_TAG | No (latest) | `a78e0e3` | Etiqueta de la imagen; ver sección 9 |
 | PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER | Fijada en el compose | `X-Real-IP` | No ponerla en .env. Vacía: todos los visitantes compartirían la IP de Caddy y un atacante bloquearía el login de todos (WARN al arrancar) |
+
+**Publicar una política nueva.** El frontend envía en `policyVersion` la versión que el
+solicitante aceptó, y el backend rechaza cualquiera distinta de `REGISTRATION_POLICY_VERSION`,
+así que las dos deben coincidir:
+
+1. Publicar el frontend con el texto nuevo y su versión (sección 7).
+2. Enseguida, en el servidor:
+
+   ```bash
+   cd ~/servibox-backend/deploy
+   sed -i "s/^REGISTRATION_POLICY_VERSION=.*/REGISTRATION_POLICY_VERSION=2027-01-15/" .env
+   docker compose -f docker-compose.prod.yml up -d backend
+   ```
+
+3. Comprobar en un navegador recién abierto que una solicitud de registro entra.
+
+Si `.env` no tiene la línea, el `sed` no cambia nada: agregarla primero.
+
+Entre los dos pasos, y mientras el backend reinicia, una solicitud nueva recibe error; quien tenga
+la página vieja abierta recibe 400 con el mensaje de recargar. Las solicitudes ya recibidas
+conservan la versión que aceptaron. Con `REGISTRATION_REQUESTS_ENABLED=false` no hay impacto.
 
 Generar cada secreto (64 caracteres hexadecimales; sin `$`, `#` ni comillas, que el compose
 interpretaría). Una ejecución por variable; nunca reutilizar un valor.

@@ -12,6 +12,31 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-11-01: Consentimiento de tratamiento de datos en la solicitud de registro (tarea 55)
+
+* Decision: POST `/api/registration-requests` exige `policyVersion` (AAAA-MM-DD, fecha real, sin
+  recortar) igual a REGISTRATION_POLICY_VERSION (default 2026-11-01; prod no arranca si es invalida).
+  Se guarda en `version_politica` y `fecha_aceptacion_politica` (V14, hora del servidor en UTC), sin
+  IP, agente de usuario ni otro dato. `acceptTerms` sigue siendo obligatorio y sin cambios.
+* Orden: la version se valida en forma con el resto del cuerpo; se compara con la vigente despues de
+  buscar la clave de reintento. Asi la misma clave con otra version es el 409 de cuerpo distinto, y
+  un reintento identico devuelve su resultado aunque la politica haya cambiado entre tanto: no crea
+  nada y el consentimiento ya quedo registrado con la version vigente de ese momento. Toda solicitud
+  nueva exige la vigente. El hash del cuerpo incluye la version.
+* Restriccion: columnas NULL solo por las filas anteriores, con CHECK `ck_solicitud_politica` que
+  exige las dos o ninguna. Que una solicitud nueva las lleve lo garantiza el servicio, unico camino
+  de creacion; la base no distingue una fila nueva sin consentimiento de una historica.
+* Listado sin cambios: `RegistrationRequestPage.items` omite los dos campos con
+  `@JsonIgnoreProperties`; el detalle los expone, tambien nulos.
+* Alternativas consideradas: NOT NULL (rompe filas existentes); CHECK con fecha de corte o `NOT
+  VALID` (H2 no lo admite igual, y en PG el `NOT VALID` se aplica al actualizar, asi que impediria
+  aprobar o rechazar una historica); guardar IP o agente (descartado: dato personal adicional);
+  comparar con la vigente antes de la clave (un reintento legitimo tras publicar una politica daria
+  400 y la misma clave con otra version 400 en vez de 409); DTO separado para el listado (duplica 16
+  campos).
+* Motivo: Ley 1581 de 2012, autorizacion previa, expresa e informada, con evidencia minima de que
+  version acepto cada solicitante. Evidencia en la [sesion](sessions/2026-11-01-registration-consent.md).
+
 ## 2026-11-01: Busqueda sin tildes ni mayusculas con columnas normalizadas (tarea 54)
 
 * Decision: `q` de servitecas y `tenantName` y `contactName` de solicitudes comparan contra columnas

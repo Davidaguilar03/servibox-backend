@@ -154,6 +154,39 @@ class ProductionConfigurationTest {
     }
 
     @Test
+    void laVersionDeLaPoliticaTieneValorPorDefectoValido() {
+        runner.withPropertyValues(PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL, "JWT_SECRET=" + "x".repeat(32))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getEnvironment().getProperty("servibox.registration-requests.policy-version"))
+                            .isEqualTo("2026-11-01");
+                });
+    }
+
+    @Test
+    void aceptaOtraVersionDeLaPolitica() {
+        runner.withPropertyValues(PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL, "JWT_SECRET=" + "x".repeat(32),
+                        "REGISTRATION_POLICY_VERSION=2027-02-28")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getEnvironment().getProperty("servibox.registration-requests.policy-version"))
+                            .isEqualTo("2027-02-28");
+                });
+    }
+
+    @Test
+    void rechazaVersionDeLaPoliticaInvalida() {
+        for (String valor : new String[]{"", "   ", "v1", "2026/11/01", "2026-02-30", "2026-11-01 "}) {
+            runner.withPropertyValues(PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL, "JWT_SECRET=" + "x".repeat(32))
+                    .withInitializer(context -> context.getEnvironment().getPropertySources().addFirst(
+                            new org.springframework.core.env.MapPropertySource("entorno",
+                                    java.util.Map.of("REGISTRATION_POLICY_VERSION", valor))))
+                    .run(context -> assertThat(context.getStartupFailure()).as(valor).hasMessageContaining(
+                            "REGISTRATION_POLICY_VERSION debe ser una fecha valida con formato AAAA-MM-DD"));
+        }
+    }
+
+    @Test
     void corsAceptaOrigenesHttpsExactos() {
         runner.withPropertyValues(PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL, "JWT_SECRET=" + "x".repeat(32),
                         "CORS_ALLOWED_ORIGINS=https://servibox.co, https://www.servibox.co")

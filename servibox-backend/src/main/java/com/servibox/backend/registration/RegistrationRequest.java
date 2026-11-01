@@ -96,6 +96,14 @@ public class RegistrationRequest {
     @Column(name = "id_tenant_activado", unique = true)
     private Long activatedTenantId;
 
+    /** Desde V14: version de la politica aceptada. Null solo en filas anteriores; toda solicitud nueva la lleva. */
+    @Column(name = "version_politica", length = 10)
+    private String policyVersion;
+
+    /** Desde V14: fecha y hora del servidor (UTC) en que se acepto; va junto con policyVersion. */
+    @Column(name = "fecha_aceptacion_politica")
+    private LocalDateTime policyAcceptedAt;
+
     public void setBusinessName(String businessName) {
         this.businessName = businessName;
         this.businessNameSearch = SearchText.normalize(businessName);

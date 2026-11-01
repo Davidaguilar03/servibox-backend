@@ -338,6 +338,7 @@ construye respuestas de error. Todas usan el mismo formato, el record
 | `DuplicateTenantSlugException` (slug ya registrado) | 409 | "Ya existe una serviteca con el identificador X" |
 | `RegistrationDisabledException` (`servibox.registration.enabled=false`, o solicitudes de registro abiertas) | 403 | "El registro de nuevas servitecas esta deshabilitado" |
 | `RegistrationRequestConflictException` (solicitudes de registro) | 409 | "El codigo solicitado no esta disponible", "La clave de reintento ya se uso con otros datos", "La solicitud ya no permite esta operacion" o "El recurso cambio; actualiza e intenta de nuevo" |
+| `InvalidRegistrationException` (consentimiento de la solicitud de registro, tarea 55) | 400 | "La version de la politica es obligatoria", "La version de la politica no es valida" o "La politica fue actualizada; recarga la pagina para continuar" |
 | `PlatformTenantConflictException` (suspender o reactivar, 5A) | 409 | "El recurso cambio; actualiza e intenta de nuevo", "El tenant ya esta suspendido" o "El tenant ya esta activo" |
 | `ActivationException` (enlace de activacion, 4B) | 400, 410 o 409 | "El enlace de activacion no es valido" (400), "El enlace de activacion vencio o fue reemplazado" (410), "El enlace de activacion ya fue utilizado; inicia sesion" (409) |
 | `ResendLimitException` (reenvio de activacion, 4B) | 429 | "Espera un momento antes de reenviar la activacion" o "Se alcanzo el limite diario de reenvios de esta solicitud" |
@@ -397,6 +398,12 @@ abre POST `/api/registration-requests` y, mientras esta abierta, el registro inm
 responde 403: nunca hay dos vias publicas activas. Plazos configurables en
 [DEPLOYMENT.md](../DEPLOYMENT.md); contrato en la sesion 2026-10-30-registration-requests.
 La misma compuerta abre POST `/api/registration-requests/activate` (4B); apagada, 404.
+`servibox.registration-requests.policy-version` (REGISTRATION_POLICY_VERSION, default
+2026-11-01, tarea 55) es la version vigente de la politica y terminos, AAAA-MM-DD; prod no
+arranca si no es una fecha valida. La solicitud publica debe traerla exacta en `policyVersion`;
+se guarda con la hora del servidor en UTC (V14), sin IP ni agente de usuario, y el detalle de
+plataforma la expone. Un reintento con la misma clave y el mismo cuerpo se resuelve antes de
+comparar con la vigente. Ver [03-DECISIONS](03-DECISIONS.md).
 
 Activacion y correo (4B): aprobar y reenviar emiten un token opaco, guardan su SHA-256 en
 ACTIVACIONES_REGISTRO y encolan el correo en CORREOS_SALIENTES en la misma transaccion;

@@ -39,6 +39,20 @@ class RegistrationRequestsDisabledTest {
         assertThat(requests.count()).isZero();
     }
 
+    /** Apagada responde 404 antes de mirar el consentimiento: no revela que el campo existe. */
+    @Test
+    void conLaCompuertaApagadaLaVersionDeLaPoliticaNoSeEvalua() throws Exception {
+        String conVersion = RegistrationRequestTest.cuerpo("taller-off");
+        for (String cuerpo : new String[]{conVersion.replace(",\n \"policyVersion\":\"2026-11-01\"", ""),
+                conVersion.replace("2026-11-01", "no-valida"), conVersion.replace("2026-11-01", "2026-10-01")}) {
+            mvc.perform(post(RegistrationRequestTest.RUTA).header("Idempotency-Key", "clave-off-2")
+                            .contentType(MediaType.APPLICATION_JSON).content(cuerpo))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.error").value("Recurso no encontrado"));
+        }
+        assertThat(requests.count()).isZero();
+    }
+
     @Test
     void conLaCompuertaApagadaActivarRespondeComoNoDisponible() throws Exception {
         long antes = tenants.count();

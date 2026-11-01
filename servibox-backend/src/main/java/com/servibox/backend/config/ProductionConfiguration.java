@@ -1,5 +1,6 @@
 package com.servibox.backend.config;
 
+import com.servibox.backend.registration.RegistrationRequestService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.context.annotation.Bean;
@@ -52,6 +53,10 @@ public class ProductionConfiguration {
             }
             if (!environment.getProperty("servibox.activation.base-url", "").startsWith("https://")) {
                 throw new IllegalStateException("ACTIVATION_BASE_URL es obligatoria en prod y debe usar https");
+            }
+            if (!RegistrationRequestService.esVersionDePolitica(
+                    environment.getProperty("servibox.registration-requests.policy-version", ""))) {
+                throw new IllegalStateException("REGISTRATION_POLICY_VERSION debe ser una fecha valida con formato AAAA-MM-DD");
             }
             for (String origin : SecurityConfig.allowedOrigins(environment)) {
                 if (!origin.matches("https://[A-Za-z0-9.-]+(:[0-9]+)?")) {
