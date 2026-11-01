@@ -196,6 +196,13 @@ RESEND_ACTIVATION con el administrador y `id_solicitud_objetivo`, sin tenant, en
 transaccion del reenvio. Sin endpoint de lectura.
 Contrato y ejemplos en la sesion 2026-10-30-platform-tenants-users.
 
+Busqueda por texto del panel (tarea 54): `q` de servitecas y `tenantName` y `contactName` de
+solicitudes comparan con LIKE contiene contra columnas normalizadas por `shared.SearchText` (sin
+tildes ni mayusculas, espacios colapsados, la ñ como n), que mantienen los setters de `Tenant` y
+`RegistrationRequest`. El codigo (slug) se compara con `lower(slug)`. No hay indice: un B-tree no
+sirve con comodin inicial. Usuarios de una serviteca no tiene busqueda por texto. Detalle en la
+sesion 2026-11-01-accent-insensitive-search.
+
 Autenticacion por token, sin sesion de servidor. El tenant no lo elige el cliente: viaja
 firmado dentro del token.
 
@@ -1267,6 +1274,9 @@ con las variables de conexion y JWT ya documentadas.
 
 ### Gestion del esquema con Flyway
 
+* **Migraciones Java:** V13 vive en `src/main/java/db/migration` porque su backfill reutiliza
+  `SearchText`. Flyway la encuentra dentro del JAR empaquetado (probado en perfil prod sobre
+  PostgreSQL 16). Las demas son SQL.
 * **El esquema lo mandan las migraciones**, en `src/main/resources/db/migration`
   (`V1__init_schema.sql`, escrita a mano desde 04-DATA-MODEL.md, y
   `V2__tenant_nit_phone_user_full_name.sql`, que agrega `nit_tenant` y `telefono_tenant` a

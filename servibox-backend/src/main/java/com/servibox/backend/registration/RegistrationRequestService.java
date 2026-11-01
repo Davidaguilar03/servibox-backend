@@ -7,6 +7,7 @@ import com.servibox.backend.registration.dto.RegistrationAcknowledgment;
 import com.servibox.backend.registration.dto.RegistrationRequestBody;
 import com.servibox.backend.registration.dto.RegistrationRequestPage;
 import com.servibox.backend.shared.ResourceNotFoundException;
+import com.servibox.backend.shared.SearchText;
 import com.servibox.backend.tenant.TenantRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -155,10 +156,10 @@ public class RegistrationRequestService {
             filtro = filtro.and((root, q, cb) -> cb.equal(root.get("status"), status));
         }
         if (nombre != null) {
-            filtro = filtro.and(contiene("businessName", nombre));
+            filtro = filtro.and(contiene("businessNameSearch", nombre));
         }
         if (responsable != null) {
-            filtro = filtro.and(contiene("contactName", responsable));
+            filtro = filtro.and(contiene("contactNameSearch", responsable));
         }
         if (desde != null) {
             LocalDateTime inicio = inicioDelDiaUtc(desde);
@@ -177,13 +178,14 @@ public class RegistrationRequestService {
                 page, size, result.getTotalElements(), result.getTotalPages());
     }
 
-    /** Recortado; vacio equivale a ausente. Mas de 100 caracteres (tras recortar) es 400. */
+    /** Normalizado (SearchText); vacio equivale a ausente. Mas de 100 caracteres (tras recortar) es 400. */
     private static String textoFiltro(String valor) {
         String texto = valor == null ? "" : valor.trim();
         if (texto.length() > MAX_FILTRO_TEXTO) {
             throw new InvalidRegistrationException("El filtro de texto no puede superar 100 caracteres");
         }
-        return texto.isEmpty() ? null : texto.toLowerCase(Locale.ROOT);
+        String normalizado = SearchText.normalize(texto);
+        return normalizado.isEmpty() ? null : normalizado;
     }
 
     /** AAAA-MM-DD estricto (ISO, rechaza 2026-02-30); vacio equivale a ausente. */
@@ -204,10 +206,10 @@ public class RegistrationRequestService {
         return dia.atStartOfDay(BOGOTA).withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
     }
 
-    /** Contiene sin distinguir mayusculas; %, _ y \ del usuario son literales (ESCAPE '\'). */
-    private static Specification<RegistrationRequest> contiene(String atributo, String textoMinusculas) {
-        String patron = "%" + textoMinusculas.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
-        return (root, q, cb) -> cb.like(cb.lower(root.get(atributo)), patron, '\\');
+    /** Contiene sobre una columna normalizada; %, _ y \ del usuario son literales (ESCAPE '\'). */
+    private static Specification<RegistrationRequest> contiene(String atributo, String textoNormalizado) {
+        String patron = "%" + textoNormalizado.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+        return (root, q, cb) -> cb.like(root.get(atributo), patron, '\\');
     }
 
     @Transactional(readOnly = true)

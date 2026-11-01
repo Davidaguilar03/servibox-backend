@@ -397,9 +397,10 @@ class RegistrationRequestTest {
     void laBaseImpideDosReservasVigentesYEstadosIncoherentes() {
         String insert = "INSERT INTO solicitudes_registro (id_solicitud, nombre_comercial, nit, telefono,"
                 + " nombre_responsable, correo_responsable, correo_normalizado, slug_solicitado, slug_reservado,"
-                + " estado, hash_cuerpo, idempotencia_expira_en, fecha_creacion, reserva_expira_en, motivo_rechazo)"
+                + " estado, hash_cuerpo, idempotencia_expira_en, fecha_creacion, reserva_expira_en, motivo_rechazo,"
+                + " nombre_comercial_busqueda, nombre_responsable_busqueda)"
                 + " VALUES (?, 'n', '1', '1', 'n', 'a@b.co', 'a@b.co', ?, ?, ?, 'h',"
-                + " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)";
+                + " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, 'n', 'n')";
         jdbc.update(insert, "db-1", "taller-db", "taller-db", "PENDING", null);
         jdbc.update(insert, "db-2", "taller-db", null, "REJECTED", "m");
         jdbc.update(insert, "db-3", "taller-db", null, "CANCELLED", null);

@@ -1,5 +1,6 @@
 package com.servibox.backend.tenant;
 
+import com.servibox.backend.shared.SearchText;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -7,7 +8,9 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import lombok.AccessLevel;
 import lombok.Data;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -24,6 +27,11 @@ public class Tenant {
 
     @Column(name = "nombre_tenant", length = 150, nullable = false)
     private String name;
+
+    /** Desde V13. Se mantiene solo desde setName; la busqueda de plataforma compara contra esta columna. */
+    @Column(name = "nombre_busqueda_tenant", length = 450, nullable = false)
+    @Setter(AccessLevel.NONE)
+    private String nameSearch;
 
     @Column(name = "slug_tenant", length = 100, nullable = false, unique = true)
     private String slug;
@@ -51,6 +59,11 @@ public class Tenant {
     /** En UTC, igual que created_at y updated_at de las entidades de negocio. */
     @Column(name = "fecha_creacion_tenant", nullable = false, updatable = false)
     private LocalDateTime createdAt;
+
+    public void setName(String name) {
+        this.name = name;
+        this.nameSearch = SearchText.normalize(name);
+    }
 
     @PrePersist
     void onCreate() {

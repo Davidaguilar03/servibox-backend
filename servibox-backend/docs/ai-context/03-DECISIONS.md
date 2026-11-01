@@ -12,6 +12,28 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-11-01: Busqueda sin tildes ni mayusculas con columnas normalizadas (tarea 54)
+
+* Decision: `q` de servitecas y `tenantName` y `contactName` de solicitudes comparan contra columnas
+  normalizadas mantenidas por la aplicacion (V13: `nombre_busqueda_tenant`,
+  `nombre_comercial_busqueda`, `nombre_responsable_busqueda`, VARCHAR(450) NOT NULL).
+  `shared.SearchText`: NFD sin marcas, minusculas, espacios recortados y colapsados; la ñ se busca
+  como n. El slug sigue con `lower(slug)` porque solo admite minusculas, numeros y guion. Contrato,
+  errores y escape de `%`, `_` y `\` sin cambios. REEMPLAZA "Los acentos cuentan" de la tarea 48.
+* Backfill en una migracion Java (`db.migration.V13__search_normalized_columns`): es la unica forma
+  de que la migracion aplique la misma regla que la aplicacion en H2 y PostgreSQL. Primera migracion
+  Java del repo.
+* Mantenimiento en los setters de la entidad, sin setter publico para la columna, y NOT NULL sin
+  default para que un INSERT que la olvide falle en vez de dejar una fila imposible de encontrar.
+* Sin indice: la busqueda es "contiene" y un B-tree no se usa con comodin inicial (EXPLAIN en PG16);
+  con 10010 servitecas el recorrido tarda 5.5 ms.
+* Alternativas consideradas: extension unaccent (funciona en PG16 con el usuario del compose, pero H2
+  no la tiene, exige alias distinto por motor y no es indexable sin envoltura IMMUTABLE); backfill con
+  `TRANSLATE` (lista fija, se separa de la regla Java); columnas nullable (fila invisible sin aviso);
+  `@PreUpdate` (solo corre al guardar; el setter deja la entidad coherente siempre).
+* Motivo: un mismo resultado en todos los motores, sin depender de permisos ni extensiones.
+  Evidencia en la [sesion](sessions/2026-11-01-accent-insensitive-search.md).
+
 ## 2026-11-01: Despliegue en VPS con Docker Compose y Caddy (despliegue 1)
 
 * Decision: produccion en un VPS Linux (Ubuntu 24.04, 2 GB) con Docker Compose:
@@ -189,6 +211,7 @@ Formato de cada entrada:
 * Decision: GET `/api/platform/registration-requests` acepta ademas `tenantName`,
   `contactName`, `receivedFrom` y `receivedTo`, opcionales y combinados con AND junto a
   `status`. Texto: recortado, vacio equivale a ausente, contiene sin distinguir mayusculas
+  (y desde la tarea 54 sin distinguir tildes: REEMPLAZADO el `lower` sobre la columna original)
   sobre `nombre_comercial` y `nombre_responsable`, con `%`, `_` y `\` literales (ESCAPE
   `\`), hasta 100 caracteres. Fechas AAAA-MM-DD estrictas, dias de America/Bogota sobre
   `fecha_creacion` (UTC sin zona): desde `>=` inicio del dia, hasta `<` inicio del dia

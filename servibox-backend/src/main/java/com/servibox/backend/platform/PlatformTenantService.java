@@ -13,6 +13,7 @@ import com.servibox.backend.platform.dto.PlatformTenantUserResponse;
 import com.servibox.backend.platform.dto.TenantSessionsRevokedResponse;
 import com.servibox.backend.registration.RegistrationRequestStatus;
 import com.servibox.backend.shared.ResourceNotFoundException;
+import com.servibox.backend.shared.SearchText;
 import com.servibox.backend.tenant.Tenant;
 import com.servibox.backend.tenant.TenantRepository;
 import com.servibox.backend.tenant.TenantStatus;
@@ -29,7 +30,6 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -52,10 +52,11 @@ public class PlatformTenantService {
     @Transactional(readOnly = true)
     public PlatformPage<PlatformTenantResponse> list(TenantStatus status, String q, int page, int size) {
         validarPaginacion(page, size);
-        String busqueda = q == null ? "" : q.trim().toLowerCase(Locale.ROOT);
-        if (busqueda.length() > MAX_BUSQUEDA) {
+        String recortada = q == null ? "" : q.trim();
+        if (recortada.length() > MAX_BUSQUEDA) {
             throw new DomainValidationException("La busqueda no puede superar 100 caracteres");
         }
+        String busqueda = SearchText.normalize(recortada);
         String pattern = "%" + busqueda.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
         List<Boolean> actives = status == null ? List.of(true, false) : List.of(status.active());
         Page<Tenant> result = tenantRepository.search(actives, pattern,

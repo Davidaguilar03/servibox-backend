@@ -25,9 +25,9 @@ public interface TenantRepository extends JpaRepository<Tenant, Long> {
     @Query("select t from Tenant t where t.id = :id")
     Optional<Tenant> lockById(@Param("id") Long id);
 
-    /** Panel de plataforma: estados en `actives`, `pattern` en minusculas con % y escape '\'. */
+    /** Panel de plataforma: estados en `actives`, `pattern` normalizado (SearchText) con % y escape '\'. */
     @Query("select t from Tenant t where t.active in :actives"
-            + " and (lower(t.name) like :pattern escape '\\' or lower(t.slug) like :pattern escape '\\')")
+            + " and (t.nameSearch like :pattern escape '\\' or lower(t.slug) like :pattern escape '\\')")
     Page<Tenant> search(@Param("actives") Collection<Boolean> actives, @Param("pattern") String pattern,
             Pageable pageable);
 

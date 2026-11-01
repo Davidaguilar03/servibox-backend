@@ -95,6 +95,24 @@ class RegistrationActivationTest {
                 """.formatted(token, username, password);
     }
 
+    /** Activar crea el tenant por el camino real: desde ese momento se encuentra sin tildes ni mayusculas. */
+    @Test
+    void elTenantActivadoSeEncuentraSinTildesNiMayusculas() throws Exception {
+        MvcResult r = mvc.perform(post(RegistrationRequestTest.RUTA).header("Idempotency-Key", "clave-acento-activa")
+                .contentType(MediaType.APPLICATION_JSON).characterEncoding(java.nio.charset.StandardCharsets.UTF_8)
+                .content(RegistrationRequestTest.cuerpo("taller-acento-activa").replace("Serviteca Uno", "Peñón Camión")))
+                .andExpect(status().isAccepted()).andReturn();
+        String id = JsonPath.read(r.getResponse().getContentAsString(), "$.requestId");
+        plataforma(id, "approve", "{\"expectedVersion\":0}").andExpect(status().isOk());
+        activar(entregarYLeerToken(), "dueno").andExpect(status().isOk());
+
+        mvc.perform(get("/api/platform/tenants").param("q", "PENON  camion")
+                .header("Authorization", "Bearer " + platformToken))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items[0].slug").value("taller-acento-activa"))
+                .andExpect(jsonPath("$.items[0].name").value("Peñón Camión"));
+    }
+
     private String aprobada(String slug) throws Exception {
         MvcResult r = mvc.perform(post(RegistrationRequestTest.RUTA).header("Idempotency-Key", "clave-" + slug)
                 .contentType(MediaType.APPLICATION_JSON).content(RegistrationRequestTest.cuerpo(slug)))
