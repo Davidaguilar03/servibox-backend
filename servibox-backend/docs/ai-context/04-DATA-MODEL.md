@@ -2,11 +2,11 @@
 
 Fuente: Diccionario de Datos de ServiBox (informe UPTC-EISC-SB-01) y su diagrama entidad-relacion, 14 entidades en tercera forma normal. Este archivo es la especificacion del esquema al que debe converger el codigo.
 
-**Estado.** El refactor de normalizacion termino (ver `sessions/2026-10-06-refactor-normalizacion.md`): las 14 tablas comerciales parten de Flyway `V1__init_schema.sql`, escrita desde este archivo; V2 a V7 las evolucionan. V8 agrega la identidad global de plataforma, V9 las solicitudes de registro y V10 la activacion de cuentas y el outbox de correo, y V11 la auditoria de plataforma, para 19 tablas. `schema.SchemaConformanceTest` compara la base con este archivo. Donde el codigo y este archivo difieran, este archivo manda, salvo lo anotado en "Decisiones de implementacion" y "Pendientes" al final.
+**Estado.** El refactor de normalizacion termino (ver `sessions/2026-10-06-refactor-normalizacion.md`): las 14 tablas comerciales parten de Flyway `V1__init_schema.sql`, escrita desde este archivo; V2 a V7 las evolucionan. V8 agrega la identidad global de plataforma, V9 las solicitudes de registro y V10 la activacion de cuentas y el outbox de correo, y V11 la auditoria de plataforma, para 19 tablas. V12 amplia la auditoria al reenvio de activacion (sin tablas nuevas). `schema.SchemaConformanceTest` compara la base con este archivo. Donde el codigo y este archivo difieran, este archivo manda, salvo lo anotado en "Decisiones de implementacion" y "Pendientes" al final.
 
 ## Reglas generales
 
-* Multi-tenant: base compartida y esquema compartido. La columna `id_tenant` esta en todas las tablas excepto `TENANTS`, `CATEGORIA_IMPUESTOS`, `ADMINISTRADORES_PLATAFORMA` (V8, identidad global adicional a las 14 tablas comerciales) `SOLICITUDES_REGISTRO` (V9, global, sin datos comerciales), `ACTIVACIONES_REGISTRO` y `CORREOS_SALIENTES` (V10, globales) y `AUDITORIA_PLATAFORMA` (V11, global; nombra al tenant afectado en `id_tenant_objetivo`, sin FK). En la capa JPA el aislamiento lo da el `@Filter` de Hibernate.
+* Multi-tenant: base compartida y esquema compartido. La columna `id_tenant` esta en todas las tablas excepto `TENANTS`, `CATEGORIA_IMPUESTOS`, `ADMINISTRADORES_PLATAFORMA` (V8, identidad global adicional a las 14 tablas comerciales) `SOLICITUDES_REGISTRO` (V9, global, sin datos comerciales), `ACTIVACIONES_REGISTRO` y `CORREOS_SALIENTES` (V10, globales) y `AUDITORIA_PLATAFORMA` (V11, global; nombra al tenant afectado en `id_tenant_objetivo`, sin FK; desde V12 el reenvio nombra la solicitud en `id_solicitud_objetivo`). En la capa JPA el aislamiento lo da el `@Filter` de Hibernate.
 * Unicos compuestos con `id_tenant`: `(id_tenant, username)` en USUARIOS, `(id_tenant, nombre_cuenta)` en CUENTAS, `(id_tenant, numero_documento)` en TERCEROS, `(id_tenant, id_tercero, numero_factura_compra)` en COMPRAS (desde V3; antes `(id_tenant, numero_factura_compra)`), `(id_tenant, numero_factura_venta)` en VENTAS, `(id_tenant, codigo_producto)` en PRODUCTOS.
 * Motor: PostgreSQL 16. Tipos fisicos: identificadores y claves foraneas `BIGINT`; texto `VARCHAR(n)`; valores de enum `VARCHAR(n)` con su longitud, no tipo ENUM; montos en COP `NUMERIC(14,2)`; tasas y porcentajes como fraccion `NUMERIC(8,6)` (0.19 es 19 por ciento); fechas de negocio (`fecha_movimiento`, `fecha_compra`, `fecha_vencimiento_compra`, `fecha_venta`, `fecha_vencimiento_venta`) `DATE`; fechas de auditoria (`created_at`, `updated_at`, `fecha_creacion_tenant`) `TIMESTAMP WITHOUT TIME ZONE` en UTC; banderas `BOOLEAN`.
 * Integridad referencial: `ON DELETE RESTRICT` en todas las claves foraneas: nada con historial transaccional se elimina.
@@ -126,16 +126,19 @@ Modulo: Outbox de correo, V10 (tarea 4B). Global, sin tenant. Fechas en UTC.
 
 ### AUDITORIA_PLATAFORMA
 
-Modulo: Auditoria de plataforma, V11 (tarea 5A). Global, solo insercion. Fechas en UTC.
+Modulo: Auditoria de plataforma, V11 (tarea 5A) y V12 (tarea 51, reenvio de activacion). Global,
+solo insercion. Fechas en UTC. CHECK ck_auditoria_objetivo (V12): RESEND_ACTIVATION lleva solo
+id_solicitud_objetivo; las acciones sobre tenants llevan id_tenant_objetivo y nunca solicitud.
 
 | Campo | Tipo Dato | Longitud | Nulidad | Clave | Descripcion Tecnica y Regla de Negocio |
 |-|-|-|-|-|-|
 | id_auditoria | BIGINT | 8 bytes | NOT NULL | PK | Identificador autoincremental. |
-| accion | VARCHAR | 30 | NOT NULL | - | SUSPEND_TENANT, REACTIVATE_TENANT, REVOKE_USER_SESSIONS o REVOKE_TENANT_SESSIONS (CHECK). |
+| accion | VARCHAR | 30 | NOT NULL | - | SUSPEND_TENANT, REACTIVATE_TENANT, REVOKE_USER_SESSIONS, REVOKE_TENANT_SESSIONS o RESEND_ACTIVATION (CHECK). |
 | id_administrador | BIGINT | 8 bytes | NOT NULL | FK | FK a ADMINISTRADORES_PLATAFORMA(id_administrador) que ejecuto la accion. |
-| id_tenant_objetivo | BIGINT | 8 bytes | NOT NULL | - | Tenant afectado. Sin FK a proposito: el registro sobrevive a un borrado permanente. |
+| id_tenant_objetivo | BIGINT | 8 bytes | NULL | - | Tenant afectado; NULL solo en RESEND_ACTIVATION (desde V12). Sin FK a proposito: el registro sobrevive a un borrado permanente. |
 | id_usuario_objetivo | BIGINT | 8 bytes | NULL | - | Usuario afectado en REVOKE_USER_SESSIONS; NULL en las demas. Sin FK por el mismo motivo. |
 | motivo | VARCHAR | 500 | NULL | - | Motivo recortado; obligatorio solo al suspender (lo exige el servicio). |
+| id_solicitud_objetivo | VARCHAR | 36 | NULL | - | Solicitud de registro afectada en RESEND_ACTIVATION (V12); NULL en las demas. Sin FK por el mismo motivo. |
 | fecha_auditoria | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Momento de la accion. |
 
 ### CONFIGURACION_FINANCIERA

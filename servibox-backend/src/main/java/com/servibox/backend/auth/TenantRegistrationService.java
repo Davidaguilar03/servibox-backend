@@ -10,6 +10,7 @@ import com.servibox.backend.inventory.entity.ProductCategory;
 import com.servibox.backend.inventory.entity.TaxType;
 import com.servibox.backend.inventory.service.InventoryService;
 import com.servibox.backend.registration.RegistrationRequestRepository;
+import com.servibox.backend.shared.ResourceNotFoundException;
 import com.servibox.backend.shared.TenantAwareEntity;
 import com.servibox.backend.tenant.Tenant;
 import com.servibox.backend.tenant.TenantContext;
@@ -22,6 +23,7 @@ import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.hibernate.Session;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -75,6 +77,7 @@ public class TenantRegistrationService {
     private final TreasuryService treasuryService;
     private final CounterpartyService counterpartyService;
     private final RegistrationRequestRepository requestRepository;
+    private final Environment environment;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -88,6 +91,11 @@ public class TenantRegistrationService {
 
     @Transactional
     public LoginResponse registrar(RegisterRequest request) {
+        // En prod el registro inmediato no existe (404), sin importar REGISTRATION_ENABLED ni la
+        // compuerta de solicitudes: la unica via de alta es la solicitud revisada. Dev y test igual que antes.
+        if (environment.matchesProfiles("prod")) {
+            throw new ResourceNotFoundException("Recurso no encontrado");
+        }
         if (!enabled || requestsEnabled) {
             throw new RegistrationDisabledException();
         }

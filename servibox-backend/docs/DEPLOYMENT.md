@@ -35,7 +35,7 @@ No poner secretos dentro de src; nunca pasarlos mediante COPY, ARG o ENV de buil
 | JWT_EXPIRATION_MS | No | Milisegundos positivos, default 86400000 |
 | PLATFORM_JWT_SECRET | Si | Clave aleatoria privada exclusiva de plataforma, al menos 32 bytes UTF-8; distinta de JWT_SECRET, sin valores dev/test ni fallback productivo |
 | PLATFORM_JWT_EXPIRATION_MS | No | Entre 1 y 86400000 milisegundos, default 900000 (15 minutos); sin refresh |
-| REGISTRATION_ENABLED | No | Booleano, default true; false responde 403 al registro. Decidir politica antes de publicar |
+| REGISTRATION_ENABLED | No | Booleano, default true; false responde 403 al registro inmediato en dev. En prod no tiene efecto: el registro inmediato responde siempre 404 (ver Registro inmediato cerrado en prod) |
 | REGISTRATION_REQUESTS_ENABLED | No | Booleano, default false. false: POST /api/registration-requests y POST /api/registration-requests/activate responden 404. true: abre ambas y cierra el registro inmediato (403). No activar en publico sin verificar un envio real de correo ni sin configurar y comprobar PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER en Railway (ver Limite de tasa publico) |
 | REGISTRATION_REQUESTS_PENDING_RESERVATION | No | Duracion Spring positiva (7d, 48h, P7D), default 7d: vigencia de la reserva de slug en PENDING. Confirmado por David el 2026-10-31 |
 | REGISTRATION_REQUESTS_APPROVED_RESERVATION | No | Duracion positiva, default 30d desde la aprobacion. Confirmado por David el 2026-10-31 |
@@ -57,12 +57,18 @@ No poner secretos dentro de src; nunca pasarlos mediante COPY, ARG o ENV de buil
 | LOGIN_THROTTLE_ACCOUNT_LIMIT | No | Entero positivo, default 20 fallos por cuenta desde cualquier IP y ventana |
 | LOGIN_THROTTLE_IP_LIMIT | No | Entero positivo, default 30 fallos por IP en total (ambos logins) y ventana |
 | LOGIN_THROTTLE_MAX_ENTRIES | No | Entero positivo, default 20000 claves por tipo (par, cuenta, IP). Lleno y sin ventanas vencidas, una clave nueva recibe 429 (falla cerrado) |
-| MAIL_OUTBOX_ENCRYPTION_KEY | Si | Clave aleatoria privada de al menos 32 bytes UTF-8 que cifra el cuerpo pendiente del outbox; distinta de JWT_SECRET y PLATFORM_JWT_SECRET, sin valores dev/test ni fallback productivo. Rotarla deja lo pendiente en FAILED (PAYLOAD_INVALIDO): reenviar la activacion |
+| MAIL_OUTBOX_ENCRYPTION_KEY | Si | Clave aleatoria privada de al menos 32 bytes UTF-8 que cifra el cuerpo pendiente del outbox; distinta de JWT_SECRET y PLATFORM_JWT_SECRET, sin valores dev/test ni fallback productivo. Rotarla: ver Rotacion de la clave del outbox |
+| MAIL_OUTBOX_ENCRYPTION_KEY_PREVIOUS | No | Vacia por defecto. Solo durante una rotacion: la clave anterior, usada SOLO para descifrar lo pendiente cifrado con ella; lo nuevo se cifra siempre con la actual. Si se define en prod: al menos 32 bytes, distinta de la actual, de JWT_SECRET y de PLATFORM_JWT_SECRET, sin prefijo dev-/test-; si no, no arranca |
 | MAIL_OUTBOX_POLL_INTERVAL | No | Duracion positiva, default 30s entre lotes del worker |
 | MAIL_OUTBOX_MAX_ATTEMPTS | No | Entero positivo, default 6 intentos antes de FAILED |
 | MAIL_OUTBOX_RETRY_BACKOFF | No | Duracion positiva, default 1m; se duplica por intento con tope 1 h |
+| MAIL_OUTBOX_PURGE_ENABLED | No | Booleano, default true. false apaga la purga programada del outbox |
+| MAIL_OUTBOX_PURGE_INTERVAL | No | Duracion positiva, default 1h entre purgas |
+| MAIL_OUTBOX_RETENTION_SENT_DAYS | No | Entero positivo, default 30: dias desde el envio tras los que se borra una fila SENT |
+| MAIL_OUTBOX_RETENTION_FAILED_DAYS | No | Entero positivo, default 90: dias desde el vencimiento tras los que se borra una fila FAILED. Cero o negativo en cualquiera de los dos impide arrancar |
 | SMTP_HOST | No | Servidor SMTP. Sin valor no hay transporte: los correos quedan PENDING y la app arranca igual (aviso en log). Proveedor sin elegir |
-| SMTP_PORT | No | Entero, default 587. Se exige STARTTLS; SMTPS implicito (465) no esta soportado |
+| SMTP_PORT | No | Entero, default 587. Con SMTP_SECURITY=ssl fijarlo en 465 (no cambia solo) |
+| SMTP_SECURITY | No | `starttls` (default: exige STARTTLS) o `ssl` (TLS implicito, SMTPS). Otro valor impide arrancar con `SMTP_SECURITY debe ser starttls o ssl` (se valida solo con SMTP_HOST). En ambos se verifica el certificado y el nombre del servidor |
 | SMTP_USERNAME | No | Usuario SMTP; vacio desactiva la autenticacion SMTP |
 | SMTP_PASSWORD | No | Secreto de ejecucion del proveedor; nunca en codigo, logs, evidencia ni chat |
 | MAIL_FROM | Si con SMTP_HOST | Remitente; con SMTP_HOST y sin MAIL_FROM la app no arranca |
@@ -72,10 +78,11 @@ No poner secretos dentro de src; nunca pasarlos mediante COPY, ARG o ENV de buil
 Exportacion: rango maximo existente de 366 dias para PDF/XLSX; acotar fechas y filas.
 `DEV_DEMO_DATA` es exclusivo de dev, no se usa en prod. No hay siembra demo en prod.
 El JAR conserva bibliotecas H2 de desarrollo por el pom existente, pero prod fija el
-driver PostgreSQL y exige DB_URL; no arranca una base H2. Flyway aplica V1 a V11 (V9:
+driver PostgreSQL y exige DB_URL; no arranca una base H2. Flyway aplica V1 a V12 (V9:
 SOLICITUDES_REGISTRO; V10: ACTIVATED, ACTIVACIONES_REGISTRO y CORREOS_SALIENTES; ninguna
 toca tablas comerciales; V11: version y suspension en TENANTS, auth_version en USUARIOS y
-AUDITORIA_PLATAFORMA, con valores por defecto sobre filas existentes),
+AUDITORIA_PLATAFORMA, con valores por defecto sobre filas existentes; V12: reenvio de
+activacion en AUDITORIA_PLATAFORMA, conserva las filas de V11),
 Hibernate valida con `ddl-auto=validate` y `open-in-view=false`. No usar repair, baseline
 ni ddl-auto=update para esquivar errores. Conservar el mismo JWT_SECRET al reiniciar;
 cambiarlo invalida tokens previos. Ninguna variable secreta lleva un ejemplo real aqui.
@@ -144,6 +151,43 @@ instancias pueden correr el worker a la vez (SKIP LOCKED mas lease); una caida e
 envio y el cierre puede duplicar un correo. Consultar `correos_salientes` (estado,
 intentos, ultimo_error) por SQL para diagnostico; nunca exportar `payload_cifrado`.
 
+Purga (tarea 51): cada MAIL_OUTBOX_PURGE_INTERVAL se borran por lotes las filas SENT con
+mas de MAIL_OUTBOX_RETENTION_SENT_DAYS dias desde el envio y las FAILED con mas de
+MAIL_OUTBOX_RETENTION_FAILED_DAYS dias desde su vencimiento. Nunca PENDING ni filas con
+lease vigente; no toca activaciones ni solicitudes. Varias instancias pueden purgar a la vez
+(SKIP LOCKED). El diagnostico por SQL solo ve lo que no se ha purgado.
+
+SMTP: con SMTP_SECURITY=starttls (default) el proveedor debe ofrecer STARTTLS en 587; con
+`ssl`, TLS implicito en 465 (fijar SMTP_PORT=465). En ambos se verifica certificado y
+nombre del servidor; un proveedor con certificado invalido o de otro nombre falla (no hay
+opcion para confiar en todos).
+
+### Rotacion de la clave del outbox (tarea 51)
+
+La clave solo protege el cuerpo de los correos PENDING (el enlace de activacion). Para
+cambiarla sin perder lo pendiente:
+
+1. Generar una clave nueva aleatoria de al menos 32 bytes, distinta de JWT_SECRET y
+   PLATFORM_JWT_SECRET, en el gestor de secretos. No imprimirla ni pegarla en chat o logs.
+2. En el servicio: MAIL_OUTBOX_ENCRYPTION_KEY_PREVIOUS = valor actual de
+   MAIL_OUTBOX_ENCRYPTION_KEY; MAIL_OUTBOX_ENCRYPTION_KEY = la nueva. Desplegar.
+3. Revisar el arranque: si alguna no cumple las reglas, la app no arranca con un mensaje
+   que nombra la variable. Con varias replicas, todas deben recibir ambas variables a la
+   vez; una replica que siga solo con la clave vieja deja en FAILED (PAYLOAD_INVALIDO) lo
+   nuevo que intente enviar.
+4. Esperar a que no quede nada cifrado con la clave anterior. Todo correo PENDING vence con
+   su enlace (REGISTRATION_ACTIVATION_TOKEN_TTL, default 24h), asi que basta esperar ese
+   plazo mas un intervalo del worker, o confirmar por SQL que no quedan PENDING creados
+   antes del despliegue del paso 2:
+   `SELECT COUNT(*) FROM correos_salientes WHERE estado = 'PENDING' AND fecha_creacion < 'FECHA_DESPLIEGUE_UTC';`
+5. Cuando de 0: quitar MAIL_OUTBOX_ENCRYPTION_KEY_PREVIOUS del servicio y desplegar. Borrar
+   la clave vieja del gestor de secretos.
+
+Sin el paso 2 (cambiar la clave sin definir la anterior), lo pendiente queda FAILED con
+PAYLOAD_INVALIDO y hay que reenviar la activacion desde la plataforma. Si la clave se
+filtro, rotar igual y reenviar las activaciones pendientes para que su enlace salga cifrado
+con la nueva; la anterior solo sirve mientras siga definida.
+
 Cada peticion de plataforma revalida activo/authVersion. La recuperacion privada auditada
 y un mecanismo operativo de rotacion/revocacion no tienen comando en esta entrega;
 deben definirse antes de operar publicamente. Rotar PLATFORM_JWT_SECRET invalida todos
@@ -191,6 +235,21 @@ no existen se cuentan y bloquean igual. Los 401 no cambian. Un 400 (cuerpo inval
 * Por instancia: con varias replicas el limite efectivo se multiplica; un reinicio borra
   los contadores.
 
+### Registro inmediato cerrado en prod (tarea 51)
+
+Con SPRING_PROFILES_ACTIVE=prod, POST /api/auth/register responde siempre 404
+`{"error":"Recurso no encontrado","status":404}` y no crea nada, sin importar
+REGISTRATION_ENABLED ni REGISTRATION_REQUESTS_ENABLED. La unica via de alta en prod es la
+solicitud revisada. Con REGISTRATION_REQUESTS_ENABLED=false (default) tambien las solicitudes
+y la activacion responden 404: el registro queda completamente cerrado, nunca abierto. En dev
+y test el registro inmediato sigue como antes (lo usa el script de siembra externo de dev).
+
+### Auditoria del reenvio de activacion (tarea 51)
+
+Cada reenvio exitoso (202) de POST /api/platform/registration-requests/{id}/resend-activation
+inserta en `auditoria_plataforma` una fila RESEND_ACTIVATION con el administrador y
+`id_solicitud_objetivo`, en la misma transaccion. No hay endpoint de lectura: se consulta por SQL.
+
 ### Comprobaciones obligatorias del despliegue en Railway
 
 Antes de abrir la compuerta de solicitudes (REGISTRATION_REQUESTS_ENABLED=true) y antes de
@@ -206,6 +265,23 @@ dar acceso publico a los logins:
    abrir la compuerta hasta resolverlo. Repetir con POST /api/registration-requests/activate
    (token falso) si se va a abrir la compuerta.
 4. Confirmar que un login correcto desde otra conexion sigue funcionando.
+
+Lista de comprobaciones de despliegue (tarea 51), ademas de las de arriba:
+
+5. Variables obligatorias de prod definidas y privadas: DB_URL, DB_USERNAME, DB_PASSWORD,
+   JWT_SECRET, PLATFORM_JWT_SECRET, MAIL_OUTBOX_ENCRYPTION_KEY (tres claves distintas) y
+   ACTIVATION_BASE_URL con https. MAIL_OUTBOX_ENCRYPTION_KEY_PREVIOUS vacia salvo durante
+   una rotacion.
+6. Log de arranque: Flyway en version 12 y `Started ServiboxApplication`; sin el WARN de
+   PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER.
+7. POST /api/auth/register responde 404. Con la compuerta apagada, POST
+   /api/registration-requests y .../activate responden 404.
+8. Si hay SMTP: SMTP_SECURITY coherente con SMTP_PORT (starttls con 587, ssl con 465) y un
+   envio real verificado en un buzon antes de abrir la compuerta.
+9. Un reenvio de activacion de prueba deja su fila RESEND_ACTIVATION en `auditoria_plataforma`.
+10. Purga encendida (MAIL_OUTBOX_PURGE_ENABLED sin definir o true) salvo motivo documentado.
+11. HSTS y cabeceras del lado del proxy o frontend: ver los hallazgos de superficie de la
+    sesion 2026-10-31-backend-hardening.
 
 ### Suspension y revocacion de tenants (5A)
 

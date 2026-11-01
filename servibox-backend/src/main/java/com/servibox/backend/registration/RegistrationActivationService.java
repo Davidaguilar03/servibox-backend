@@ -5,6 +5,9 @@ import com.servibox.backend.auth.TenantRegistrationService;
 import com.servibox.backend.auth.dto.RegisterRequest;
 import com.servibox.backend.mail.MailOutbox;
 import com.servibox.backend.mail.OutboxTemplate;
+import com.servibox.backend.platform.PlatformAuditAction;
+import com.servibox.backend.platform.PlatformAuditEntry;
+import com.servibox.backend.platform.PlatformAuditRepository;
 import com.servibox.backend.registration.dto.ActivationAcknowledgment;
 import com.servibox.backend.registration.dto.ActivationBody;
 import com.servibox.backend.shared.ResourceNotFoundException;
@@ -44,6 +47,7 @@ public class RegistrationActivationService {
     private final RegistrationActivationRepository activations;
     private final TenantRegistrationService provisioning;
     private final MailOutbox outbox;
+    private final PlatformAuditRepository audit;
     private final String baseUrl;
     private final Duration tokenTtl;
     private final Duration resendCooldown;
@@ -56,6 +60,7 @@ public class RegistrationActivationService {
             RegistrationActivationRepository activations,
             TenantRegistrationService provisioning,
             MailOutbox outbox,
+            PlatformAuditRepository audit,
             @Value("${servibox.activation.base-url}") String baseUrl,
             @Value("${servibox.registration-requests.activation-token-ttl}") Duration tokenTtl,
             @Value("${servibox.registration-requests.resend-cooldown}") Duration resendCooldown,
@@ -68,6 +73,7 @@ public class RegistrationActivationService {
         this.activations = activations;
         this.provisioning = provisioning;
         this.outbox = outbox;
+        this.audit = audit;
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.tokenTtl = tokenTtl;
         this.resendCooldown = resendCooldown;
@@ -108,9 +114,12 @@ public class RegistrationActivationService {
                 cuerpo(r, baseUrl + "/activar#token=" + token, a.getExpiresAt()), now, a.getExpiresAt());
     }
 
-    /** Revoca lo vigente y emite una generacion nueva. No crea tenant ni usuario. */
+    /**
+     * Revoca lo vigente y emite una generacion nueva. No crea tenant ni usuario. Un reenvio
+     * exitoso queda en AUDITORIA_PLATAFORMA con el administrador, en la misma transaccion.
+     */
     @Transactional
-    public void resend(String id) {
+    public void resend(String id, Long adminId) {
         RegistrationRequest r = requests.lockById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Solicitud no encontrada"));
         LocalDateTime now = now();
@@ -133,6 +142,13 @@ public class RegistrationActivationService {
         activations.saveAllAndFlush(abiertas);
         outbox.cancelPending(abiertas.stream().map(RegistrationActivation::getId).toList(), "REVOCADO");
         issue(r, previas.isEmpty() ? 1 : previas.getFirst().getGeneration() + 1, now);
+
+        PlatformAuditEntry entry = new PlatformAuditEntry();
+        entry.setAction(PlatformAuditAction.RESEND_ACTIVATION);
+        entry.setAdminId(adminId);
+        entry.setRequestId(r.getId());
+        entry.setCreatedAt(now);
+        audit.save(entry);
     }
 
     /**

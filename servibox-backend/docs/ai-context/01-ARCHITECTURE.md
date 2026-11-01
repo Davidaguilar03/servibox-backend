@@ -191,6 +191,9 @@ sube `version_tenant` y la version de sesion de todos los usuarios del tenant (a
 no reviven los tokens viejos). Reactivar exige expectedVersion y limpia fecha y motivo.
 Revocar (un usuario o todo el tenant) es un UPDATE directo de auth_version, idempotente en
 efecto y sin tocar updated_at. Toda escritura inserta una fila en AUDITORIA_PLATAFORMA.
+Desde la tarea 51 (V12) tambien el reenvio de activacion de una solicitud: accion
+RESEND_ACTIVATION con el administrador y `id_solicitud_objetivo`, sin tenant, en la misma
+transaccion del reenvio. Sin endpoint de lectura.
 Contrato y ejemplos en la sesion 2026-10-30-platform-tenants-users.
 
 Autenticacion por token, sin sesion de servidor. El tenant no lo elige el cliente: viaja
@@ -205,7 +208,11 @@ firmado dentro del token.
    `passwordEncoder.matches(...)` contra el `passwordHash` BCrypt.
 3. Si algo no cuadra responde **401 con el mismo mensaje generico** en todos los casos
    (tenant inexistente, usuario inexistente, usuario inactivo, contrasena incorrecta).
-   Distinguirlos le confirmaria a un atacante que usuarios existen en que tenant.
+   Distinguirlos le confirmaria a un atacante que usuarios existen en que tenant. Desde la
+   tarea 51 los caminos sin contrasena real (tenant inexistente o suspendido, usuario
+   inexistente o inactivo; en plataforma tambien clave de mas de 72 bytes) pagan una
+   comparacion BCrypt de relleno (`auth.LoginTimingEqualizer`, hash fijo generado al
+   arrancar con el mismo encoder y costo) para que el tiempo tampoco lo distinga.
 4. Si cuadra, **`auth.JwtService.generateToken(user)`** emite un JWT firmado con HMAC SHA
    con los claims `sub` (username), `tenantId`, `role` y marcadores tenant descritos arriba,
    y expiracion segun configuracion.
@@ -371,6 +378,9 @@ servibox.registration.enabled=${REGISTRATION_ENABLED:true}
 ```
 
 `servibox.registration.enabled` apaga el registro publico (403) sin desplegar codigo.
+En el perfil prod el registro inmediato no existe: `TenantRegistrationService.registrar`
+responde 404 `Recurso no encontrado` antes de mirar cualquier compuerta (tarea 51); dev y
+test conservan el comportamiento de abajo.
 `servibox.registration-requests.enabled` (REGISTRATION_REQUESTS_ENABLED, default false)
 abre POST `/api/registration-requests` y, mientras esta abierta, el registro inmediato
 responde 403: nunca hay dos vias publicas activas. Plazos configurables en
@@ -381,7 +391,10 @@ Activacion y correo (4B): aprobar y reenviar emiten un token opaco, guardan su S
 ACTIVACIONES_REGISTRO y encolan el correo en CORREOS_SALIENTES en la misma transaccion;
 nunca envian. `mail.OutboxWorker` (tarea programada solo en el servidor HTTP) reclama con
 `FOR UPDATE SKIP LOCKED` mas lease condicional y envia por `mail.MailTransport` fuera de
-transaccion; sin SMTP_HOST no hay transporte y lo pendiente espera. Activar provisiona con
+transaccion; sin SMTP_HOST no hay transporte y lo pendiente espera. `SMTP_SECURITY` elige
+STARTTLS (por defecto) o TLS implicito (ssl, 465), con verificacion de certificado y de nombre.
+`mail.OutboxPurger` (misma programacion) borra por lotes SENT y FAILED viejos con SKIP LOCKED;
+`OutboxCipher` acepta una clave anterior solo para descifrar (rotacion). Activar provisiona con
 `TenantRegistrationService.provisionar`, el mismo codigo del registro inmediato. Contrato en
 la sesion 2026-10-30-activation-outbox-email.
 
@@ -450,7 +463,7 @@ Base: `com.servibox.backend`. Un paquete por modulo de negocio, mas tres transve
 | `shared` | `TenantAwareEntity`, `ErrorResponse`, `GlobalExceptionHandler`, `ResourceNotFoundException` |
 | `auth` | `JwtService`, `JwtAuthenticationFilter`, `AuthController`, `TenantRegistrationService`, `InvalidCredentialsException` y las tres excepciones del registro, mas `entity` / `repository` / `dto` |
 | `registration` | solicitudes de registro (4A): `RegistrationRequest`, su servicio, el controlador publico y el de revision de plataforma; activacion (4B): `RegistrationActivation` y `RegistrationActivationService`; global, sin tenant |
-| `mail` | outbox de correo (4B): `OutboxMessage`, `MailOutbox` (encolar), `OutboxWorker` (enviar), `OutboxCipher` (AES-GCM), `MailTransport` y `SmtpMailTransport`; global, sin tenant |
+| `mail` | outbox de correo (4B): `OutboxMessage`, `MailOutbox` (encolar), `OutboxWorker` (enviar), `OutboxPurger` (purga, tarea 51), `OutboxCipher` (AES-GCM, clave anterior opcional), `MailTransport` y `SmtpMailTransport`; global, sin tenant |
 | `inventory` | primer modulo de negocio migrado, ver abajo |
 | `treasury` | segundo modulo de negocio migrado, ver abajo |
 | `counterparties` | terceros (`Counterparty`): clientes y proveedores en una sola entidad, compartida por `sales` y `purchases`, ver abajo |

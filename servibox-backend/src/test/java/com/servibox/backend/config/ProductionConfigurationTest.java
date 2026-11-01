@@ -123,6 +123,22 @@ class ProductionConfigurationTest {
     }
 
     @Test
+    void claveAnteriorDelOutboxOpcionalPeroValidadaEnProd() {
+        String jwt = "JWT_SECRET=" + "x".repeat(32);
+        runner.withPropertyValues(jwt, PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL,
+                        "MAIL_OUTBOX_ENCRYPTION_KEY_PREVIOUS=unit-config-outbox-previous-key-2026-x")
+                .run(context -> assertThat(context).hasNotFailed());
+        for (String previa : java.util.List.of("short", "x".repeat(32), "unit-config-platform-only-key-2026",
+                "unit-config-outbox-only-key-2026-xx", "dev-only-outbox-key-never-for-production-2026",
+                "test-only-outbox-key-never-for-production-2026")) {
+            runner.withPropertyValues(jwt, PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL,
+                            "MAIL_OUTBOX_ENCRYPTION_KEY_PREVIOUS=" + previa)
+                    .run(context -> assertThat(context.getStartupFailure())
+                            .hasMessageContaining("MAIL_OUTBOX_ENCRYPTION_KEY_PREVIOUS es opcional en prod"));
+        }
+    }
+
+    @Test
     void avisaSinCabeceraDeIpDelClienteSinFallarElArranque(CapturedOutput output) {
         runner.withPropertyValues(PLATFORM_TEST_KEY, OUTBOX_TEST_KEY, ACTIVATION_TEST_URL, "JWT_SECRET=" + "x".repeat(32))
                 .run(context -> assertThat(context).hasNotFailed());

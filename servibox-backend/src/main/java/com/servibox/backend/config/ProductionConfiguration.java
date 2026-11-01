@@ -43,6 +43,13 @@ public class ProductionConfiguration {
                 throw new IllegalStateException(
                         "MAIL_OUTBOX_ENCRYPTION_KEY es obligatoria en prod, requiere al menos 32 bytes, debe ser exclusiva y no de desarrollo o pruebas");
             }
+            String previousKey = environment.getProperty("servibox.mail.outbox.encryption-key-previous", "");
+            if (!previousKey.isEmpty() && (previousKey.isBlank() || previousKey.getBytes(StandardCharsets.UTF_8).length < 32
+                    || previousKey.equals(outboxKey) || previousKey.equals(secret) || previousKey.equals(platformSecret)
+                    || previousKey.startsWith("dev-") || previousKey.startsWith("test-"))) {
+                throw new IllegalStateException(
+                        "MAIL_OUTBOX_ENCRYPTION_KEY_PREVIOUS es opcional en prod; si se define requiere al menos 32 bytes, debe ser distinta de la clave actual y de las claves JWT y no de desarrollo o pruebas");
+            }
             if (!environment.getProperty("servibox.activation.base-url", "").startsWith("https://")) {
                 throw new IllegalStateException("ACTIVATION_BASE_URL es obligatoria en prod y debe usar https");
             }
