@@ -19,6 +19,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.util.matcher.AnyRequestMatcher;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.Arrays;
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -28,7 +33,7 @@ public class SecurityConfig {
     static final long HSTS_MAX_AGE_SECONDS = 180L * 24 * 60 * 60;
 
     /**
-     * Solo en prod: Strict-Transport-Security en todas las respuestas. Railway termina TLS y la
+     * Solo en prod: Strict-Transport-Security en todas las respuestas. El proxy (Caddy) termina TLS y la
      * app ve HTTP, asi que el chequeo por defecto (solo si la peticion es segura) nunca la
      * enviaria; se envia siempre y el navegador la aplica en la respuesta HTTPS que le llega del
      * proxy (sobre HTTP la ignora). No usa X-Forwarded-Proto ni forward-headers-strategy. En dev
@@ -44,6 +49,33 @@ public class SecurityConfig {
         }
     }
 
+    /**
+     * CORS solo si CORS_ALLOWED_ORIGINS trae origenes (lista exacta separada por comas, sin
+     * comodines; prod exige https). Vacia: sin CORS, como antes (mismo origen). El JWT viaja en
+     * Authorization, sin cookies: allowCredentials queda en false.
+     */
+    private static void cors(HttpSecurity http, Environment environment) throws Exception {
+        List<String> origins = allowedOrigins(environment);
+        if (origins.isEmpty()) {
+            return;
+        }
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(origins);
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Idempotency-Key"));
+        config.setExposedHeaders(List.of("Retry-After", "Content-Disposition"));
+        config.setAllowCredentials(false);
+        config.setMaxAge(3600L);
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/api/**", config);
+        http.cors(c -> c.configurationSource(source));
+    }
+
+    static List<String> allowedOrigins(Environment environment) {
+        return Arrays.stream(environment.getProperty("servibox.cors.allowed-origins", "").split(","))
+                .map(String::trim).filter(origin -> !origin.isEmpty()).toList();
+    }
+
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
@@ -56,6 +88,7 @@ public class SecurityConfig {
             PlatformAdminRepository repository, JsonAuthenticationEntryPoint entryPoint, Environment environment)
             throws Exception {
         hsts(http, environment);
+        cors(http, environment);
         return http.securityMatcher("/api/platform/**")
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -98,6 +131,7 @@ public class SecurityConfig {
             JwtAuthenticationFilter jwtAuthenticationFilter,
             JsonAuthenticationEntryPoint authenticationEntryPoint, Environment environment) throws Exception {
         hsts(http, environment);
+        cors(http, environment);
         return http
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

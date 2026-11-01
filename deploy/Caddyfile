@@ -1,0 +1,21 @@
+# Caddy obtiene y renueva los certificados de Let's Encrypt solo (puertos 80 y 443 abiertos y
+# DNS apuntando al servidor). Los dominios salen de API_DOMAIN y FRONTEND_DOMAIN (.env).
+
+{$API_DOMAIN:api.servibox.co} {
+	encode zstd gzip
+	reverse_proxy backend:8080 {
+		# IP real del cliente: Caddy reemplaza cualquier X-Real-IP que mande el cliente.
+		header_up X-Real-IP {remote_host}
+		# Una sola cabecera HSTS aunque el backend tambien la envie.
+		header_down Strict-Transport-Security "max-age=15552000"
+	}
+}
+
+{$FRONTEND_DOMAIN:servibox.co} {
+	root * /srv/frontend
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=15552000"
+	# SPA: toda ruta que no sea un archivo existente entrega index.html.
+	try_files {path} /index.html
+	file_server
+}

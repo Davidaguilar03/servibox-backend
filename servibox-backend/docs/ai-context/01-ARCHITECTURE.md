@@ -366,7 +366,8 @@ de error.
 `SecurityConfig` (paquete `config`): sesion `STATELESS`, CSRF deshabilitado (es una API
 pura, sin formularios ni cookies de sesion), `BCryptPasswordEncoder` como bean, sin
 `UserDetailsServiceAutoConfiguration` (excluida en `ServiboxApplication`, tarea 52), HSTS de
-180 dias en todas las respuestas solo con el perfil prod,
+180 dias en todas las respuestas solo con el perfil prod, CORS solo para los origenes
+exactos de CORS_ALLOWED_ORIGINS (vacia: sin CORS; prod exige https; despliegue VPS),
 `permitAll` en `POST /api/auth/login`, `POST /api/auth/register` y `GET /api/health`, y
 TENANT_IDENTITY en las familias comerciales enumeradas; resto denegado. Cadena de
 plataforma separada descrita arriba, con login publico propio.
@@ -429,6 +430,8 @@ El perfil prod sobreescribe el fallback con JWT_SECRET vacio si falta, para rech
 GET /api/health solo confirma disponibilidad HTTP; no consulta la base. Contenedor,
 puerto PORT (SERVER_PORT tiene precedencia), variables y operacion en
 [DEPLOYMENT.md](../DEPLOYMENT.md).
+Despliegue en VPS (Docker Compose, PostgreSQL 16, Caddy, respaldos) en
+[deploy/VPS.md](../deploy/VPS.md).
 
 ### Modelo de usuario
 

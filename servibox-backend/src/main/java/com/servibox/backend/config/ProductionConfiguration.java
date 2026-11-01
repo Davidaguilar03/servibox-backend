@@ -15,10 +15,10 @@ import java.nio.charset.StandardCharsets;
 public class ProductionConfiguration {
 
     static final String CLIENT_IP_HEADER_WARNING = "PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER esta vacia: los limites por IP"
-            + " (rutas publicas de solicitudes y logins) usan la IP del socket. Detras de un proxy (Railway) esa IP es"
+            + " (rutas publicas de solicitudes y logins) usan la IP del socket. Detras de un proxy (Caddy) esa IP es"
             + " la del proxy y todos los visitantes compartirian una sola cuota: un atacante bloquearia el login de"
-            + " todos. En Railway configura PUBLIC_RATE_LIMIT_CLIENT_IP_HEADER=X-Real-IP y comprueba con un X-Real-IP"
-            + " falso que la cuota no cambia. Ver DEPLOYMENT.md";
+            + " todos. Con deploy/docker-compose.prod.yml queda fijada en X-Real-IP; comprueba con un X-Real-IP"
+            + " falso que la cuota no cambia. Ver docs/deploy/VPS.md";
 
     @Bean
     static BeanFactoryPostProcessor productionJwtValidation(Environment environment) {
@@ -52,6 +52,12 @@ public class ProductionConfiguration {
             }
             if (!environment.getProperty("servibox.activation.base-url", "").startsWith("https://")) {
                 throw new IllegalStateException("ACTIVATION_BASE_URL es obligatoria en prod y debe usar https");
+            }
+            for (String origin : SecurityConfig.allowedOrigins(environment)) {
+                if (!origin.matches("https://[A-Za-z0-9.-]+(:[0-9]+)?")) {
+                    throw new IllegalStateException(
+                            "CORS_ALLOWED_ORIGINS acepta solo origenes https exactos separados por coma, sin comodines ni rutas");
+                }
             }
             boolean limitsOn = environment.getProperty("servibox.rate-limit.enabled", Boolean.class, true)
                     || environment.getProperty("servibox.login-throttle.enabled", Boolean.class, true);
