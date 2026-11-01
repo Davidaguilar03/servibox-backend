@@ -12,6 +12,44 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-11-01: Errores, logs y cabeceras de produccion (tarea 52)
+
+* Sin usuario en memoria: `@SpringBootApplication(exclude = UserDetailsServiceAutoConfiguration.class)`.
+  Esa autoconfiguracion de Spring Boot 4.1.1 (`org.springframework.boot.security.autoconfigure`)
+  creaba un usuario `user` con clave aleatoria y la escribia en el log al arrancar. La app no
+  usa UserDetailsService (logins propios con JWT, sin httpBasic ni formLogin). Alternativa
+  descartada: declarar un UserDetailsService vacio (Spring Security lo usaria para armar un
+  DaoAuthenticationProvider; un bean que no hace nada). Aplica a todos los perfiles y al bootstrap.
+* Mensajes de error: nueva `shared.DomainValidationException extends IllegalArgumentException`
+  y las 52 validaciones de dominio de las rutas HTTP la lanzan (reemplazo mecanico, mismo
+  texto). Su manejador devuelve el mensaje tal cual. Cualquier otra IllegalArgumentException
+  (librerias: por ejemplo BigDecimal con un saldo 1e400; o programacion) y toda
+  IllegalStateException (ninguna es de dominio: configuracion, tenant ausente, librerias)
+  responden el mismo 400 de siempre con `Peticion invalida`, texto que ya existia (cuerpo
+  invalido de @Valid) y que el frontend ya trata con su texto de 400. El 500 conserva
+  `Error interno del servidor`. Extender IllegalArgumentException evita tocar a quien la
+  atrapa. Quedan con IllegalArgumentException solo el bootstrap por consola y la
+  configuracion JWT de plataforma (nunca responden HTTP); `DomainMessagesSourceTest` impide
+  nuevas en el resto. Descartado: decidir por el paquete de la pila de llamadas (fragil).
+* Logs sin datos personales: `shared.SafeLog.describe` registra la cadena de clases, el
+  SQLState y el primer marco del codigo propio, nunca el mensaje (los de la base traen
+  valores de columnas). Lo usan los manejadores de 400 genericos, bloqueos, 500 y la siembra
+  dev. `logging.level.org.hibernate.orm.jdbc.error=OFF` (categoria de SqlExceptionHelper en Hibernate 7): Hibernate
+  escribia el error SQL completo (en PostgreSQL un duplicado incluye el valor). El worker del
+  outbox registra id, intento, si es permanente, la clase y el texto de la causa mas profunda
+  (codigo SMTP) con `SafeLog.mask`: correos como j***@dominio y secuencias de 32 o mas
+  caracteres tipo token como [oculto], recortado a 300. Se pierde el stacktrace completo del
+  500 a cambio de no filtrar valores.
+* Login tenant con clave de mas de 72 bytes y usuario activo: paga el BCrypt de relleno y
+  responde el 401 de siempre, como plataforma desde la tarea 51. Nunca autentica.
+* HSTS: solo en el perfil prod, `Strict-Transport-Security: max-age=15552000` (180 dias), sin
+  includeSubDomains ni preload, en todas las respuestas de ambas cadenas (requestMatcher de
+  cualquier peticion, porque detras de Railway la app ve HTTP y el chequeo por defecto de
+  peticion segura nunca la enviaria). El navegador solo la aplica sobre HTTPS, que es como le
+  llega del proxy. Sin forward-headers-strategy ni X-Forwarded-Proto. En dev y test no se
+  envia: localhost por HTTP no la necesita y fijarla en un navegador de desarrollo no aporta.
+  El HSTS del frontend lo configura el servicio que lo sirve.
+
 ## 2026-10-31: Endurecimiento previo al despliegue (tarea 51)
 
 * BCrypt de relleno: en ambos logins, los caminos que terminan sin evaluar una contrasena real

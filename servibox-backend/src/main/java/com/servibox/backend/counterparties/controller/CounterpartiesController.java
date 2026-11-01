@@ -1,5 +1,6 @@
 package com.servibox.backend.counterparties.controller;
 
+import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.counterparties.dto.CounterpartyRequest;
 import com.servibox.backend.counterparties.dto.CounterpartyResponse;
 import com.servibox.backend.counterparties.dto.CounterpartyUpdateRequest;
@@ -49,7 +50,7 @@ public class CounterpartiesController {
             throw new InvalidCounterpartyException("El tercero necesita un rol");
         }
         if (request.role() == CounterpartyRole.AMBOS) {
-            throw new IllegalArgumentException("El rol de un tercero nuevo es CLIENTE o PROVEEDOR");
+            throw new DomainValidationException("El rol de un tercero nuevo es CLIENTE o PROVEEDOR");
         }
         CounterpartyService.DatosTercero datos = CounterpartyService.validarDatos(request.name(),
                 request.documentType(), request.documentNumber(), request.email(), request.phone());

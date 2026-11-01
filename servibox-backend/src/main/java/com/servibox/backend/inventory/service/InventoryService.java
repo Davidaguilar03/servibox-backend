@@ -1,5 +1,6 @@
 package com.servibox.backend.inventory.service;
 
+import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.inventory.entity.FinancialSettings;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
@@ -161,16 +162,16 @@ public class InventoryService {
      */
     private static void validarProducto(Product product) {
         if (product.getCode() != null && product.getCode().length() > 50) {
-            throw new IllegalArgumentException("El codigo del producto admite hasta 50 caracteres");
+            throw new DomainValidationException("El codigo del producto admite hasta 50 caracteres");
         }
         if (product.getDescription() != null && product.getDescription().length() > 255) {
-            throw new IllegalArgumentException("La descripcion del producto admite hasta 255 caracteres");
+            throw new DomainValidationException("La descripcion del producto admite hasta 255 caracteres");
         }
         if (product.getPurchaseCost() != null && product.getPurchaseCost() < 0) {
-            throw new IllegalArgumentException("El costo de compra no puede ser negativo");
+            throw new DomainValidationException("El costo de compra no puede ser negativo");
         }
         if (product.getQuantity() != null && product.getQuantity() < 0) {
-            throw new IllegalArgumentException("La cantidad no puede ser negativa");
+            throw new DomainValidationException("La cantidad no puede ser negativa");
         }
     }
 
@@ -285,7 +286,7 @@ public class InventoryService {
         // La fila se reescribe entera, stock incluido: sin bloqueo pisaria el de una venta.
         bloquearProductos(List.of(id));
         Product product = findProductById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Producto no encontrado: " + id));
+                .orElseThrow(() -> new DomainValidationException("Producto no encontrado: " + id));
 
         if (!product.getCode().equals(code)) {
             if (saleDetailRepository.existsByProductId(id) || purchaseDetailRepository.existsByProductId(id)) {
@@ -318,7 +319,7 @@ public class InventoryService {
     public ProductCategory actualizarCategoria(Long id, String name, String color, Integer yellowStockMin,
                                                Integer redStockMin, Double targetMargin, List<Long> taxTypeIds) {
         ProductCategory category = findCategoryById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Categoria no encontrada: " + id));
+                .orElseThrow(() -> new DomainValidationException("Categoria no encontrada: " + id));
         bloquearProductos(idsDe(productRepository.findByCategoryId(id)));
 
         String nombre = name.trim().toUpperCase();
@@ -368,19 +369,19 @@ public class InventoryService {
     private static void validarCategoria(String nombre, Integer yellowStockMin, Integer redStockMin,
                                          Double targetMargin) {
         if (nombre.length() > 100) {
-            throw new IllegalArgumentException("El nombre de la categoria admite hasta 100 caracteres");
+            throw new DomainValidationException("El nombre de la categoria admite hasta 100 caracteres");
         }
         if (yellowStockMin < 0) {
-            throw new IllegalArgumentException("El umbral amarillo no puede ser negativo");
+            throw new DomainValidationException("El umbral amarillo no puede ser negativo");
         }
         if (redStockMin < 0) {
-            throw new IllegalArgumentException("El umbral rojo no puede ser negativo");
+            throw new DomainValidationException("El umbral rojo no puede ser negativo");
         }
         if (redStockMin > yellowStockMin) {
-            throw new IllegalArgumentException("El umbral rojo no puede superar al amarillo");
+            throw new DomainValidationException("El umbral rojo no puede superar al amarillo");
         }
         if (targetMargin < 0 || targetMargin >= 1) {
-            throw new IllegalArgumentException("El margen debe estar entre 0 y menos de 100%");
+            throw new DomainValidationException("El margen debe estar entre 0 y menos de 100%");
         }
     }
 
@@ -403,7 +404,7 @@ public class InventoryService {
             for (Long taxTypeId : taxTypeIds) {
                 TaxType impuesto = delTenant.get(taxTypeId);
                 if (impuesto == null) {
-                    throw new IllegalArgumentException("Impuesto no encontrado: " + taxTypeId);
+                    throw new DomainValidationException("Impuesto no encontrado: " + taxTypeId);
                 }
                 impuestos.add(impuesto);
             }
@@ -483,7 +484,7 @@ public class InventoryService {
     @Transactional
     public ProductCategory updateCategoryMargin(Long categoryId, Double targetMargin) {
         ProductCategory category = findCategoryById(categoryId)
-                .orElseThrow(() -> new IllegalArgumentException("Categoria no encontrada: " + categoryId));
+                .orElseThrow(() -> new DomainValidationException("Categoria no encontrada: " + categoryId));
         bloquearProductos(idsDe(productRepository.findByCategoryId(categoryId)));
         category.setTargetMargin(targetMargin);
         ProductCategory guardada = saveCategory(category);

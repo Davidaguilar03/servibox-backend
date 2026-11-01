@@ -1,5 +1,6 @@
 package com.servibox.backend.reporting.controller;
 
+import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.reporting.dto.IvaReportResponse;
 import com.servibox.backend.reporting.dto.KpisResponse;
 import com.servibox.backend.reporting.dto.MovementSummaryResponse;
@@ -82,13 +83,13 @@ public class ReportingController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
             @RequestParam(required = false) Long accountId) {
         if (type == null) {
-            throw new IllegalArgumentException("Falta el parametro type: ESTADO_RESULTADOS o MOVIMIENTOS");
+            throw new DomainValidationException("Falta el parametro type: ESTADO_RESULTADOS o MOVIMIENTOS");
         }
         if (format == null) {
-            throw new IllegalArgumentException("Falta el parametro format: PDF o XLSX");
+            throw new DomainValidationException("Falta el parametro format: PDF o XLSX");
         }
         if (type == ReportType.ESTADO_RESULTADOS && accountId != null) {
-            throw new IllegalArgumentException("accountId solo aplica al reporte MOVIMIENTOS");
+            throw new DomainValidationException("accountId solo aplica al reporte MOVIMIENTOS");
         }
 
         ReportModel reporte = type == ReportType.ESTADO_RESULTADOS

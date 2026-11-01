@@ -1,5 +1,6 @@
 package com.servibox.backend.counterparties.service;
 
+import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.auth.TenantRegistrationService;
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.counterparties.entity.CounterpartyRole;
@@ -42,7 +43,7 @@ public class CounterpartyService {
     @Transactional
     public List<Counterparty> listar(CounterpartyRole rol) {
         if (rol == CounterpartyRole.AMBOS) {
-            throw new IllegalArgumentException("El filtro role es CLIENTE o PROVEEDOR");
+            throw new DomainValidationException("El filtro role es CLIENTE o PROVEEDOR");
         }
         Long tenantId = TenantContext.getTenantId();
         if (tenantId == null) {
@@ -194,7 +195,7 @@ public class CounterpartyService {
                                       String correo,
                                       String celular) {
         if (rolRequerido == null || rolRequerido == CounterpartyRole.AMBOS) {
-            throw new IllegalArgumentException("El rol requerido es CLIENTE o PROVEEDOR");
+            throw new DomainValidationException("El rol requerido es CLIENTE o PROVEEDOR");
         }
 
         Optional<Counterparty> existente = findByDocumentNumber(numeroDocumento);

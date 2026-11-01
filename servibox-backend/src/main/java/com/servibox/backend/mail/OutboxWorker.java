@@ -1,5 +1,6 @@
 package com.servibox.backend.mail;
 
+import com.servibox.backend.shared.SafeLog;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -119,13 +120,13 @@ public class OutboxWorker {
         try {
             t.send(c.recipient(), c.template().subject(), body);
         } catch (MailTransportException ex) {
-            log.warn("Outbox: correo {} no aceptado por el transporte, intento {} ({})", c.id(), c.attempts(),
-                    ex.getMessage());
+            log.warn("Outbox: correo {} no aceptado por el transporte, intento {}, permanente {} ({})", c.id(),
+                    c.attempts(), ex.isPermanent(), detalle(ex));
             retryOrFail(c, lease, ex.isPermanent());
             return;
         } catch (RuntimeException ex) {
             log.warn("Outbox: correo {} no aceptado por el transporte, intento {} ({})", c.id(), c.attempts(),
-                    ex.getClass().getSimpleName());
+                    detalle(ex));
             retryOrFail(c, lease, false);
             return;
         }
@@ -133,6 +134,19 @@ public class OutboxWorker {
                 + " reclamado_hasta = NULL, ultimo_error = NULL"
                 + " WHERE id_correo = ? AND estado = 'PENDING' AND reclamado_hasta = ?", now(), c.id(), lease);
         log.info("Outbox: correo {} aceptado por el transporte", c.id());
+    }
+
+    /**
+     * Para operar sin datos personales: clase y respuesta del servidor SMTP de la causa mas
+     * profunda (codigo y texto, por ejemplo 550 5.1.1), con los correos enmascarados (a***@dominio).
+     * Nunca el destinatario completo ni el cuerpo (el enlace con el token).
+     */
+    static String detalle(Throwable ex) {
+        Throwable raiz = ex;
+        while (raiz.getCause() != null && raiz.getCause() != raiz) {
+            raiz = raiz.getCause();
+        }
+        return raiz.getClass().getSimpleName() + ": " + SafeLog.mask(raiz.getMessage());
     }
 
     private void retryOrFail(Claimed c, LocalDateTime lease, boolean permanent) {

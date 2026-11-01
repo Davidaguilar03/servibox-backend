@@ -50,14 +50,18 @@ import java.util.stream.Collectors;
 @Slf4j
 public class GlobalExceptionHandler {
 
+    /** Mensaje generico de un 400 cuyo detalle no es para el cliente (tarea 52). */
+    public static final String PETICION_INVALIDA = "Peticion invalida";
+
     /**
-     * Principalmente la que lanza TenantAwareEntity en @PrePersist cuando no hay tenant
-     * activo en el contexto. Es un error de uso, no una falla del servidor.
+     * Ninguna IllegalStateException es de dominio: la de TenantAwareEntity sin tenant, las de
+     * configuracion y las de librerias. Conserva el 400 de siempre, pero con mensaje generico; el
+     * detalle va al log sin su mensaje (puede traer valores).
      */
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ErrorResponse> manejarEstadoInvalido(IllegalStateException ex) {
-        log.warn("Peticion rechazada por estado invalido: {}", ex.getMessage());
-        return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
+        log.warn("Peticion rechazada por estado invalido: {}", SafeLog.describe(ex));
+        return construir(HttpStatus.BAD_REQUEST, PETICION_INVALIDA);
     }
 
     /** Choque con una restriccion de unicidad, por ejemplo dos productos con el mismo codigo. */
@@ -156,10 +160,20 @@ public class GlobalExceptionHandler {
         return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
-    /** Referencia a algo que no existe, por ejemplo una categoria o producto por id. */
+    /** Regla de dominio incumplida, por ejemplo una categoria o producto por id: su mensaje tal cual. */
+    @ExceptionHandler(DomainValidationException.class)
+    public ResponseEntity<ErrorResponse> manejarValidacionDeDominio(DomainValidationException ex) {
+        return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /**
+     * IllegalArgumentException que no es de dominio (librerias, por ejemplo un monto infinito que
+     * BigDecimal rechaza, o de programacion): mismo 400, mensaje generico, detalle solo al log.
+     */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> manejarArgumentoInvalido(IllegalArgumentException ex) {
-        return construir(HttpStatus.BAD_REQUEST, ex.getMessage());
+        log.warn("Peticion rechazada por argumento invalido: {}", SafeLog.describe(ex));
+        return construir(HttpStatus.BAD_REQUEST, PETICION_INVALIDA);
     }
 
     /** Dato del registro publico que no cumple su regla. */
@@ -290,17 +304,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({PessimisticLockingFailureException.class, jakarta.persistence.PessimisticLockException.class,
             LockTimeoutException.class, PessimisticLockException.class})
     public ResponseEntity<ErrorResponse> manejarBloqueo(Exception ex) {
-        log.warn("Bloqueo no obtenido: {}", ex.getMessage());
+        log.warn("Bloqueo no obtenido: {}", SafeLog.describe(ex));
         return construir(HttpStatus.CONFLICT, "El recurso esta siendo modificado por otra operacion, intenta de nuevo");
     }
 
     /**
      * Ultimo recurso. El detalle va al log del servidor, nunca al cliente: un stacktrace
-     * en la respuesta le regala al atacante versiones de librerias y rutas internas.
+     * en la respuesta le regala al atacante versiones de librerias y rutas internas. En el log
+     * va la cadena de clases, SQLState y lugar, sin mensajes: los de la base traen valores de
+     * columnas (correos, NIT). Ver SafeLog.
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> manejarNoControlada(Exception ex) {
-        log.error("Error no controlado", ex);
+        log.error("Error no controlado: {}", SafeLog.describe(ex));
         return construir(HttpStatus.INTERNAL_SERVER_ERROR, "Error interno del servidor");
     }
 

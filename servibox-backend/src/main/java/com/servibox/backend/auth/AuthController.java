@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
 @RestController
@@ -57,7 +58,9 @@ public class AuthController {
 
         Optional<User> user = userRepository.findByUsernameAndTenantId(
                 request.username(), tenant.getId());
-        if (user.isEmpty() || !user.get().isActive()) {
+        // Mas de 72 bytes: BCrypt no la evaluaria (Spring devuelve false sin calcular); paga el relleno.
+        if (user.isEmpty() || !user.get().isActive()
+                || request.password().getBytes(StandardCharsets.UTF_8).length > 72) {
             timingEqualizer.compareDummy();
             throw new InvalidCredentialsException();
         }

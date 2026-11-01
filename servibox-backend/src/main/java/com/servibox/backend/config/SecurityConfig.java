@@ -7,6 +7,7 @@ import com.servibox.backend.platform.PlatformJwtService;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.env.Environment;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -17,10 +18,31 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.util.matcher.AnyRequestMatcher;
 
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+
+    /** 180 dias, sin includeSubDomains ni preload (tarea 52). */
+    static final long HSTS_MAX_AGE_SECONDS = 180L * 24 * 60 * 60;
+
+    /**
+     * Solo en prod: Strict-Transport-Security en todas las respuestas. Railway termina TLS y la
+     * app ve HTTP, asi que el chequeo por defecto (solo si la peticion es segura) nunca la
+     * enviaria; se envia siempre y el navegador la aplica en la respuesta HTTPS que le llega del
+     * proxy (sobre HTTP la ignora). No usa X-Forwarded-Proto ni forward-headers-strategy. En dev
+     * y test no se envia: localhost por HTTP no la necesita.
+     */
+    private static void hsts(HttpSecurity http, Environment environment) throws Exception {
+        if (environment.matchesProfiles("prod")) {
+            http.headers(headers -> headers.httpStrictTransportSecurity(hsts -> hsts
+                    .requestMatcher(AnyRequestMatcher.INSTANCE)
+                    .maxAgeInSeconds(HSTS_MAX_AGE_SECONDS)
+                    .includeSubDomains(false)
+                    .preload(false)));
+        }
+    }
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -31,7 +53,9 @@ public class SecurityConfig {
     @ConditionalOnWebApplication
     @Order(1)
     public SecurityFilterChain platformSecurityFilterChain(HttpSecurity http, PlatformJwtService jwtService,
-            PlatformAdminRepository repository, JsonAuthenticationEntryPoint entryPoint) throws Exception {
+            PlatformAdminRepository repository, JsonAuthenticationEntryPoint entryPoint, Environment environment)
+            throws Exception {
+        hsts(http, environment);
         return http.securityMatcher("/api/platform/**")
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -72,7 +96,8 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             JwtAuthenticationFilter jwtAuthenticationFilter,
-            JsonAuthenticationEntryPoint authenticationEntryPoint) throws Exception {
+            JsonAuthenticationEntryPoint authenticationEntryPoint, Environment environment) throws Exception {
+        hsts(http, environment);
         return http
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

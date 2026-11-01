@@ -1,5 +1,6 @@
 package com.servibox.backend.sales.controller;
 
+import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.counterparties.entity.Counterparty;
 import com.servibox.backend.counterparties.service.CounterpartyService;
 import com.servibox.backend.sales.dto.CollectionRequest;
@@ -57,14 +58,14 @@ public class SalesController {
         Counterparty cliente = null;
         if (request.customerId() != null) {
             cliente = counterpartyService.findById(request.customerId())
-                    .orElseThrow(() -> new IllegalArgumentException(
+                    .orElseThrow(() -> new DomainValidationException(
                             "Cliente no encontrado: " + request.customerId()));
         }
 
         Account cuenta = null;
         if (request.paymentType() == PaymentType.CONTADO && request.accountId() != null) {
             cuenta = treasuryService.findAccountById(request.accountId())
-                    .orElseThrow(() -> new IllegalArgumentException(
+                    .orElseThrow(() -> new DomainValidationException(
                             "Cuenta no encontrada: " + request.accountId()));
         }
 

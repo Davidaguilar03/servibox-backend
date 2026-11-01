@@ -322,8 +322,9 @@ construye respuestas de error. Todas usan el mismo formato, el record
 
 | Excepcion | Codigo | Cuerpo |
 |-|-|-|
-| `IllegalStateException` (tipicamente el `@PrePersist` sin tenant activo) | 400 | mensaje de la excepcion |
-| `IllegalArgumentException` (id del cuerpo que no resuelve, rango de fechas invalido) | 400 | mensaje de la excepcion |
+| `DomainValidationException` (id del cuerpo que no resuelve, rango de fechas invalido; tarea 52) | 400 | mensaje de la excepcion |
+| `IllegalStateException` (el `@PrePersist` sin tenant activo, configuracion, librerias) | 400 | "Peticion invalida" (detalle solo al log, tarea 52) |
+| Otra `IllegalArgumentException` (librerias o programacion) | 400 | "Peticion invalida" (detalle solo al log, tarea 52) |
 | `InvalidTransferException`, `InvalidSaleOperationException`, `InvalidPurchaseOperationException` | 400 | mensaje de la excepcion |
 | `DuplicateProductCodeException`, `DuplicateAccountNameException`, `DuplicateInvoiceNumberException`, `DuplicatePurchaseInvoiceNumberException`, `DuplicateCounterpartyDocumentException` | 409 | mensaje de la excepcion |
 | `InvalidRegistrationException` (dato del registro publico) | 400 | mensaje de la regla |
@@ -363,7 +364,9 @@ de error.
 ### Configuracion
 
 `SecurityConfig` (paquete `config`): sesion `STATELESS`, CSRF deshabilitado (es una API
-pura, sin formularios ni cookies de sesion), `BCryptPasswordEncoder` como bean,
+pura, sin formularios ni cookies de sesion), `BCryptPasswordEncoder` como bean, sin
+`UserDetailsServiceAutoConfiguration` (excluida en `ServiboxApplication`, tarea 52), HSTS de
+180 dias en todas las respuestas solo con el perfil prod,
 `permitAll` en `POST /api/auth/login`, `POST /api/auth/register` y `GET /api/health`, y
 TENANT_IDENTITY en las familias comerciales enumeradas; resto denegado. Cadena de
 plataforma separada descrita arriba, con login publico propio.
