@@ -12,6 +12,7 @@ public record RegistrationRequestBody(
         String adminFullName,
         String adminEmail,
         Boolean acceptTerms,
+        String policyVersion,
         String password
 ) {
 }

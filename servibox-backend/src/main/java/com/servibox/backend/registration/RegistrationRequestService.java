@@ -46,6 +46,7 @@ public class RegistrationRequestService {
     private static final Pattern CLAVE = Pattern.compile("[A-Za-z0-9._:-]{8,100}");
     private static final int MAX_FILTRO_TEXTO = 100;
     private static final ZoneId BOGOTA = ZoneId.of("America/Bogota");
+    private static final Pattern VERSION_POLITICA = Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
 
     private final RegistrationRequestRepository repository;
     private final TenantRepository tenantRepository;
@@ -53,6 +54,7 @@ public class RegistrationRequestService {
     private final Duration pendingReservation;
     private final Duration approvedReservation;
     private final Duration idempotencyRetention;
+    private final String policyVersion;
 
     public RegistrationRequestService(
             RegistrationRequestRepository repository,
@@ -60,7 +62,8 @@ public class RegistrationRequestService {
             RegistrationActivationService activationService,
             @Value("${servibox.registration-requests.pending-reservation}") Duration pendingReservation,
             @Value("${servibox.registration-requests.approved-reservation}") Duration approvedReservation,
-            @Value("${servibox.registration-requests.idempotency-retention}") Duration idempotencyRetention) {
+            @Value("${servibox.registration-requests.idempotency-retention}") Duration idempotencyRetention,
+            @Value("${servibox.registration-requests.policy-version}") String policyVersion) {
         if (!pendingReservation.isPositive() || !approvedReservation.isPositive() || !idempotencyRetention.isPositive()) {
             throw new IllegalStateException("Plazos de solicitudes de registro invalidos");
         }
@@ -70,6 +73,7 @@ public class RegistrationRequestService {
         this.pendingReservation = pendingReservation;
         this.approvedReservation = approvedReservation;
         this.idempotencyRetention = idempotencyRetention;
+        this.policyVersion = policyVersion;
     }
 
     @Transactional
@@ -85,6 +89,12 @@ public class RegistrationRequestService {
             // Clave vencida: se libera y la peticion cuenta como nueva.
             previa.get().setIdempotencyKey(null);
             repository.saveAndFlush(previa.get());
+        }
+
+        // Despues de la clave: un reintento conserva su resultado aunque la politica cambie entre
+        // tanto, porque el consentimiento ya quedo registrado. Solo una solicitud nueva exige la vigente.
+        if (!policyVersion.equals(body.policyVersion())) {
+            throw new InvalidRegistrationException("La politica fue actualizada; recarga la pagina para continuar");
         }
 
         String slug = normalizarSlug(body.slug());
@@ -116,6 +126,8 @@ public class RegistrationRequestService {
         r.setIdempotencyExpiresAt(now.plus(idempotencyRetention));
         r.setCreatedAt(now);
         r.setReservationExpiresAt(now.plus(pendingReservation));
+        r.setPolicyVersion(body.policyVersion());
+        r.setPolicyAcceptedAt(now);
         // Dos solicitudes simultaneas con el mismo slug o la misma clave chocan aqui con
         // uk_solicitud_slug_reservado o uk_solicitud_clave_idempotencia; ver afterConflict.
         repository.saveAndFlush(r);
@@ -316,12 +328,31 @@ public class RegistrationRequestService {
         if (!Boolean.TRUE.equals(body.acceptTerms())) {
             throw new InvalidRegistrationException("Debe aceptar los terminos y condiciones");
         }
+        if (body.policyVersion() == null || body.policyVersion().isBlank()) {
+            throw new InvalidRegistrationException("La version de la politica es obligatoria");
+        }
+        if (!esVersionDePolitica(body.policyVersion())) {
+            throw new InvalidRegistrationException("La version de la politica no es valida");
+        }
         TenantRegistrationService.validarNombreComercial(body.businessName());
         TenantRegistrationService.validarNit(body.nit());
         TenantRegistrationService.validarTelefono(body.phone());
         TenantRegistrationService.validarSlug(normalizarSlug(body.slug()));
         TenantRegistrationService.validarResponsable(body.adminFullName(), body.adminEmail());
         return hash(body);
+    }
+
+    /** AAAA-MM-DD exacto y fecha real (rechaza 2026-02-30). Tambien lo usa la validacion de arranque en prod. */
+    public static boolean esVersionDePolitica(String valor) {
+        if (!VERSION_POLITICA.matcher(valor).matches()) {
+            return false;
+        }
+        try {
+            LocalDate.parse(valor);
+            return true;
+        } catch (DateTimeParseException e) {
+            return false;
+        }
     }
 
     private static String normalizarSlug(String slug) {
@@ -332,7 +363,7 @@ public class RegistrationRequestService {
     private static String hash(RegistrationRequestBody b) {
         StringBuilder canonico = new StringBuilder();
         for (Object campo : new Object[]{b.businessName(), b.nit(), b.phone(), b.slug(), b.adminFullName(),
-                b.adminEmail(), b.acceptTerms()}) {
+                b.adminEmail(), b.acceptTerms(), b.policyVersion()}) {
             canonico.append(campo == null ? "\u0001" : campo.toString()).append('\u0000');
         }
         try {

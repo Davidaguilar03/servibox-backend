@@ -91,6 +91,8 @@ Modulo: Solicitudes de registro, V9 (tarea 4A). Global, sin tenant, sin contrase
 | id_revisor | BIGINT | 8 bytes | NULL | FK | FK a ADMINISTRADORES_PLATAFORMA(id_administrador) que aprobo o rechazo. |
 | motivo_rechazo | VARCHAR | 500 | NULL | - | Obligatorio en REJECTED (CHECK). |
 | id_tenant_activado | BIGINT | 8 bytes | NULL | UK, FK | V10. FK a TENANTS(id_tenant) creado al activar; solo y siempre en ACTIVATED (CHECK ck_solicitud_activada). Unico: una solicitud crea un tenant. |
+| version_politica | VARCHAR | 10 | NULL | - | V14. Version de la politica y terminos aceptada (AAAA-MM-DD). NULL solo en filas anteriores a V14; toda solicitud nueva la lleva. Va junto con fecha_aceptacion_politica (CHECK ck_solicitud_politica). |
+| fecha_aceptacion_politica | TIMESTAMP (D) | 8 bytes | NULL | - | V14. Fecha y hora del servidor, UTC, en que se acepto la politica. Sin IP ni agente de usuario. |
 
 ### ACTIVACIONES_REGISTRO
 

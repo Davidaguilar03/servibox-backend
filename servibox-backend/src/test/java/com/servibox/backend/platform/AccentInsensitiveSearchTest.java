@@ -253,7 +253,7 @@ class AccentInsensitiveSearchTest {
                 .content("""
                         {"businessName":"  Peñón  Automotriz ","nit":"900123456-7","phone":"3001234567",
                         "slug":"acc-publico","adminFullName":"Óscar  Muñoz","adminEmail":"oscar@example.invalid",
-                        "acceptTerms":true}
+                        "acceptTerms":true,"policyVersion":"2026-11-01"}
                         """))
                 .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
         String id = JsonPath.read(json, "$.requestId");

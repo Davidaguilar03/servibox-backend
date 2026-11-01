@@ -98,7 +98,8 @@ class RegistrationRequestTest {
     static String cuerpo(String slug, String nit, String correo) {
         return """
                 {"businessName":"Serviteca Uno","nit":"%s","phone":"300 123 4567","slug":"%s",
-                 "adminFullName":"Ana Rojas","adminEmail":"%s","acceptTerms":true}
+                 "adminFullName":"Ana Rojas","adminEmail":"%s","acceptTerms":true,
+                 "policyVersion":"2026-11-01"}
                 """.formatted(nit, slug, correo);
     }
 

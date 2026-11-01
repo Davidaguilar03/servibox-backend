@@ -72,7 +72,11 @@ rutas publicas de solicitudes (tarea 49) ni con el bloqueo de logins por fallos 
 tambien **429**, cada uno con mensaje propio y cabecera `Retry-After` en segundos. Un login
 fallido sigue siendo siempre el mismo **401** generico, sin distinguir la causa. Panel de plataforma (5A): version esperada distinta o transicion de
 estado del tenant no permitida es **409** (no 400 como en documentos comerciales: lo pide
-el contrato de plataforma, igual que 4A).
+el contrato de plataforma, igual que 4A). Solicitud publica de registro (tarea 55):
+`policyVersion` es obligatorio; ausente, vacio, con formato distinto de AAAA-MM-DD o distinto del
+vigente es **400**, y la misma clave con otra version es el **409** de cuerpo distinto. El detalle
+de plataforma, y las respuestas de aprobar, rechazar y reenviar, que devuelven ese detalle, agregan
+`policyVersion` y `policyAcceptedAt` (nulos en historicos); el listado no los incluye.
 
 * **Secretos de un solo uso**: tokens de activacion y similares se guardan solo como
   SHA-256; el valor crudo no va a la base, logs ni respuestas. Si un mensaje pendiente
