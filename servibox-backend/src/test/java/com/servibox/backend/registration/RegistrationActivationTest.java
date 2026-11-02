@@ -174,7 +174,10 @@ class RegistrationActivationTest {
         assertThat(correo.to()).isEqualTo("ana@uno.co");
         assertThat(correo.subject()).isEqualTo("Activa tu cuenta de ServiBox");
         assertThat(correo.body()).contains("https://app.example.invalid/activar#token=" + token)
-                .contains("Serviteca Uno").contains("Ana Rojas");
+                .contains("Serviteca Uno").contains("Ana Rojas")
+                .contains("https://servibox.co/politica-de-datos");
+        assertThat(correo.html()).contains("href=\"https://app.example.invalid/activar#token=" + token + "\"")
+                .contains("Activar mi cuenta").contains("Serviteca Uno").contains("Ana Rojas");
         Map<String, Object> fila = jdbc.queryForMap("SELECT estado, payload_cifrado, fecha_envio FROM correos_salientes");
         assertThat(fila.get("ESTADO")).isEqualTo("SENT");
         assertThat(fila.get("PAYLOAD_CIFRADO")).isNull();

@@ -38,9 +38,9 @@ class OutboxLogPrivacyTest {
     static class TransporteQueRechaza {
         @Bean
         MailTransport rechazaConDatos() {
-            return (to, subject, body) -> {
+            return (to, subject, body, html) -> {
                 throw new MailTransportException(true, new MailSendException("Failed messages",
-                        new IllegalStateException("550 5.1.1 <" + to + "> User unknown; cuerpo: " + body)));
+                        new IllegalStateException("550 5.1.1 <" + to + "> User unknown; cuerpo: " + body + html)));
             };
         }
     }
@@ -79,6 +79,29 @@ class OutboxLogPrivacyTest {
                 .contains("Outbox: correo " + id + " no aceptado por el transporte, intento 1, permanente true")
                 .contains("IllegalStateException: 550 5.1.1 <j***@cliente-secreto.co> User unknown")
                 .doesNotContain(DESTINATARIO).doesNotContain("juana.perez").doesNotContain(TOKEN);
+    }
+
+    @Test
+    void rechazoDeCorreoConMarcaNoDejaTokenEnElLog(CapturedOutput output) {
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        jdbc.update("INSERT INTO solicitudes_registro (id_solicitud, nombre_comercial, nit, telefono, nombre_responsable,"
+                + " correo_responsable, correo_normalizado, slug_solicitado, slug_reservado, estado, hash_cuerpo,"
+                + " idempotencia_expira_en, fecha_creacion, reserva_expira_en, nombre_comercial_busqueda, nombre_responsable_busqueda) VALUES (?, 'Taller Log', '900123456-7',"
+                + " '3001234567', 'Juana', ?, ?, 'taller-log', 'taller-log', 'APPROVED', ?, ?, ?, ?, 'taller log', 'juana')", SOLICITUD,
+                DESTINATARIO, DESTINATARIO, "0".repeat(64), now.plusDays(1), now, now.plusDays(1));
+        jdbc.update("INSERT INTO activaciones_registro (id_solicitud, generacion, digest_token, fecha_creacion, expira_en)"
+                + " VALUES (?, 1, ?, ?, ?)", SOLICITUD, "c".repeat(64), now, now.plusDays(1));
+        long activacion = jdbc.queryForObject("SELECT id_activacion FROM activaciones_registro", Long.class);
+        outbox.enqueue(activacion, DESTINATARIO, OutboxTemplate.ACTIVATION,
+                "Hola:\n\nhttps://app.example.invalid/activar#token=" + TOKEN + "\n\nFin.\n", now.minusSeconds(1),
+                now.plusDays(1));
+
+        assertThat(worker.processBatch()).isEqualTo(1);
+
+        assertThat(jdbc.queryForObject("SELECT ultimo_error FROM correos_salientes", String.class))
+                .isEqualTo("TRANSPORTE_PERMANENTE");
+        assertThat(output.getAll()).contains("no aceptado por el transporte").contains("token=[oculto]").doesNotContain(TOKEN)
+                .doesNotContain(DESTINATARIO);
     }
 
     @Test

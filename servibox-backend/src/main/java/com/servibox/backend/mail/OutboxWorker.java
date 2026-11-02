@@ -38,6 +38,7 @@ public class OutboxWorker {
     private final TransactionTemplate tx;
     private final OutboxCipher cipher;
     private final ObjectProvider<MailTransport> transport;
+    private final MailRenderer renderer;
     private final int maxAttempts;
     private final Duration backoff;
 
@@ -45,7 +46,7 @@ public class OutboxWorker {
     }
 
     public OutboxWorker(JdbcTemplate jdbc, PlatformTransactionManager transactionManager, OutboxCipher cipher,
-            ObjectProvider<MailTransport> transport,
+            ObjectProvider<MailTransport> transport, MailRenderer renderer,
             @Value("${servibox.mail.outbox.max-attempts}") int maxAttempts,
             @Value("${servibox.mail.outbox.retry-backoff}") Duration backoff) {
         if (maxAttempts < 1 || !backoff.isPositive()) {
@@ -55,6 +56,7 @@ public class OutboxWorker {
         this.tx = new TransactionTemplate(transactionManager);
         this.cipher = cipher;
         this.transport = transport;
+        this.renderer = renderer;
         this.maxAttempts = maxAttempts;
         this.backoff = backoff;
         if (transport.getIfAvailable() == null) {
@@ -118,7 +120,11 @@ public class OutboxWorker {
             return;
         }
         try {
-            t.send(c.recipient(), c.template().subject(), body);
+            RenderedMail mail = renderer.render(c.template(), body);
+            if (mail.html() == null) {
+                log.warn("Outbox: correo {} sin enlace reconocible, va solo en texto", c.id());
+            }
+            t.send(c.recipient(), c.template().subject(), mail.text(), mail.html());
         } catch (MailTransportException ex) {
             log.warn("Outbox: correo {} no aceptado por el transporte, intento {}, permanente {} ({})", c.id(),
                     c.attempts(), ex.isPermanent(), detalle(ex));
