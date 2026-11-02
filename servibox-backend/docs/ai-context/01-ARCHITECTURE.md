@@ -409,7 +409,9 @@ Activacion y correo (4B): aprobar y reenviar emiten un token opaco, guardan su S
 ACTIVACIONES_REGISTRO y encolan el correo en CORREOS_SALIENTES en la misma transaccion;
 nunca envian. `mail.OutboxWorker` (tarea programada solo en el servidor HTTP) reclama con
 `FOR UPDATE SKIP LOCKED` mas lease condicional y envia por `mail.MailTransport` fuera de
-transaccion; sin SMTP_HOST no hay transporte y lo pendiente espera. `SMTP_SECURITY` elige
+transaccion; sin SMTP_HOST no hay transporte y lo pendiente espera. `mail.MailRenderer` arma al
+enviar el HTML con la marca y el texto a partir del cuerpo guardado (tarea 57); el logo es
+`resources/mail/servibox-logo.png`, incrustado por cid. `SMTP_SECURITY` elige
 STARTTLS (por defecto) o TLS implicito (ssl, 465), con verificacion de certificado y de nombre.
 `mail.OutboxPurger` (misma programacion) borra por lotes SENT y FAILED viejos con SKIP LOCKED;
 `OutboxCipher` acepta una clave anterior solo para descifrar (rotacion). Activar provisiona con
@@ -483,7 +485,7 @@ Base: `com.servibox.backend`. Un paquete por modulo de negocio, mas tres transve
 | `shared` | `TenantAwareEntity`, `ErrorResponse`, `GlobalExceptionHandler`, `ResourceNotFoundException` |
 | `auth` | `JwtService`, `JwtAuthenticationFilter`, `AuthController`, `TenantRegistrationService`, `InvalidCredentialsException` y las tres excepciones del registro, mas `entity` / `repository` / `dto` |
 | `registration` | solicitudes de registro (4A): `RegistrationRequest`, su servicio, el controlador publico y el de revision de plataforma; activacion (4B): `RegistrationActivation` y `RegistrationActivationService`; global, sin tenant |
-| `mail` | outbox de correo (4B): `OutboxMessage`, `MailOutbox` (encolar), `OutboxWorker` (enviar), `OutboxPurger` (purga, tarea 51), `OutboxCipher` (AES-GCM, clave anterior opcional), `MailTransport` y `SmtpMailTransport`; global, sin tenant |
+| `mail` | outbox de correo (4B): `OutboxMessage`, `MailOutbox` (encolar), `OutboxWorker` (enviar), `OutboxPurger` (purga, tarea 51), `OutboxCipher` (AES-GCM, clave anterior opcional), `MailRenderer` (plantilla HTML y texto, tarea 57), `MailTransport` y `SmtpMailTransport`; global, sin tenant |
 | `inventory` | primer modulo de negocio migrado, ver abajo |
 | `treasury` | segundo modulo de negocio migrado, ver abajo |
 | `counterparties` | terceros (`Counterparty`): clientes y proveedores en una sola entidad, compartida por `sales` y `purchases`, ver abajo |

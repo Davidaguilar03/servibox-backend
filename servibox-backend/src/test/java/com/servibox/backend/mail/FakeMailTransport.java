@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class FakeMailTransport implements MailTransport {
 
-    public record Sent(String to, String subject, String body) {
+    public record Sent(String to, String subject, String body, String html) {
     }
 
     private final List<Sent> sent = new ArrayList<>();
@@ -20,7 +20,7 @@ public class FakeMailTransport implements MailTransport {
     private volatile long delayMs;
 
     @Override
-    public void send(String to, String subject, String body) throws MailTransportException {
+    public void send(String to, String subject, String body, String html) throws MailTransportException {
         calls.incrementAndGet();
         if (delayMs > 0) {
             try {
@@ -34,7 +34,7 @@ public class FakeMailTransport implements MailTransport {
                 failures--;
                 throw new MailTransportException(permanent, new IllegalStateException("fallo simulado"));
             }
-            sent.add(new Sent(to, subject, body));
+            sent.add(new Sent(to, subject, body, html));
         }
     }
 

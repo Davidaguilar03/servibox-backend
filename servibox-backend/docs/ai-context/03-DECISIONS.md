@@ -12,6 +12,26 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-11-01: Correo con la marca renderizado al enviar (tarea 57)
+
+* Decision: `mail.MailRenderer` arma el HTML y el texto en el momento de enviar a partir del cuerpo
+  que el outbox ya guarda. Sin migracion ni cambio de `payload_cifrado`. El correo sale como
+  multipart/alternative(texto, multipart/related(html, logo por cid)). El boton sale del unico bloque
+  del cuerpo que es exactamente `ACTIVATION_BASE_URL` + ruta de la plantilla + token de 43 caracteres.
+* Compatibilidad: una fila PENDING anterior tiene el mismo formato, asi que sale con la marca y el
+  mismo enlace. Lo enviado no se reenvia. Sin ese enlace unico (cuerpo raro, nombre con saltos de linea
+  que imite un enlace, ACTIVATION_BASE_URL cambiada) el correo va tal cual solo en texto, con un aviso
+  en el log que lleva solo el id.
+* Colores: encabezado en `nav` (#1f2937), porque el simbolo es rojo y desapareceria sobre `brand`;
+  boton en `brand-ink` (#d32316), porque blanco sobre `brand` da 3.55 a 1. Logo: PNG de 96 px mostrado
+  a 40 px, rasterizado de src/brand/symbol.svg del frontend; ese repo no tiene logotipo en SVG, y el
+  nombre va como texto.
+* Alternativas consideradas: payload JSON con version (migra formato y deja dos caminos para siempre,
+  y lo encolado saldria distinto); plantilla Thymeleaf (dependencia nueva para un solo correo); imagen
+  por URL (depende de que el cliente descargue imagenes y de que servibox.co este arriba).
+* Motivo: cambio minimo, sin riesgo para las filas cifradas, y el texto guardado sigue siendo la unica
+  fuente del contenido.
+
 ## 2026-11-01: Cache y cabeceras de seguridad del frontend en Caddy (tarea 56)
 
 * Decision: `/assets/*` existente con `public, max-age=31536000, immutable` y sin fallback SPA, un

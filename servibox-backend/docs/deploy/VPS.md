@@ -549,5 +549,6 @@ Desde el PC o el servidor (bash; en PowerShell usar `curl.exe` con las mismas op
     Esperado: `404` sin `text/html`. Si da `200 text/html`, sigue activo el Caddyfile anterior.
 
 Antes de abrir el registro (`REGISTRATION_REQUESTS_ENABLED=true`): configurar SMTP, verificar
-un correo real en un buzón y repetir el punto 7 con `POST /api/registration-requests/activate`
+un correo real en un buzón (con logo, botón y pie; el seguimiento de aperturas y clics de Resend
+debe seguir apagado, porque reescribiría el enlace con el token) y repetir el punto 7 con `POST /api/registration-requests/activate`
 (token falso). Resto de comprobaciones en [DEPLOYMENT.md](../DEPLOYMENT.md).

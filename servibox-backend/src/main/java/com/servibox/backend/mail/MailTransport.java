@@ -6,5 +6,6 @@ package com.servibox.backend.mail;
  */
 public interface MailTransport {
 
-    void send(String to, String subject, String body) throws MailTransportException;
+    /** html null: solo texto plano. Con html: multipart/alternative con el logo incrustado (MailRenderer.LOGO_CID). */
+    void send(String to, String subject, String text, String html) throws MailTransportException;
 }

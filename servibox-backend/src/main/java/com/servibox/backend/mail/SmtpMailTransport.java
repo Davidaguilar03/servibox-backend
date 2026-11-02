@@ -1,14 +1,23 @@
 package com.servibox.backend.mail;
 
+import jakarta.activation.DataHandler;
+import jakarta.mail.MessagingException;
+import jakarta.mail.Part;
+import jakarta.mail.internet.MimeBodyPart;
+import jakarta.mail.internet.MimeMessage;
+import jakarta.mail.internet.MimeMultipart;
+import jakarta.mail.util.ByteArrayDataSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.mail.MailException;
 import org.springframework.mail.MailParseException;
 import org.springframework.mail.MailPreparationException;
-import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.util.Locale;
 import java.util.Properties;
 
@@ -25,6 +34,7 @@ public class SmtpMailTransport implements MailTransport {
 
     private final JavaMailSenderImpl sender = new JavaMailSenderImpl();
     private final String from;
+    private final byte[] logoPng;
 
     public SmtpMailTransport(
             @Value("${servibox.mail.smtp.host}") String host,
@@ -59,6 +69,11 @@ public class SmtpMailTransport implements MailTransport {
         props.put("mail.smtp.timeout", "10000");
         props.put("mail.smtp.writetimeout", "10000");
         this.from = from;
+        try {
+            this.logoPng = new ClassPathResource("mail/servibox-logo.png").getContentAsByteArray();
+        } catch (IOException ex) {
+            throw new IllegalStateException("No se pudo leer el logo del correo", ex);
+        }
     }
 
     /** Solo para pruebas del mapeo de propiedades. */
@@ -67,18 +82,45 @@ public class SmtpMailTransport implements MailTransport {
     }
 
     @Override
-    public void send(String to, String subject, String body) throws MailTransportException {
-        SimpleMailMessage message = new SimpleMailMessage();
-        message.setFrom(from);
-        message.setTo(to);
-        message.setSubject(subject);
-        message.setText(body);
+    public void send(String to, String subject, String text, String html) throws MailTransportException {
         try {
-            sender.send(message);
-        } catch (MailParseException | MailPreparationException ex) {
+            sender.send(build(to, subject, text, html));
+        } catch (MessagingException | MailParseException | MailPreparationException ex) {
             throw new MailTransportException(true, ex);
         } catch (MailException ex) {
             throw new MailTransportException(false, ex);
         }
+    }
+
+    /** Con html: alternative(texto, related(html, logo)), sin adjuntos visibles. Sin html: texto plano simple. */
+    MimeMessage build(String to, String subject, String text, String html) throws MessagingException {
+        MimeMessage message = sender.createMimeMessage();
+        MimeMessageHelper helper = new MimeMessageHelper(message, "UTF-8");
+        helper.setFrom(from);
+        helper.setTo(to);
+        helper.setSubject(subject);
+        if (html == null) {
+            helper.setText(text);
+            return message;
+        }
+        MimeBodyPart htmlPart = new MimeBodyPart();
+        htmlPart.setText(html, "UTF-8", "html");
+        MimeBodyPart logo = new MimeBodyPart();
+        logo.setDataHandler(new DataHandler(new ByteArrayDataSource(logoPng, "image/png")));
+        logo.setContentID("<" + MailRenderer.LOGO_CID + ">");
+        logo.setDisposition(Part.INLINE);
+        logo.setFileName("servibox-logo.png");
+        MimeMultipart related = new MimeMultipart("related");
+        related.addBodyPart(htmlPart);
+        related.addBodyPart(logo);
+        MimeBodyPart relatedPart = new MimeBodyPart();
+        relatedPart.setContent(related);
+        MimeBodyPart textPart = new MimeBodyPart();
+        textPart.setText(text, "UTF-8");
+        MimeMultipart alternative = new MimeMultipart("alternative");
+        alternative.addBodyPart(textPart);
+        alternative.addBodyPart(relatedPart);
+        message.setContent(alternative);
+        return message;
     }
 }

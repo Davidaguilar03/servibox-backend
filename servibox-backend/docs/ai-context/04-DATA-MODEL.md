@@ -119,7 +119,7 @@ Modulo: Outbox de correo, V10 (tarea 4B). Global, sin tenant. Fechas en UTC.
 | id_activacion | BIGINT | 8 bytes | NOT NULL | FK | FK a ACTIVACIONES_REGISTRO: enlace que lleva el correo; reenviar o activar cancela lo pendiente. |
 | destinatario | VARCHAR | 150 | NOT NULL | - | Correo del responsable de la solicitud. |
 | plantilla | VARCHAR | 30 | NOT NULL | - | ACTIVATION (CHECK). El asunto sale de la plantilla. |
-| payload_cifrado | VARCHAR | 4000 | NULL | - | Cuerpo con el enlace, AES-256-GCM con MAIL_OUTBOX_ENCRYPTION_KEY, Base64. Solo en PENDING (CHECK); se borra al enviar, fallar, revocar, consumir o vencer. |
+| payload_cifrado | VARCHAR | 4000 | NULL | - | Cuerpo en texto plano con el enlace (el HTML se arma al enviar), AES-256-GCM con MAIL_OUTBOX_ENCRYPTION_KEY, Base64. Solo en PENDING (CHECK); se borra al enviar, fallar, revocar, consumir o vencer. |
 | estado | VARCHAR | 10 | NOT NULL | - | PENDING, SENT (aceptado por el transporte, no entregado al buzon) o FAILED (CHECK). |
 | intentos | INTEGER | 4 bytes | NOT NULL | - | Reclamos del worker; no negativo. |
 | proximo_intento | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Reintento con retroceso exponencial. |
