@@ -2,6 +2,7 @@ package com.servibox.backend.inventory.service;
 
 import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.inventory.entity.FinancialSettings;
+import com.servibox.backend.inventory.entity.ItemType;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
 import com.servibox.backend.inventory.entity.TaxType;
@@ -24,6 +25,7 @@ import org.springframework.data.domain.Sort;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -31,6 +33,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -46,9 +49,114 @@ public class InventoryService {
     @PersistenceContext
     private EntityManager entityManager;
 
+    /** Mensaje del 400 al intentar cambiar el tipo de un item en un PUT. */
+    public static final String MENSAJE_TIPO_INMUTABLE = "El tipo de un item no se puede cambiar despues de crearlo";
+
+    /** Categoria a la que van todos los servicios del tenant; se crea la primera vez. */
+    public static final String CATEGORIA_SERVICIOS = "SERVICIOS";
+
     @Transactional(readOnly = true)
     public List<Product> findAllProducts() {
         return productRepository.findAll(Sort.by("description", "id"));
+    }
+
+    /** GET /api/inventory/products?itemType=: null es productos y servicios juntos. */
+    @Transactional(readOnly = true)
+    public List<Product> findProducts(ItemType itemType) {
+        return itemType == null ? findAllProducts()
+                : productRepository.findByItemType(itemType, Sort.by("description", "id"));
+    }
+
+    /**
+     * POST de un SERVICIO: stock y costo en 0 (lo que llegue se ignora), precio fijo de venta
+     * en suggestedPrice y, con vatApplies (true si no llega), su IVA en taxAmount a la tasa de
+     * la categoria SERVICIOS. El codigo comparte unicidad con los productos.
+     */
+    @Transactional
+    public Product crearServicio(String code, String description, Double salePrice, Boolean vatApplies) {
+        double precio = validarPrecioServicio(salePrice);
+        Product servicio = new Product();
+        servicio.setItemType(ItemType.SERVICIO);
+        servicio.setCode(code);
+        servicio.setDescription(description);
+        servicio.setPurchaseCost(0.0);
+        servicio.setQuantity(0);
+        // Antes de cualquier consulta, como en saveProduct.
+        validarProducto(servicio);
+        servicio.setCategory(categoriaServicios());
+        aplicarPrecioServicio(servicio, precio, vatApplies == null || vatApplies);
+        return saveProduct(servicio);
+    }
+
+    /**
+     * PUT de un SERVICIO: codigo (mismas reglas que un producto), descripcion, precio e IVA. La
+     * categoria y el costo que lleguen se ignoran. vatApplies null conserva lo que tenia.
+     */
+    @Transactional
+    public Product actualizarServicio(Long id, String code, String description, Double salePrice,
+                                      Boolean vatApplies) {
+        bloquearProductos(List.of(id));
+        Product servicio = findProductById(id)
+                .orElseThrow(() -> new DomainValidationException("Producto no encontrado: " + id));
+        double precio = validarPrecioServicio(salePrice);
+        boolean conIva = vatApplies != null ? vatApplies
+                : servicio.getTaxAmount() != null && servicio.getTaxAmount() > 0;
+
+        if (!servicio.getCode().equals(code)) {
+            if (saleDetailRepository.existsByProductId(id)) {
+                throw new ProductCodeLockedException(servicio.getCode());
+            }
+            productRepository.findByCodeAndTenantId(code, TenantContext.getTenantId())
+                    .filter(existente -> !existente.getId().equals(id))
+                    .ifPresent(existente -> {
+                        throw new DuplicateProductCodeException(code);
+                    });
+        }
+
+        servicio.setCode(code);
+        servicio.setDescription(description);
+        aplicarPrecioServicio(servicio, precio, conIva);
+        return saveProduct(servicio);
+    }
+
+    private static double validarPrecioServicio(Double salePrice) {
+        if (salePrice == null || salePrice <= 0) {
+            throw new DomainValidationException("El precio de venta del servicio debe ser mayor a cero");
+        }
+        return Moneda.aCentavos(salePrice);
+    }
+
+    /**
+     * Precio fijo e IVA de un servicio, con la tasa de IVA vigente de su categoria. No lo
+     * tocan los recalculos de categoria ni de configuracion financiera (aplicarPrecios).
+     */
+    private void aplicarPrecioServicio(Product servicio, double precio, boolean conIva) {
+        servicio.setSuggestedPrice(precio);
+        servicio.setTaxAmount(conIva
+                ? Moneda.aCentavos(BigDecimal.valueOf(precio).multiply(BigDecimal.valueOf(vatRateOf(servicio.getCategory()))))
+                : 0.0);
+    }
+
+    /**
+     * La categoria SERVICIOS del tenant activo, creada la primera vez con los impuestos de IVA
+     * del tenant, sin umbrales ni margen. Si hay varias con ese nombre se usa la de menor id.
+     */
+    private ProductCategory categoriaServicios() {
+        return productCategoryRepository.findByNameAndTenantId(CATEGORIA_SERVICIOS, TenantContext.getTenantId())
+                .stream()
+                .min(Comparator.comparing(ProductCategory::getId))
+                .orElseGet(() -> {
+                    ProductCategory categoria = new ProductCategory();
+                    categoria.setName(CATEGORIA_SERVICIOS);
+                    categoria.setColor("#3498db");
+                    categoria.setYellowStockMin(0);
+                    categoria.setRedStockMin(0);
+                    categoria.setTargetMargin(0.0);
+                    categoria.setTaxTypes(listarImpuestos().stream()
+                            .filter(t -> Boolean.TRUE.equals(t.getIsVat()))
+                            .collect(Collectors.toSet()));
+                    return saveCategory(categoria);
+                });
     }
 
     /**
@@ -222,7 +330,8 @@ public class InventoryService {
      * muchos productos con una sola lectura de la configuracion.
      */
     private void aplicarPrecios(Product product, FinancialSettings fs) {
-        if (product.getPurchaseCost() == null) {
+        // Un servicio tiene precio fijo: no lo mueven costo, margen, impuestos ni configuracion.
+        if (product.getPurchaseCost() == null || product.esServicio()) {
             return;
         }
         // En BigDecimal desde los valores guardados: el unico redondeo es el del resultado
@@ -454,12 +563,18 @@ public class InventoryService {
      * proyecto lo marca como candidato a centralizar. Aqui vive una sola vez y es de donde
      * lo toman tanto el calculo de precios como Sales.
      *
-     * Dos diferencias con Autollantas, las dos heredadas de decisiones ya tomadas:
-     * suma las rates con isVat en vez de quedarse con la primera, y no tiene la rama de
-     * servicios (`isService`), porque ServiBox no tiene todavia `itemType` ni `basePrice`
-     * en Product. Ver 03-DECISIONS.md.
+     * Suma las rates con isVat en vez de quedarse con la primera, decision ya tomada. La rama
+     * de servicios es la de Autollantas (`isService`): taxAmount / precio fijo (basePrice alli,
+     * suggestedPrice aqui), asi la tasa queda congelada en el servicio. Ver 03-DECISIONS.md.
      */
     public double getIvaRateForProduct(Product product) {
+        if (product != null && product.esServicio()) {
+            double precio = product.getSuggestedPrice() != null ? product.getSuggestedPrice() : 0.0;
+            double iva = product.getTaxAmount() != null ? product.getTaxAmount() : 0.0;
+            return precio > 0
+                    ? BigDecimal.valueOf(iva).divide(BigDecimal.valueOf(precio), MathContext.DECIMAL64).doubleValue()
+                    : 0.0;
+        }
         return product != null ? vatRateOf(product.getCategory()) : 0.0;
     }
 

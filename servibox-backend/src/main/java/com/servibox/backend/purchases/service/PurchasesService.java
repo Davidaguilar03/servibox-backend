@@ -185,6 +185,10 @@ public class PurchasesService {
             Product producto = inventoryService.findProductById(linea.productId())
                     .orElseThrow(() -> new DomainValidationException(
                             "Producto no encontrado: " + linea.productId()));
+            if (producto.esServicio()) {
+                throw new InvalidPurchaseOperationException(
+                        "No se puede comprar un servicio: " + producto.getDescription());
+            }
 
             int cantidad = linea.quantity() != null ? linea.quantity() : 0;
             if (cantidad <= 0) {

@@ -10,6 +10,7 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 ### Agregado
 
 - Versionado semántico del producto y endpoint público GET /api/version.
+- Servicios: ítems sin stock ni costo, vendibles junto con productos, con categoría Servicios automática por serviteca.
 
 ## [1.0.0] - 2026-11-01
 

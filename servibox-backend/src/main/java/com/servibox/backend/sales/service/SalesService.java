@@ -220,8 +220,10 @@ public class SalesService {
             // Congelado aqui: la tasa que rige es la del momento de facturar.
             double ivaLinea = Moneda.aCentavos(baseExacta.multiply(
                     BigDecimal.valueOf(inventoryService.getIvaRateForProduct(producto))));
-            // IVA a favor: el que ya se pago al comprar esas unidades.
-            double descontableLinea = (producto.getTaxAmount() != null ? producto.getTaxAmount() : 0.0) * cantidad;
+            // IVA a favor: el que ya se pago al comprar esas unidades. Un servicio no se compra:
+            // su taxAmount es el IVA de su precio de venta y no tiene descontable.
+            double descontableLinea = producto.esServicio() ? 0.0
+                    : (producto.getTaxAmount() != null ? producto.getTaxAmount() : 0.0) * cantidad;
 
             SaleDetail detalle = new SaleDetail();
             detalle.setSale(guardada);
@@ -432,7 +434,11 @@ public class SalesService {
                 });
     }
 
+    /** Un servicio no tiene stock: se vende sin validarlo ni descontarlo (crear y restaurar). */
     private void descontarStock(Product producto, int cantidad) {
+        if (producto.esServicio()) {
+            return;
+        }
         int disponible = producto.getQuantity() != null ? producto.getQuantity() : 0;
         if (disponible < cantidad) {
             throw new InsufficientStockException(producto.getDescription(), disponible, cantidad);
@@ -444,10 +450,10 @@ public class SalesService {
     /**
      * Se guarda por el repositorio y no por InventoryService.saveProduct a proposito:
      * saveProduct revalida el codigo y rehace los precios sugeridos, y devolver stock no
-     * es motivo para recalcularle el precio a un producto.
+     * es motivo para recalcularle el precio a un producto. Un servicio no recibe stock.
      */
     private void restaurarStock(Product producto, Integer cantidad) {
-        if (producto == null || cantidad == null) {
+        if (producto == null || cantidad == null || producto.esServicio()) {
             return;
         }
         int actual = producto.getQuantity() != null ? producto.getQuantity() : 0;

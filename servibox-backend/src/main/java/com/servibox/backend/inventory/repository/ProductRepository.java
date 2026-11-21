@@ -1,7 +1,9 @@
 package com.servibox.backend.inventory.repository;
 
+import com.servibox.backend.inventory.entity.ItemType;
 import com.servibox.backend.inventory.entity.Product;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -14,6 +16,9 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     List<Product> findByCodeIgnoreCase(String code);
 
     List<Product> findByCategoryId(Long categoryId);
+
+    /** El tenant lo pone el @Filter de Hibernate, igual que en findAll. */
+    List<Product> findByItemType(ItemType itemType, Sort sort);
 
     Optional<Product> findByCodeAndTenantId(String code, Long tenantId);
 

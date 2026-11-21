@@ -2,7 +2,7 @@
 
 Fuente: Diccionario de Datos de ServiBox (informe UPTC-EISC-SB-01) y su diagrama entidad-relacion, 14 entidades en tercera forma normal. Este archivo es la especificacion del esquema al que debe converger el codigo.
 
-**Estado.** El refactor de normalizacion termino (ver `sessions/2026-10-06-refactor-normalizacion.md`): las 14 tablas comerciales parten de Flyway `V1__init_schema.sql`, escrita desde este archivo; V2 a V7 las evolucionan. V8 agrega la identidad global de plataforma, V9 las solicitudes de registro y V10 la activacion de cuentas y el outbox de correo, y V11 la auditoria de plataforma, para 19 tablas. V12 amplia la auditoria al reenvio de activacion (sin tablas nuevas). `schema.SchemaConformanceTest` compara la base con este archivo. Donde el codigo y este archivo difieran, este archivo manda, salvo lo anotado en "Decisiones de implementacion" y "Pendientes" al final.
+**Estado.** El refactor de normalizacion termino (ver `sessions/2026-10-06-refactor-normalizacion.md`): las 14 tablas comerciales parten de Flyway `V1__init_schema.sql`, escrita desde este archivo; V2 a V7 las evolucionan. V8 agrega la identidad global de plataforma, V9 las solicitudes de registro y V10 la activacion de cuentas y el outbox de correo, y V11 la auditoria de plataforma, para 19 tablas. V12 amplia la auditoria al reenvio de activacion (sin tablas nuevas). V15 agrega `item_type` a PRODUCTOS (servicios). `schema.SchemaConformanceTest` compara la base con este archivo. Donde el codigo y este archivo difieran, este archivo manda, salvo lo anotado en "Decisiones de implementacion" y "Pendientes" al final.
 
 ## Reglas generales
 
@@ -305,7 +305,8 @@ Modulo: Inventario.
 | costo_compra | NUMERIC | 14,2 | NOT NULL | - | Ultimo costo neto o promedio ponderado de compra en COP. |
 | cantidad | INTEGER (I) | 4 bytes | NOT NULL | - | Saldo de existencias fisicas disponibles en almacen o bodega. |
 | iva_producto | NUMERIC | 14,2 | NOT NULL | - | Monto de IVA por unidad en COP: costo_compra por la suma de las tasas de IVA (es_iva) de la categoria del producto, en pesos enteros (HALF_UP, .00). No es una tarifa. |
-| precio_sugerido | NUMERIC | 14,2 | NOT NULL | - | Precio de venta recomendado calculado a partir de costo y margen, en pesos enteros (HALF_UP, .00). V5 redondeo los ya guardados. |
+| precio_sugerido | NUMERIC | 14,2 | NOT NULL | - | Precio de venta recomendado calculado a partir de costo y margen, en pesos enteros (HALF_UP, .00). V5 redondeo los ya guardados. En un SERVICIO es el precio fijo de venta sin IVA, con centavos, y no se recalcula. |
+| item_type | VARCHAR | 20 | NOT NULL | - | V15. PRODUCTO (por defecto) o SERVICIO (`ck_producto_item_type`); no cambia despues de crear el item. Un SERVICIO tiene cantidad y costo_compra en 0, va a la categoria SERVICIOS del tenant y su iva_producto es el IVA de su precio fijo (0 si no lleva IVA). Indice `ix_producto_tenant_tipo` (id_tenant, item_type, descripcion_producto, id_producto). |
 | created_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de registro del producto en el catalogo (UTC). |
 | updated_at | TIMESTAMP (D) | 8 bytes | NOT NULL | - | Fecha y hora de modificacion de existencias o precios (UTC). |
 
