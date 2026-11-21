@@ -116,7 +116,7 @@ Despues de configurar conexion y ambas claves de firma privadas en el entorno, e
 desde Maven con el JAR empaquetado y perfil elegido por SPRING_PROFILES_ACTIVE:
 
 ```powershell
-java -jar target/servibox-backend-0.0.1-SNAPSHOT.jar --platform-bootstrap
+java -jar target/servibox-backend-1.1.0.jar --platform-bootstrap
 ```
 
 Exige consola Java real: solicita email y contrasena con readPassword (entrada oculta).

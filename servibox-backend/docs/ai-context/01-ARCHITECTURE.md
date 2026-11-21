@@ -376,7 +376,9 @@ pura, sin formularios ni cookies de sesion), `BCryptPasswordEncoder` como bean, 
 `UserDetailsServiceAutoConfiguration` (excluida en `ServiboxApplication`, tarea 52), HSTS de
 180 dias en todas las respuestas solo con el perfil prod, CORS solo para los origenes
 exactos de CORS_ALLOWED_ORIGINS (vacia: sin CORS; prod exige https; despliegue VPS),
-`permitAll` en `POST /api/auth/login`, `POST /api/auth/register` y `GET /api/health`, y
+`permitAll` en `POST /api/auth/login`, `POST /api/auth/register`, `GET /api/health` y
+`GET /api/version` (tarea 58: `name`, `version` y `buildTime` de BuildProperties; "dev" sin
+build-info), y
 TENANT_IDENTITY en las familias comerciales enumeradas; resto denegado. Cadena de
 plataforma separada descrita arriba, con login publico propio.
 

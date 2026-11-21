@@ -12,6 +12,26 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-11-21: Versionado semantico del producto (tarea 58)
+
+* Contexto: la evaluacion externa observo que el producto no indicaba su version. El `pom.xml`
+  decia 0.0.1-SNAPSHOT y ninguna ruta la exponia.
+* Decision: SemVer. Lo desplegado desde el 2026-11-01 es v1.0.0; la version en desarrollo es
+  1.1.0 (servicios sin stock y reportes ampliados), sin `-SNAPSHOT`. El goal `build-info` del
+  spring-boot-maven-plugin genera META-INF/build-info.properties en cada `./mvnw package`,
+  tambien dentro de la imagen Docker. `GET /api/version`, publico, responde solo `name`
+  ("ServiBox"), `version` y `buildTime` (ISO-8601, UTC); sin BuildProperties responde `version`
+  "dev" y `buildTime` null. Reglas en [02-CONVENTIONS](02-CONVENTIONS.md), seccion Versionado.
+* Dockerfile: copia `servibox-backend-*.jar` en vez del nombre con version, para que subir la
+  version no rompa la imagen.
+* Alternativas consideradas: Actuator `/info` (dependencia nueva y otra familia de rutas que
+  abrir en seguridad); leer la version del MANIFEST (no trae fecha de compilacion);
+  mantener `-SNAPSHOT` en desarrollo (el prompt fija 1.1.0).
+* Consecuencias: cada version sube a mano en `pom.xml` y `package.json`, lleva su entrada en
+  CHANGELOG.md y su etiqueta `vX.Y.Z` en ambos repos al desplegar. Lo que hoy corre en
+  produccion no tiene la ruta: responde solo desde el despliegue de 1.1.0. La etiqueta v1.0.0
+  queda pendiente de crear sobre el commit desplegado el 2026-11-01.
+
 ## 2026-11-01: Correo con la marca renderizado al enviar (tarea 57)
 
 * Decision: `mail.MailRenderer` arma el HTML y el texto en el momento de enviar a partir del cuerpo
