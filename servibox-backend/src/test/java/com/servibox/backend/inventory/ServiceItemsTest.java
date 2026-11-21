@@ -365,6 +365,37 @@ class ServiceItemsTest {
 
     // ---- Apoyo ----
 
+    // ---- vatApplies ----
+
+    @Test
+    void vatAppliesDiceSiElItemLlevaIva() throws Exception {
+        fixture.usarTenant(tenantUno);
+        ProductCategory sinIva = new ProductCategory();
+        sinIva.setName("BATERIAS");
+        sinIva.setColor("#2ecc71");
+        sinIva.setYellowStockMin(1);
+        sinIva.setRedStockMin(0);
+        sinIva.setTargetMargin(0.0);
+        sinIva.setTaxTypes(java.util.Set.of());
+        fixture.crearProducto(inventoryService.saveCategory(sinIva), "BAT-001", 100.0, 3);
+        // Costo 0: sin taxAmount, pero su categoria lleva IVA.
+        fixture.crearProducto(llantas, "LLA-000", 0.0, 1);
+        TenantContext.clear();
+        crearServicio(tokenUno, servicio("SRV-IVA", 20000)).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.vatApplies").value(true));
+        crearServicio(tokenUno, """
+                {"code":"SRV-SIN","description":"Lavado","itemType":"SERVICIO","salePrice":10000,"vatApplies":false}
+                """).andExpect(status().isCreated()).andExpect(jsonPath("$.vatApplies").value(false));
+
+        mockMvc.perform(get("/api/inventory/products").header("Authorization", "Bearer " + tokenUno))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.code == 'LLA-001')].vatApplies").value(true))
+                .andExpect(jsonPath("$[?(@.code == 'LLA-000')].vatApplies").value(true))
+                .andExpect(jsonPath("$[?(@.code == 'BAT-001')].vatApplies").value(false))
+                .andExpect(jsonPath("$[?(@.code == 'SRV-IVA')].vatApplies").value(true))
+                .andExpect(jsonPath("$[?(@.code == 'SRV-SIN')].vatApplies").value(false));
+    }
+
     private Sale vender(PaymentType tipo, SalesService.LineaFactura... lineas) {
         Counterparty cliente = fixture.crearCliente("Cliente", "900" + System.nanoTime());
         Account caja = tipo == PaymentType.CONTADO ? fixture.crearCuenta("Caja " + System.nanoTime()) : null;

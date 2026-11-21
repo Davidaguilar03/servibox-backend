@@ -18,6 +18,8 @@ import org.openpdf.text.pdf.PdfReader;
 import org.openpdf.text.pdf.PdfStamper;
 import org.openpdf.text.pdf.PdfWriter;
 import org.openpdf.text.pdf.draw.LineSeparator;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.info.BuildProperties;
 import org.springframework.stereotype.Component;
 
 import java.awt.Color;
@@ -61,15 +63,33 @@ public class PdfReportGenerator {
     /** El reloj de negocio: la hora del pie es la del taller, no la del servidor. */
     private final Clock clock;
 
+    /** La version del producto para el pie, la misma de GET /api/version. */
+    private final ObjectProvider<BuildProperties> buildProperties;
+
     public byte[] generar(ReportModel reporte) {
         byte[] cuerpo = cuerpo(reporte);
         String generado = "Generado el " + LocalDateTime.now(clock).format(FECHA_HORA) + " · " + reporte.tenantName();
-        return conPie(cuerpo, generado);
+        return conPie(cuerpo, generado, "ServiBox " + version(buildProperties));
+    }
+
+    /** Sin build-info (desde el IDE sin Maven): "dev", igual que GET /api/version. */
+    static String version(ObjectProvider<BuildProperties> buildProperties) {
+        BuildProperties build = buildProperties.getIfAvailable();
+        return build == null ? "dev" : build.getVersion();
+    }
+
+    /** "Período: <desde> a <hasta>", o "Corte al <hasta>" si el reporte no tiene desde. */
+    static String periodo(ReportModel r) {
+        return r.desde() == null
+                ? "Corte al " + r.hasta().format(FECHA)
+                : "Período: " + r.desde().format(FECHA) + " a " + r.hasta().format(FECHA);
     }
 
     private byte[] cuerpo(ReportModel r) {
         ByteArrayOutputStream salida = new ByteArrayOutputStream();
-        Document documento = new Document(PageSize.A4, MARGEN, MARGEN, MARGEN, MARGEN);
+        // Mas de seis columnas no caben en vertical sin partir los montos.
+        Document documento = new Document(r.columns().size() > 6 ? PageSize.A4.rotate() : PageSize.A4,
+                MARGEN, MARGEN, MARGEN, MARGEN);
         PdfWriter.getInstance(documento, salida);
         documento.open();
 
@@ -78,8 +98,7 @@ public class PdfReportGenerator {
             documento.add(new Paragraph("NIT " + r.tenantNit(), fuente(10, Font.NORMAL, GRIS)));
         }
         documento.add(new Paragraph(r.title(), fuente(12, Font.BOLD, Color.BLACK)));
-        documento.add(new Paragraph("Período: " + r.desde().format(FECHA) + " a " + r.hasta().format(FECHA),
-                fuente(10, Font.NORMAL, GRIS)));
+        documento.add(new Paragraph(periodo(r), fuente(10, Font.NORMAL, GRIS)));
         if (r.subtitle() != null) {
             documento.add(new Paragraph(r.subtitle(), fuente(10, Font.NORMAL, GRIS)));
         }
@@ -107,7 +126,7 @@ public class PdfReportGenerator {
 
         for (Column columna : columnas) {
             PdfPCell celda = celda(columna.title(), fuente(9, Font.BOLD, Color.WHITE), CARBON,
-                    columna.type() == ColumnType.MONEY ? Element.ALIGN_RIGHT : Element.ALIGN_LEFT);
+                    numerica(columna.type()) ? Element.ALIGN_RIGHT : Element.ALIGN_LEFT);
             tabla.addCell(celda);
         }
 
@@ -121,6 +140,15 @@ public class PdfReportGenerator {
             List<Object> fila = r.rows().get(i);
             for (int c = 0; c < n; c++) {
                 tabla.addCell(valor(fila.get(c), columnas.get(c).type(), false, fondo, null));
+            }
+        }
+        if (r.footer() != null) {
+            for (int c = 0; c < n; c++) {
+                Object celda = r.footer().get(c);
+                tabla.addCell(c == 0 || celda == null
+                        ? celda(celda == null ? "" : String.valueOf(celda), fuente(9, Font.BOLD, Color.BLACK),
+                        FONDO_TOTAL, Element.ALIGN_LEFT)
+                        : valor(celda, columnas.get(c).type(), true, FONDO_TOTAL, null));
             }
         }
 
@@ -141,11 +169,14 @@ public class PdfReportGenerator {
                 fondo, Element.ALIGN_LEFT);
         etiqueta.setColspan(n - 1);
         tabla.addCell(etiqueta);
-        tabla.addCell(valor(total.amount(), ColumnType.MONEY, true, fondo, colorTexto));
+        tabla.addCell(valor(total.amount(), total.type(), true, fondo, colorTexto));
     }
 
     private PdfPCell valor(Object valor, ColumnType tipo, boolean negrita, Color fondo, Color colorForzado) {
         int estilo = negrita ? Font.BOLD : Font.NORMAL;
+        if (valor == null) {
+            return celda("", fuente(9, estilo, Color.BLACK), fondo, Element.ALIGN_LEFT);
+        }
         return switch (tipo) {
             case DATE -> celda(((LocalDate) valor).format(FECHA), fuente(9, estilo, Color.BLACK), fondo,
                     Element.ALIGN_LEFT);
@@ -154,8 +185,35 @@ public class PdfReportGenerator {
                 Color color = colorForzado != null ? colorForzado : monto < 0 ? ROJO_NEGATIVO : Color.BLACK;
                 yield celda(moneda(monto), fuente(9, estilo, color), fondo, Element.ALIGN_RIGHT);
             }
+            case INTEGER -> celda(entero(((Number) valor).longValue()), fuente(9, estilo, Color.BLACK), fondo,
+                    Element.ALIGN_RIGHT);
+            case PERCENT -> {
+                double porcentaje = (Double) valor;
+                Color color = colorForzado != null ? colorForzado : porcentaje < 0 ? ROJO_NEGATIVO : Color.BLACK;
+                yield celda(porcentaje(porcentaje), fuente(9, estilo, color), fondo, Element.ALIGN_RIGHT);
+            }
             case TEXT -> celda(String.valueOf(valor), fuente(9, estilo, Color.BLACK), fondo, Element.ALIGN_LEFT);
         };
+    }
+
+    static boolean numerica(ColumnType tipo) {
+        return tipo == ColumnType.MONEY || tipo == ColumnType.INTEGER || tipo == ColumnType.PERCENT;
+    }
+
+    private static DecimalFormatSymbols simbolos() {
+        DecimalFormatSymbols simbolos = new DecimalFormatSymbols();
+        simbolos.setGroupingSeparator('.');
+        simbolos.setDecimalSeparator(',');
+        return simbolos;
+    }
+
+    static String entero(long cantidad) {
+        return new DecimalFormat("#,##0", simbolos()).format(cantidad);
+    }
+
+    /** 12.5 es "12,50 %". */
+    static String porcentaje(double valor) {
+        return new DecimalFormat("#,##0.00", simbolos()).format(valor) + " %";
     }
 
     private static PdfPCell celda(String texto, Font fuente, Color fondo, int alineacion) {
@@ -184,8 +242,8 @@ public class PdfReportGenerator {
         return new Font(Font.HELVETICA, tamano, estilo, color);
     }
 
-    /** Segunda pasada: "<generado> · Pag. N de M" centrado al pie de cada pagina. */
-    private static byte[] conPie(byte[] pdf, String generado) {
+    /** Segunda pasada: "<generado> · Pag. N de M · <version>" centrado al pie de cada pagina. */
+    private static byte[] conPie(byte[] pdf, String generado, String version) {
         try {
             PdfReader lector = new PdfReader(pdf);
             ByteArrayOutputStream salida = new ByteArrayOutputStream();
@@ -193,9 +251,10 @@ public class PdfReportGenerator {
             int paginas = lector.getNumberOfPages();
             Font fuente = fuente(8, Font.NORMAL, GRIS);
             for (int i = 1; i <= paginas; i++) {
-                Rectangle pagina = lector.getPageSize(i);
+                // Con rotacion: en una pagina horizontal el ancho es el lado largo.
+                Rectangle pagina = lector.getPageSizeWithRotation(i);
                 ColumnText.showTextAligned(estampador.getOverContent(i), Element.ALIGN_CENTER,
-                        new Phrase(generado + " · Pág. " + i + " de " + paginas, fuente),
+                        new Phrase(generado + " · Pág. " + i + " de " + paginas + " · " + version, fuente),
                         pagina.getWidth() / 2, MARGEN / 2, 0);
             }
             estampador.close();

@@ -16,7 +16,12 @@ public record ProductResponse(
         Double suggestedPrice,
         Long categoryId,
         String categoryName,
-        ItemType itemType
+        ItemType itemType,
+        /**
+         * Si el item lleva IVA. Un servicio, si su IVA (taxAmount) es mayor que cero; un producto,
+         * si su categoria tiene algun impuesto de IVA con tasa mayor que cero, aunque su costo sea 0.
+         */
+        boolean vatApplies
 ) {
 
     public static ProductResponse from(Product product) {
@@ -30,8 +35,18 @@ public record ProductResponse(
                 aDosDecimales(product.getSuggestedPrice()),
                 product.getCategory() != null ? product.getCategory().getId() : null,
                 product.getCategory() != null ? product.getCategory().getName() : null,
-                product.getItemType()
+                product.getItemType(),
+                llevaIva(product)
         );
+    }
+
+    private static boolean llevaIva(Product product) {
+        if (product.esServicio()) {
+            return product.getTaxAmount() != null && product.getTaxAmount() > 0;
+        }
+        return product.getCategory() != null && product.getCategory().getTaxTypes() != null
+                && product.getCategory().getTaxTypes().stream()
+                .anyMatch(t -> Boolean.TRUE.equals(t.getIsVat()) && t.getRate() != null && t.getRate() > 0);
     }
 
     /**

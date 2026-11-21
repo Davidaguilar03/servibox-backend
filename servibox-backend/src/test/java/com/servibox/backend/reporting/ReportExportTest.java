@@ -585,10 +585,11 @@ class ReportExportTest {
 
     @Test
     void typeYFormatInvalidosOFaltantesSon400() throws Exception {
-        exportar(tokenUno, "type=VENTAS&format=PDF" + RANGO)
+        exportar(tokenUno, "type=INVENTARIO&format=PDF" + RANGO)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value(
-                        "Valor invalido 'VENTAS' en el parametro type. Valores permitidos: ESTADO_RESULTADOS, MOVIMIENTOS"));
+                        "Valor invalido 'INVENTARIO' en el parametro type. Valores permitidos: ESTADO_RESULTADOS, "
+                                + "MOVIMIENTOS, VENTAS, PRODUCTOS_VENDIDOS, COMPRAS, CARTERA_COBRAR, CARTERA_PAGAR"));
         exportar(tokenUno, "type=MOVIMIENTOS&format=CSV" + RANGO)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value(
