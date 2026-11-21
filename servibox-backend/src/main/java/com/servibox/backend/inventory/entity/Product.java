@@ -2,8 +2,11 @@ package com.servibox.backend.inventory.entity;
 
 import com.servibox.backend.shared.TenantAwareEntity;
 import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.CheckConstraint;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -27,7 +30,8 @@ import org.hibernate.type.SqlTypes;
         uniqueConstraints = @UniqueConstraint(
                 name = "uk_producto_tenant_code",
                 columnNames = {"id_tenant", "codigo_producto"}
-        )
+        ),
+        check = @CheckConstraint(name = "ck_producto_item_type", constraint = "item_type IN ('PRODUCTO', 'SERVICIO')")
 )
 public class Product extends TenantAwareEntity {
 
@@ -57,4 +61,17 @@ public class Product extends TenantAwareEntity {
     @ManyToOne
     @JoinColumn(name = "id_categoria_producto", nullable = false)
     private ProductCategory category;
+
+    /**
+     * PRODUCTO o SERVICIO (V15). Un servicio tiene quantity y purchaseCost en 0, su
+     * suggestedPrice es el precio fijo de venta y su taxAmount el IVA de ese precio. No cambia.
+     */
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(name = "item_type", length = 20, nullable = false)
+    private ItemType itemType = ItemType.PRODUCTO;
+
+    public boolean esServicio() {
+        return itemType == ItemType.SERVICIO;
+    }
 }

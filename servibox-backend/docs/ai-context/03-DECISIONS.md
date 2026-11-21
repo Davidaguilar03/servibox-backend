@@ -12,6 +12,40 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-11-21: Servicios como items de producto con tipo SERVICIO (tarea 59)
+
+* Contexto: la evaluacion externa observo que solo se registraban productos, y una serviteca vende
+  sobre todo servicios (alineacion, balanceo, montaje, cambio de aceite).
+* Decision: modelo de Autollantas. Un servicio es una fila de PRODUCTOS con `item_type` SERVICIO
+  (V15, CHECK `ck_producto_item_type`, PRODUCTO por defecto); comparte `uk_producto_tenant_code`
+  con los productos. `quantity` y `purchaseCost` quedan en 0 (lo que llegue en el POST o el PUT se
+  **ignora**, como ya se ignoraba `quantity` en el PUT); `salePrice` obligatorio y mayor que cero
+  se guarda en `suggestedPrice` (sin IVA, con centavos) y `vatApplies` (true por defecto) deja en
+  `taxAmount` el IVA de ese precio a la tasa de IVA de la categoria al guardar. Ningun recalculo
+  (categoria, margen, configuracion financiera) toca un servicio: `aplicarPrecios` lo salta.
+* `getIvaRateForProduct` trae la rama de servicios de Autollantas: `taxAmount / suggestedPrice`
+  (alli `basePrice`), con lo que la tasa queda congelada en el servicio y la factura calcula el IVA
+  por linea igual que con un producto. Esto cierra el pendiente de la entrada de Sales que decia
+  "cuando se migren, esa rama hay que traerla". El descontable de una linea de servicio es 0 (no se
+  compra), asi que su IVA neto es todo el generado, como dice Notion para el Reporte de IVA.
+* Categoria SERVICIOS: se busca por nombre en el tenant y, si no hay, se crea al vuelo con los
+  impuestos de IVA del tenant, umbrales 0 y margen 0; la categoryId que llegue se ignora. Si
+  existen varias con ese nombre se usa la de menor id.
+* Tipo inmutable: un PUT con `itemType` distinto del guardado es 400 "El tipo de un item no se
+  puede cambiar despues de crearlo" (validacion, no estado de documento ni duplicado).
+* Ventas: un servicio no valida ni descuenta stock al facturar o restaurar, ni lo devuelve al
+  anular; su costo congelado es 0. Compras: una linea de servicio es 400 "No se puede comprar un
+  servicio: <descripcion>".
+* Alertas de stock y valorizacion no existen en el backend (las arma el frontend con el listado):
+  el frontend debe usar `GET /api/inventory/products?itemType=PRODUCTO` o filtrar por `itemType`.
+  Los ingresos de servicios entran en ventas, Estado de Resultados, Movimientos e IVA sin cambios.
+* Alternativas consideradas: tabla o entidad aparte para servicios (duplica catalogo, codigos y
+  lineas de venta); rechazar stock o costo distintos de 0 (el PUT ya ignora `quantity`, y un 400
+  obligaria al frontend a limpiar campos); columna nueva de precio base como Autollantas
+  (`precio_sugerido` ya es el precio de venta y no se recalcula para servicios); IVA del servicio
+  leido siempre de la categoria (cambiaria el IVA de los servicios al editar la categoria).
+* Columna `item_type` en ingles por pedido explicito de la tarea, a diferencia del resto de columnas.
+
 ## 2026-11-21: Versionado semantico del producto (tarea 58)
 
 * Contexto: la evaluacion externa observo que el producto no indicaba su version. El `pom.xml`
@@ -1799,7 +1833,9 @@ Formato de cada entrada:
 * **6. Servicios.** Notion dice que el reporte incluye la categoria `SERVICIOS` y que a los
   servicios no les aplica descontable. ServiBox no tiene el concepto de servicio
   (`InventoryService.isService` no se porto), asi que no hay caso especial. Si se porta,
-  un servicio tendria `taxAmount` cero y su descontable saldria cero solo.
+  un servicio tendria `taxAmount` cero y su descontable saldria cero solo. **Reemplazado el
+  2026-11-21 (tarea 59): el servicio guarda en `taxAmount` el IVA de su precio, y el descontable
+  sale cero porque `crearFactura` lo pone en cero para servicios.**
 
 * **7. Tests.** Notion dice 14 tests en `DashboardServiceTest` y es correcto: 14, en tres
   grupos `@Nested` (movimientos, KPIs globales, KPIs del periodo), todos unitarios con
@@ -2305,7 +2341,8 @@ PostgreSQL.
   * **`getIvaRateForProduct` no tiene la rama de servicios.** El de Autollantas mira
     primero `InventoryService.isService(p)` y, si lo es, usa `taxAmount / basePrice`.
     ServiBox no tiene todavia `itemType` ni `basePrice` en `Product`, asi que no hay
-    servicios que distinguir. Cuando se migren, esa rama hay que traerla.
+    servicios que distinguir. Cuando se migren, esa rama hay que traerla. **Reemplazado el
+    2026-11-21 (tarea 59): la rama existe, con `suggestedPrice` en lugar de `basePrice`.**
   * **Suma las rates con `isVat` en vez de quedarse con la primera.** Autollantas usa
     `findFirst()`; aqui se mantiene la semantica de suma que ya tenia `vatRateOf`, por
     coherencia con la decision de `taxAmount` del 2026-08-28.

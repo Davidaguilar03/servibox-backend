@@ -1,5 +1,6 @@
 package com.servibox.backend.inventory.dto;
 
+import com.servibox.backend.inventory.entity.ItemType;
 import com.servibox.backend.inventory.entity.Product;
 
 import java.math.BigDecimal;
@@ -14,7 +15,8 @@ public record ProductResponse(
         Double taxAmount,
         Double suggestedPrice,
         Long categoryId,
-        String categoryName
+        String categoryName,
+        ItemType itemType
 ) {
 
     public static ProductResponse from(Product product) {
@@ -27,7 +29,8 @@ public record ProductResponse(
                 aDosDecimales(product.getTaxAmount()),
                 aDosDecimales(product.getSuggestedPrice()),
                 product.getCategory() != null ? product.getCategory().getId() : null,
-                product.getCategory() != null ? product.getCategory().getName() : null
+                product.getCategory() != null ? product.getCategory().getName() : null,
+                product.getItemType()
         );
     }
 

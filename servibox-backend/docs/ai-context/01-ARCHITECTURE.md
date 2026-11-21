@@ -526,6 +526,12 @@ Migrado desde el modulo `inventory` de Autollantas. Todas sus entidades extiende
   restriccion de base queda igual como red de seguridad para cualquier escritura que no
   pase por el service. Al editar, la validacion excluye el propio registro: volver a
   guardar un producto sin cambiarle el codigo no es un duplicado.
+
+  `itemType` (`item_type`, V15): `PRODUCTO` o `SERVICIO`, inmutable. Un servicio no tiene stock
+  ni costo (0), su `suggestedPrice` es el precio fijo de venta y su `taxAmount` el IVA de ese
+  precio; va a la categoria `SERVICIOS` del tenant, creada al vuelo
+  (`InventoryService.crearServicio`). Ventas no le mueven stock y compras lo rechazan. Detalle en
+  [03-DECISIONS.md](03-DECISIONS.md), 2026-11-21.
 * `FinancialSettings` (`CONFIGURACION_FINANCIERA`): `expensesRate`, `dianRate`, `icaRate`,
   `cardCommissionRate`, todas fracciones (`icaRate` por mil). En Autollantas es un
   singleton con id fijo 1; aqui es **una fila por tenant**, porque cada negocio tiene sus
@@ -573,13 +579,18 @@ la categoria y rehace el precio sugerido de todos sus productos.
   rojo no mayor que amarillo, margen en [0, 1), nombre hasta 100.
 * `GET` y `POST` `/api/inventory/products`. Codigo hasta 50, descripcion hasta 255, costo y
   stock no negativos (**400**, tambien en el PUT salvo el stock). POST y PUT devuelven
-  `taxAmount` y `suggestedPrice` en pesos enteros, como el GET.
+  `taxAmount` y `suggestedPrice` en pesos enteros, como el GET. El GET acepta `?itemType=`
+  (`PRODUCTO` o `SERVICIO`; sin el, todos; otro valor **400**). Toda respuesta lleva `itemType`.
+  El POST con `itemType` `SERVICIO` exige `salePrice` mayor que cero (**400**) y acepta
+  `vatApplies`; ignora costo, stock y categoria.
 * `GET /api/inventory/products/{id}`
 * `PUT /api/inventory/products/{id}`: `code`, `description`, `purchaseCost`, `categoryId`
   (`ProductUpdateRequest`). `quantity` no se edita: si llega se ignora. Codigo repetido
   **409**; cambiar el codigo de un producto con lineas de venta o de compra **409**
   (`ProductCodeLockedException`); categoria de otro tenant **400**; producto de otro tenant
-  **404**. Responde con `ProductResponse` y los precios recalculados.
+  **404**. Responde con `ProductResponse` y los precios recalculados. `itemType` opcional:
+  distinto del guardado **400**. En un servicio el cuerpo es `code`, `description`,
+  `salePrice` y `vatApplies` (null conserva el IVA que tenia); costo y categoria se ignoran.
 * `GET /api/inventory/tax-types`: impuestos del tenant por nombre (`TaxTypeResponse`). Solo
   lectura.
 * `GET` y `PUT` `/api/inventory/financial-settings` (`FinancialSettingsResponse`): sin fila

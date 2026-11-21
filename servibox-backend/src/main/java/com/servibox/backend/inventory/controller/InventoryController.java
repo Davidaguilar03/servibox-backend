@@ -10,6 +10,7 @@ import com.servibox.backend.inventory.dto.ProductRequest;
 import com.servibox.backend.inventory.dto.ProductResponse;
 import com.servibox.backend.inventory.dto.ProductUpdateRequest;
 import com.servibox.backend.inventory.dto.TaxTypeResponse;
+import com.servibox.backend.inventory.entity.ItemType;
 import com.servibox.backend.inventory.entity.Product;
 import com.servibox.backend.inventory.entity.ProductCategory;
 import com.servibox.backend.inventory.service.InventoryService;
@@ -26,6 +27,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -87,9 +89,10 @@ public class InventoryController {
                 request.expensesRate(), request.dianRate(), request.icaRate(), request.cardCommissionRate()));
     }
 
+    /** itemType opcional: sin el, productos y servicios juntos. */
     @GetMapping("/products")
-    public List<ProductResponse> listarProductos() {
-        return inventoryService.findAllProducts().stream().map(ProductResponse::from).toList();
+    public List<ProductResponse> listarProductos(@RequestParam(required = false) ItemType itemType) {
+        return inventoryService.findProducts(itemType).stream().map(ProductResponse::from).toList();
     }
 
     @GetMapping("/products/{id}")
@@ -102,6 +105,14 @@ public class InventoryController {
     @PostMapping("/products")
     @ResponseStatus(HttpStatus.CREATED)
     public ProductResponse crearProducto(@Valid @RequestBody ProductRequest request) {
+        if (request.itemType() == ItemType.SERVICIO) {
+            return ProductResponse.from(inventoryService.crearServicio(request.code(), request.description(),
+                    request.salePrice(), request.vatApplies()));
+        }
+        // Antes eran @NotNull del DTO; un servicio no los lleva. Mismo 400 de siempre.
+        if (request.purchaseCost() == null || request.quantity() == null || request.categoryId() == null) {
+            throw new DomainValidationException("Peticion invalida");
+        }
         ProductCategory category = inventoryService.findCategoryById(request.categoryId())
                 .orElseThrow(() -> new DomainValidationException("Categoria no encontrada: " + request.categoryId()));
 
@@ -117,8 +128,18 @@ public class InventoryController {
 
     @PutMapping("/products/{id}")
     public ProductResponse editarProducto(@PathVariable Long id, @Valid @RequestBody ProductUpdateRequest request) {
-        inventoryService.findProductById(id)
+        Product actual = inventoryService.findProductById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado: " + id));
+        if (request.itemType() != null && request.itemType() != actual.getItemType()) {
+            throw new DomainValidationException(InventoryService.MENSAJE_TIPO_INMUTABLE);
+        }
+        if (actual.esServicio()) {
+            return ProductResponse.from(inventoryService.actualizarServicio(id, request.code(), request.description(),
+                    request.salePrice(), request.vatApplies()));
+        }
+        if (request.purchaseCost() == null || request.categoryId() == null) {
+            throw new DomainValidationException("Peticion invalida");
+        }
         ProductCategory category = inventoryService.findCategoryById(request.categoryId())
                 .orElseThrow(() -> new DomainValidationException("Categoria no encontrada: " + request.categoryId()));
         return ProductResponse.from(inventoryService.actualizarProducto(id, request.code(), request.description(),
