@@ -1145,7 +1145,8 @@ eliminan, y al eliminarse desaparecen solos.
 
 **`ReportingService`**
 
-* `getGlobalKpis()`: los KPIs sobre todo el historico del tenant.
+* `getGlobalKpis()`: los KPIs sobre todo el historico del tenant. Desde la tarea 61 ninguna ruta
+  lo expone (`/kpis` sin fechas es el mes en curso); queda para las pruebas.
 * `getPeriodKpis(desde, hasta)`: los mismos, por `invoiceDate` de la factura o `date`
   del movimiento de gasto o de ingreso ocasional dentro de `[desde, hasta]`, ambos inclusive. Dos metodos y dos consultas por
   cifra, no uno con fechas opcionales: un `(:desde IS NULL OR ...)` en JPQL da problemas de
@@ -1191,8 +1192,10 @@ eliminan, y al eliminarse desaparecen solos.
   estan congelados al facturar, asi que una compra posterior que cambie el `taxAmount` del
   producto no mueve el reporte de un periodo ya facturado.
 
-Rangos: `desde` y `hasta` son obligatorios en periodo, movimientos e IVA; si falta uno, o
-`desde` es posterior a `hasta`, el service lanza `IllegalArgumentException` (**400**).
+Rangos: en el service, `desde` y `hasta` son obligatorios en periodo, movimientos e IVA; si
+falta uno, o `desde` es posterior a `hasta`, **400**. Desde la tarea 61 el controlador manda el
+mes en curso cuando no llega ninguna de las dos fechas; con una sola sigue siendo 400. Estas tres
+rutas no tienen tope de dias.
 
 **`ReportExportService`** y los generadores de archivo (paquete `reporting/export`)
 
@@ -1228,9 +1231,8 @@ Rangos: `desde` y `hasta` son obligatorios en periodo, movimientos e IVA; si fal
 
 **Endpoints** (todos requieren JWT, todos `GET`; JSON salvo `/export`)
 
-* `/api/reporting/kpis`: sin parametros, KPIs globales. Con `desde` y `hasta` (ISO,
-  `2026-09-01`), KPIs del periodo. Una sola ruta porque la respuesta es el mismo DTO;
-  `desde` / `hasta` vuelven null en el global. Respuesta: `desde`, `hasta`, `totalSales`,
+* `/api/reporting/kpis`: KPIs del periodo `desde` a `hasta` (ISO, `2026-09-01`); sin los dos,
+  el mes en curso (antes de la tarea 61, los KPIs globales). Respuesta: `desde`, `hasta`, `totalSales`,
   `totalPurchases`, `netSales`, `costOfSales`, `grossProfit`, `operatingExpenses`,
   `otherIncome`, `netProfit`.
 * `/api/reporting/movements?desde=...&hasta=...`
@@ -1249,9 +1251,11 @@ DTOs: `KpisResponse`, `MovementSummaryResponse`, `IvaReportResponse` con su list
 `IvaCategoryResponse`. Archivos: ver [03-DECISIONS.md](03-DECISIONS.md), "Exportacion de
 reportes en PDF y Excel".
 
-**Reportes en vivo (tarea 60)**
+**Reportes en vivo (tareas 60 y 61)**
 
-Ventas, Productos y servicios vendidos, Compras, Cartera por cobrar y Cartera por pagar.
+Ventas, Productos y servicios vendidos, Compras, Cartera por cobrar y Cartera por pagar (tarea
+60); Inventario valorizado y rotacion, Flujo de caja, Estado de resultados, IVA y Movimientos
+(tarea 61).
 `LiveReportService` arma cada uno y `ReportExportService` convierte esa misma respuesta en un
 `ReportModel`, asi que pantalla y archivo dan las mismas cifras. Las consultas estan en
 `reporting/repository/LiveReportRepository`: JPQL armado solo con los filtros presentes, una sola
@@ -1268,6 +1272,10 @@ Forma comun de la respuesta (`LiveReportResponse<S, R>`):
   "summary": { ... }, "rows": [ ... ], "series": [ {"label": "...", "value": 0.0} ] }
 ```
 
+`P` (el punto de `series`) es `SeriesPoint {label, value}` salvo en el Estado de resultados, que
+trae `{label, revenue, cost, profit}`. Inventario trae `corte` (stock y valores) y `desde`/`hasta`
+(rotacion).
+
 Los reportes de rango traen `desde` y `hasta` (sin los dos, el mes en curso del reloj de negocio;
 con uno solo, desde posterior a hasta o mas de 366 dias, **400**) y `corte` null; las carteras
 traen `corte` (hoy) y `desde`/`hasta` null. `appliedFilters` es texto de pantalla con tildes.
@@ -1279,10 +1287,27 @@ Contratos completos en
 * `GET /api/reporting/purchases?desde&hasta&proveedorId&categoriaId&estado`
 * `GET /api/reporting/receivables?clienteId&antiguedad=0-30|31-60|61-90|90+`
 * `GET /api/reporting/payables?proveedorId&antiguedad`
+* `GET /api/reporting/inventory?desde&hasta&categoriaId&estadoStock=NORMAL|BAJO|CRITICO|SIN_STOCK`
+* `GET /api/reporting/cash-flow?desde&hasta&cuentaId`
+* `GET /api/reporting/income-statement?desde&hasta`
+* `GET /api/reporting/vat?desde&hasta`
+* `GET /api/reporting/movements-report?desde&hasta&cuentaId&tipo=INGRESO|EGRESO`
 * `/export` acepta `type` `VENTAS`, `PRODUCTOS_VENDIDOS`, `COMPRAS`, `CARTERA_COBRAR` y
   `CARTERA_PAGAR` con los mismos filtros; un filtro de otro reporte es **400** "El parametro X no
   aplica al reporte TYPE". Archivos `ventas_<desde>_<hasta>`, `productos-servicios-vendidos_...`,
-  `compras_...`, `cartera-por-cobrar_<corte>` y `cartera-por-pagar_<corte>`.
+  `compras_...`, `cartera-por-cobrar_<corte>` y `cartera-por-pagar_<corte>`. Tarea 61: `INVENTARIO`
+  (`inventario-rotacion_...`), `FLUJO_CAJA` (`flujo-caja_...`) e `IVA` (`reporte-iva_...`);
+  `MOVIMIENTOS` acepta ademas `tipo` y `cuentaId` (alias de `accountId`). Todas las exportaciones,
+  tambien `ESTADO_RESULTADOS` y `MOVIMIENTOS`, usan el mes en curso sin fechas.
+* Inventario: solo items `PRODUCTO`; estado de stock con `inventory.entity.StockStatus`, la regla
+  de `servibox-frontend/src/lib/stock.ts` (ver 03-DECISIONS). Unidades vendidas en el rango y
+  ultima venta como subconsultas sobre `SaleDetail` sin anuladas.
+* Flujo de caja: movimientos activos (la regla de `MovementSpecifications.activo()` escrita en
+  JPQL) agrupados por categoria, tipo y forma de pago de la factura enlazada; saldos con
+  `TreasuryService.saldoAl`. Sin cuenta, sin transferencias.
+* Estado de resultados: las cifras de `getPeriodKpis`, las mismas de `/kpis` y de la exportacion.
+* IVA: las lineas de `buildReporteIva` como escalares, agrupadas por categoria y tarifa.
+* Movimientos: `TreasuryService.listarParaReporte` con `tipo`, la consulta de la exportacion.
 
 `ReportModel` gano `footer` (fila de totales por columna), los tipos de columna `INTEGER` y
 `PERCENT` (Excel guarda la fraccion con formato `0.00%`), `Total` con tipo y `desde` null para

@@ -3,8 +3,13 @@ package com.servibox.backend.reporting.service;
 import com.servibox.backend.shared.DomainValidationException;
 import com.servibox.backend.inventory.entity.ItemType;
 import com.servibox.backend.purchases.entity.PurchaseStatus;
+import com.servibox.backend.inventory.entity.StockStatus;
+import com.servibox.backend.reporting.dto.CashFlowReport;
+import com.servibox.backend.reporting.dto.InventoryReport;
 import com.servibox.backend.reporting.dto.KpisResponse;
+import com.servibox.backend.reporting.dto.VatReport;
 import com.servibox.backend.reporting.dto.LiveReportResponse;
+import com.servibox.backend.reporting.dto.SeriesPoint;
 import com.servibox.backend.reporting.dto.PortfolioReport;
 import com.servibox.backend.reporting.dto.ProductsSoldReport;
 import com.servibox.backend.reporting.dto.PurchasesReport;
@@ -29,7 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.servibox.backend.shared.Moneda;
 
 import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -64,7 +69,9 @@ public class ReportExportService {
      */
     @Transactional(readOnly = true)
     public ReportModel estadoDeResultados(LocalDate desde, LocalDate hasta) {
-        validarRango(desde, hasta);
+        LiveReportService.Rango rango = liveReportService.rango(desde, hasta);
+        desde = rango.desde();
+        hasta = rango.hasta();
         Tenant tenant = tenantActual();
         KpisResponse kpis = reportingService.getPeriodKpis(desde, hasta);
         List<List<Object>> filas = List.of(
@@ -85,7 +92,15 @@ public class ReportExportService {
      */
     @Transactional(readOnly = true)
     public ReportModel movimientos(LocalDate desde, LocalDate hasta, Long accountId) {
-        validarRango(desde, hasta);
+        return movimientos(desde, hasta, accountId, null);
+    }
+
+    /** Lo mismo, solo de un tipo (INGRESO o EGRESO) si `tipo` no es null. */
+    @Transactional(readOnly = true)
+    public ReportModel movimientos(LocalDate desde, LocalDate hasta, Long accountId, MovementType tipo) {
+        LiveReportService.Rango rango = liveReportService.rango(desde, hasta);
+        desde = rango.desde();
+        hasta = rango.hasta();
         Tenant tenant = tenantActual();
         Account cuenta = null;
         if (accountId != null) {
@@ -93,7 +108,7 @@ public class ReportExportService {
                     .orElseThrow(() -> new DomainValidationException("Cuenta no encontrada: " + accountId));
         }
 
-        List<FilaReporte> movimientos = treasuryService.listarParaReporte(accountId, desde, hasta, maxFilas + 1);
+        List<FilaReporte> movimientos = treasuryService.listarParaReporte(accountId, tipo, desde, hasta, maxFilas + 1);
         if (movimientos.size() > maxFilas) {
             throw new DomainValidationException("El reporte tiene mas de " + maxFilas
                     + " movimientos: acota el rango de fechas");
@@ -110,7 +125,7 @@ public class ReportExportService {
                 egresos = Moneda.sumar(egresos, m.amount());
             }
             filas.add(List.of(m.date(), m.accountName(), ingreso ? "Ingreso" : "Egreso", m.concept(),
-                    origen(m), ingreso ? m.amount() : -m.amount()));
+                    LiveReportService.referencia(m), ingreso ? m.amount() : -m.amount()));
         }
 
         List<Total> totales = new ArrayList<>();
@@ -125,7 +140,8 @@ public class ReportExportService {
         }
 
         return new ReportModel(tenant.getName(), tenant.getNit(), "Movimientos de cuentas", desde, hasta,
-                cuenta != null ? "Cuenta: " + cuenta.getName() : "Todas las cuentas",
+                (cuenta != null ? "Cuenta: " + cuenta.getName() : "Todas las cuentas")
+                        + (tipo != null ? " · Tipo: " + LiveReportService.etiqueta(tipo) : ""),
                 List.of(new Column("Fecha", ColumnType.DATE, 12),
                         new Column("Cuenta", ColumnType.TEXT, 18),
                         new Column("Tipo", ColumnType.TEXT, 10),
@@ -144,7 +160,7 @@ public class ReportExportService {
     @Transactional(readOnly = true)
     public ReportModel ventas(LocalDate desde, LocalDate hasta, Long clienteId, PaymentType formaPago,
                               SaleStatus estado) {
-        LiveReportResponse<SalesReport.Summary, SalesReport.Row> r =
+        LiveReportResponse<SalesReport.Summary, SalesReport.Row, SeriesPoint> r =
                 liveReportService.ventas(desde, hasta, clienteId, formaPago, estado);
         Tenant tenant = tenantActual();
         List<List<Object>> filas = new ArrayList<>();
@@ -186,7 +202,7 @@ public class ReportExportService {
     @Transactional(readOnly = true)
     public ReportModel productosVendidos(LocalDate desde, LocalDate hasta, ItemType itemType, Long categoriaId,
                                          Long productoId) {
-        LiveReportResponse<ProductsSoldReport.Summary, ProductsSoldReport.Row> r =
+        LiveReportResponse<ProductsSoldReport.Summary, ProductsSoldReport.Row, SeriesPoint> r =
                 liveReportService.productosVendidos(desde, hasta, itemType, categoriaId, productoId);
         Tenant tenant = tenantActual();
         List<List<Object>> filas = new ArrayList<>();
@@ -215,7 +231,7 @@ public class ReportExportService {
     @Transactional(readOnly = true)
     public ReportModel compras(LocalDate desde, LocalDate hasta, Long proveedorId, Long categoriaId,
                                PurchaseStatus estado) {
-        LiveReportResponse<PurchasesReport.Summary, PurchasesReport.Row> r =
+        LiveReportResponse<PurchasesReport.Summary, PurchasesReport.Row, SeriesPoint> r =
                 liveReportService.compras(desde, hasta, proveedorId, categoriaId, estado);
         Tenant tenant = tenantActual();
         List<List<Object>> filas = new ArrayList<>();
@@ -260,7 +276,7 @@ public class ReportExportService {
     }
 
     private ReportModel cartera(String titulo, String tercero, String abonado,
-                                LiveReportResponse<PortfolioReport.Summary, PortfolioReport.Row> r) {
+                                LiveReportResponse<PortfolioReport.Summary, PortfolioReport.Row, SeriesPoint> r) {
         Tenant tenant = tenantActual();
         List<List<Object>> filas = new ArrayList<>();
         double total = 0.0;
@@ -293,28 +309,104 @@ public class ReportExportService {
     }
 
     /** "Filtros: Cliente: X · Estado: Pendiente", o "Sin filtros". */
-    private static String filtros(LiveReportResponse<?, ?> r) {
+    private static String filtros(LiveReportResponse<?, ?, ?> r) {
         return r.appliedFilters().isEmpty() ? "Sin filtros"
                 : "Filtros: " + String.join(" · ", r.appliedFilters());
     }
 
-    /** El rango de los reportes JSON, mas el tope de 366 dias. */
-    private void validarRango(LocalDate desde, LocalDate hasta) {
-        reportingService.validarRango(desde, hasta);
-        if (ChronoUnit.DAYS.between(desde, hasta) + 1 > MAX_DIAS) {
-            throw new DomainValidationException("El rango de un reporte no puede pasar de " + MAX_DIAS + " dias");
+    @Transactional(readOnly = true)
+    public ReportModel inventario(LocalDate desde, LocalDate hasta, Long categoriaId, StockStatus estadoStock) {
+        LiveReportResponse<InventoryReport.Summary, InventoryReport.Row, SeriesPoint> r =
+                liveReportService.inventario(desde, hasta, categoriaId, estadoStock);
+        Tenant tenant = tenantActual();
+        List<List<Object>> filas = new ArrayList<>();
+        for (InventoryReport.Row f : r.rows()) {
+            filas.add(Arrays.asList(f.code(), f.description(), f.categoryName(), f.stock(),
+                    LiveReportService.etiqueta(f.stockStatus()), f.unitCost(), f.costValue(), f.salePrice(),
+                    f.unitsSold(), f.lastSaleDate(), f.daysWithoutSale()));
         }
+        InventoryReport.Summary s = r.summary();
+        return new ReportModel(tenant.getName(), tenant.getNit(), "Inventario valorizado y rotación", r.desde(),
+                r.hasta(), "Stock y valores al " + r.corte().format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+                + "; unidades vendidas en el período · " + filtros(r),
+                List.of(new Column("Código", ColumnType.TEXT, 10),
+                        new Column("Descripción", ColumnType.TEXT, 24),
+                        new Column("Categoría", ColumnType.TEXT, 12),
+                        new Column("Stock", ColumnType.INTEGER, 7),
+                        new Column("Estado", ColumnType.TEXT, 9),
+                        new Column("Costo unitario", ColumnType.MONEY, 13),
+                        new Column("Valor al costo", ColumnType.MONEY, 14),
+                        new Column("Precio de venta", ColumnType.MONEY, 13),
+                        new Column("Vendidas", ColumnType.INTEGER, 9),
+                        new Column("Última venta", ColumnType.DATE, 11),
+                        new Column("Días sin vender", ColumnType.INTEGER, 9)),
+                filas, "Sin productos",
+                List.of(new Total("Productos", s.productCount(), ColumnType.INTEGER),
+                        new Total("Valor del inventario al costo", s.costValue()),
+                        new Total("Valor a precio de venta", s.saleValue()),
+                        new Total("Productos en stock bajo", s.lowStockCount(), ColumnType.INTEGER),
+                        new Total("Productos en stock crítico", s.criticalStockCount(), ColumnType.INTEGER),
+                        new Total("Productos sin stock", s.outOfStockCount(), ColumnType.INTEGER)),
+                null, "Solo productos: los servicios no tienen stock. Precio de venta sin IVA", true,
+                Arrays.asList("Totales", null, null, s.unitsInStock(), null, null, s.costValue(), null,
+                        s.unitsSoldInPeriod(), null, null));
     }
 
-    /** No hay codigos propios de gasto, ingreso ni transferencia: solo la factura tiene numero. */
-    private static String origen(FilaReporte m) {
-        return switch (m.category()) {
-            case RECAUDO_VENTA -> "VENTA " + m.saleInvoiceNumber();
-            case PAGO_COMPRA -> "COMPRA " + m.purchaseInvoiceNumber();
-            case GASTO_OPERATIVO -> "GASTO OPERATIVO";
-            case INGRESO_OCASIONAL -> "INGRESO OCASIONAL";
-            case TRANSFERENCIA -> "TRANSFERENCIA";
-        };
+    @Transactional(readOnly = true)
+    public ReportModel flujoDeCaja(LocalDate desde, LocalDate hasta, Long cuentaId) {
+        LiveReportResponse<CashFlowReport.Summary, CashFlowReport.Row, SeriesPoint> r =
+                liveReportService.flujoDeCaja(desde, hasta, cuentaId);
+        Tenant tenant = tenantActual();
+        List<List<Object>> filas = new ArrayList<>();
+        for (CashFlowReport.Row f : r.rows()) {
+            boolean entrada = "ENTRADA".equals(f.direction());
+            filas.add(List.of(f.label(), entrada ? "Entrada" : "Salida", f.movementCount(),
+                    entrada ? f.amount() : negativo(f.amount())));
+        }
+        CashFlowReport.Summary s = r.summary();
+        return new ReportModel(tenant.getName(), tenant.getNit(), "Flujo de caja", r.desde(), r.hasta(), filtros(r),
+                List.of(new Column("Concepto", ColumnType.TEXT, 30),
+                        new Column("Tipo", ColumnType.TEXT, 10),
+                        new Column("Movimientos", ColumnType.INTEGER, 12),
+                        new Column("Valor", ColumnType.MONEY, 18)),
+                filas, SIN_MOVIMIENTOS,
+                List.of(new Total("Saldo inicial", s.openingBalance()),
+                        new Total("Entradas", s.inflows()),
+                        new Total("Salidas", negativo(s.outflows())),
+                        new Total("Flujo neto", s.netFlow())),
+                new Total("Saldo final", s.closingBalance()),
+                cuentaId == null
+                        ? "Todas las cuentas: las transferencias entre cuentas propias no se incluyen"
+                        : null,
+                false, null);
+    }
+
+    @Transactional(readOnly = true)
+    public ReportModel iva(LocalDate desde, LocalDate hasta) {
+        LiveReportResponse<VatReport.Summary, VatReport.Row, SeriesPoint> r = liveReportService.iva(desde, hasta);
+        Tenant tenant = tenantActual();
+        List<List<Object>> filas = new ArrayList<>();
+        double base = 0.0;
+        for (VatReport.Row f : r.rows()) {
+            filas.add(List.of(f.categoryName(), f.ratePercent(), f.taxableBase(), f.ivaGenerado(),
+                    f.ivaDescontable(), f.ivaNeto()));
+            base = Moneda.sumar(base, f.taxableBase());
+        }
+        VatReport.Summary s = r.summary();
+        return new ReportModel(tenant.getName(), tenant.getNit(), "Reporte de IVA", r.desde(), r.hasta(), null,
+                List.of(new Column("Categoría", ColumnType.TEXT, 20),
+                        new Column("Tarifa", ColumnType.PERCENT, 9),
+                        new Column("Base", ColumnType.MONEY, 16),
+                        new Column("IVA generado", ColumnType.MONEY, 16),
+                        new Column("IVA descontable", ColumnType.MONEY, 16),
+                        new Column("IVA neto", ColumnType.MONEY, 16)),
+                filas, "Sin ventas con IVA en el período",
+                List.of(new Total("Facturas con IVA", s.invoicesWithIva(), ColumnType.INTEGER),
+                        new Total("IVA generado", s.ivaGenerado()),
+                        new Total("IVA descontable", s.ivaDescontable())),
+                new Total("Saldo de IVA por pagar", s.ivaNeto()),
+                "IVA de las ventas sin facturas anuladas. El descontable es el IVA pagado al comprar las unidades vendidas",
+                true, Arrays.asList("Totales", null, base, s.ivaGenerado(), s.ivaDescontable(), s.ivaNeto()));
     }
 
     /** El tenant es el del token; TENANTS no es una entidad por tenant, asi que va por id. */

@@ -8,7 +8,10 @@ public enum ReportType {
     PRODUCTOS_VENDIDOS("productos-servicios-vendidos"),
     COMPRAS("compras"),
     CARTERA_COBRAR("cartera-por-cobrar"),
-    CARTERA_PAGAR("cartera-por-pagar");
+    CARTERA_PAGAR("cartera-por-pagar"),
+    INVENTARIO("inventario-rotacion"),
+    FLUJO_CAJA("flujo-caja"),
+    IVA("reporte-iva");
 
     private final String archivo;
 

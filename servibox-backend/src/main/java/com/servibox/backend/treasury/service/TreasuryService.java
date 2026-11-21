@@ -195,8 +195,19 @@ public class TreasuryService {
     @Transactional(readOnly = true)
     public List<MovementRepositoryCustom.FilaReporte> listarParaReporte(Long accountId, LocalDate desde,
                                                                         LocalDate hasta, int maximo) {
-        return movementRepository.listarParaReporte(
-                filtroActivos(accountId, null, desde, hasta, null, null), maximo);
+        return listarParaReporte(accountId, null, desde, hasta, maximo);
+    }
+
+    /** Lo mismo, solo de un tipo (INGRESO o EGRESO) si `tipo` no es null. */
+    @Transactional(readOnly = true)
+    public List<MovementRepositoryCustom.FilaReporte> listarParaReporte(Long accountId, MovementType tipo,
+                                                                        LocalDate desde, LocalDate hasta,
+                                                                        int maximo) {
+        Specification<Movement> filtro = filtroActivos(accountId, null, desde, hasta, null, null);
+        if (tipo != null) {
+            filtro = filtro.and((raiz, consulta, cb) -> cb.equal(raiz.get("type"), tipo));
+        }
+        return movementRepository.listarParaReporte(filtro, maximo);
     }
 
     /**

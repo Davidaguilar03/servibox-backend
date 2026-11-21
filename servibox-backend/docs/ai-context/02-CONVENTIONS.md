@@ -245,7 +245,9 @@ producto en negativo.
 
 | Termino | Significado | Cuidado |
 |-|-|-|
-| KPIs globales / del periodo | Los mismos 8 indicadores sobre todo el historico o sobre `[desde, hasta]` | Global en Autollantas significa **otra cosa** (por cobrar, por pagar, saldo, alertas). Aqui global es "sin rango". Ver [03-DECISIONS.md](03-DECISIONS.md) |
+| KPIs globales / del periodo | Los mismos 8 indicadores sobre todo el historico o sobre `[desde, hasta]` | Global en Autollantas significa **otra cosa** (por cobrar, por pagar, saldo, alertas). Aqui global es "sin rango". Desde la tarea 61 `/kpis` sin fechas es el mes en curso, no el global. Ver [03-DECISIONS.md](03-DECISIONS.md) |
+| Estado de stock | `SIN_STOCK` (stock <= 0), `CRITICO` (<= umbral rojo), `BAJO` (<= umbral amarillo), `NORMAL` | La misma regla en el frontend (`stock.ts`) y en el backend (`StockStatus`). Solo productos |
+| Flujo de caja | Entradas y salidas de caja por concepto, con saldo inicial y final de las cuentas | Sin cuenta no lleva transferencias entre cuentas propias. No es el Estado de resultados: cuenta dinero, no ventas a credito |
 | `totalSales` / `totalPurchases` | Suma de `total` de las facturas, **con IVA** | Nunca incluyen facturas `ANULADA`. No confundir con `subtotal` |
 | `netSales` | Suma de `subtotal` de las ventas, **sin IVA** | Sin `ANULADA` |
 | `costOfSales` | Suma de `unitCost * quantity` de las lineas de esas ventas | `unitCost` es el costo del producto congelado al facturar: no cambia despues |
