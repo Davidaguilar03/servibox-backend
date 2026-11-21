@@ -22,6 +22,15 @@
 * Tests: nombre en espanol que describe el comportamiento
   (`anularNoRevierteElCostoDelProducto`).
 
+## Versionado
+
+* Versionado semantico (MAJOR.MINOR.PATCH). La version vive en `pom.xml` (backend) y en
+  `package.json` (frontend), y las dos deben coincidir. `GET /api/version` la expone desde
+  BuildProperties (goal `build-info` del spring-boot-maven-plugin).
+* Cada version desplegada se etiqueta en git como `vX.Y.Z` en ambos repos.
+* Cada tarea que cambie comportamiento agrega una linea en `CHANGELOG.md` (raiz del repo,
+  formato Keep a Changelog) bajo la version en desarrollo.
+
 ## Cambios de esquema
 
 * Todo cambio de tablas, columnas, tipos o restricciones es una **migracion nueva**
