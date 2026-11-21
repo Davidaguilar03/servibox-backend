@@ -11,6 +11,11 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 - Versionado semántico del producto y endpoint público GET /api/version.
 - Servicios: ítems sin stock ni costo, vendibles junto con productos, con categoría Servicios automática por serviteca.
+- Reportes de Ventas, Productos y servicios vendidos, Compras, Cartera por cobrar y Cartera por pagar, consultables en vivo con filtros y exportables a PDF y Excel.
+
+### Cambiado
+
+- La respuesta de productos incluye vatApplies.
 
 ## [1.0.0] - 2026-11-01
 

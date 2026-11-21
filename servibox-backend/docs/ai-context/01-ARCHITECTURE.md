@@ -580,7 +580,9 @@ la categoria y rehace el precio sugerido de todos sus productos.
 * `GET` y `POST` `/api/inventory/products`. Codigo hasta 50, descripcion hasta 255, costo y
   stock no negativos (**400**, tambien en el PUT salvo el stock). POST y PUT devuelven
   `taxAmount` y `suggestedPrice` en pesos enteros, como el GET. El GET acepta `?itemType=`
-  (`PRODUCTO` o `SERVICIO`; sin el, todos; otro valor **400**). Toda respuesta lleva `itemType`.
+  (`PRODUCTO` o `SERVICIO`; sin el, todos; otro valor **400**). Toda respuesta lleva `itemType`
+  y `vatApplies` (tarea 60): en un servicio, `taxAmount` mayor que cero; en un producto, que su
+  categoria tenga un impuesto de IVA con tasa mayor que cero (aunque el costo sea 0).
   El POST con `itemType` `SERVICIO` exige `salePrice` mayor que cero (**400**) y acepta
   `vatApplies`; ignora costo, stock y categoria.
 * `GET /api/inventory/products/{id}`
@@ -1246,6 +1248,47 @@ Rangos: `desde` y `hasta` son obligatorios en periodo, movimientos e IVA; si fal
 DTOs: `KpisResponse`, `MovementSummaryResponse`, `IvaReportResponse` con su lista de
 `IvaCategoryResponse`. Archivos: ver [03-DECISIONS.md](03-DECISIONS.md), "Exportacion de
 reportes en PDF y Excel".
+
+**Reportes en vivo (tarea 60)**
+
+Ventas, Productos y servicios vendidos, Compras, Cartera por cobrar y Cartera por pagar.
+`LiveReportService` arma cada uno y `ReportExportService` convierte esa misma respuesta en un
+`ReportModel`, asi que pantalla y archivo dan las mismas cifras. Las consultas estan en
+`reporting/repository/LiveReportRepository`: JPQL armado solo con los filtros presentes, una sola
+sentencia por reporte que proyecta escalares (no carga `Sale` ni `Purchase`, que traen el tercero
+EAGER), con lo abonado o pagado como subconsulta correlacionada sobre `Movement` (la misma suma
+de `saldoPendiente`) y `GROUP BY` producto en Productos vendidos. Tenant: el `@Filter` de
+Hibernate. Tope de filas `servibox.reporting.max-export-rows` (mas es **400**).
+
+Forma comun de la respuesta (`LiveReportResponse<S, R>`):
+
+```
+{ "desde": "2026-09-01", "hasta": "2026-09-30", "corte": null,
+  "appliedFilters": ["Cliente: Transportes Andina"],
+  "summary": { ... }, "rows": [ ... ], "series": [ {"label": "...", "value": 0.0} ] }
+```
+
+Los reportes de rango traen `desde` y `hasta` (sin los dos, el mes en curso del reloj de negocio;
+con uno solo, desde posterior a hasta o mas de 366 dias, **400**) y `corte` null; las carteras
+traen `corte` (hoy) y `desde`/`hasta` null. `appliedFilters` es texto de pantalla con tildes.
+Contratos completos en
+[sessions/2026-11-21-reports-sales-portfolio.md](sessions/2026-11-21-reports-sales-portfolio.md).
+
+* `GET /api/reporting/sales?desde&hasta&clienteId&formaPago=CONTADO|CREDITO&estado=PAGADA|PENDIENTE|ANULADA`
+* `GET /api/reporting/products-sold?desde&hasta&itemType=PRODUCTO|SERVICIO&categoriaId&productoId`
+* `GET /api/reporting/purchases?desde&hasta&proveedorId&categoriaId&estado`
+* `GET /api/reporting/receivables?clienteId&antiguedad=0-30|31-60|61-90|90+`
+* `GET /api/reporting/payables?proveedorId&antiguedad`
+* `/export` acepta `type` `VENTAS`, `PRODUCTOS_VENDIDOS`, `COMPRAS`, `CARTERA_COBRAR` y
+  `CARTERA_PAGAR` con los mismos filtros; un filtro de otro reporte es **400** "El parametro X no
+  aplica al reporte TYPE". Archivos `ventas_<desde>_<hasta>`, `productos-servicios-vendidos_...`,
+  `compras_...`, `cartera-por-cobrar_<corte>` y `cartera-por-pagar_<corte>`.
+
+`ReportModel` gano `footer` (fila de totales por columna), los tipos de columna `INTEGER` y
+`PERCENT` (Excel guarda la fraccion con formato `0.00%`), `Total` con tipo y `desde` null para
+"Corte al <fecha>". El PDF pasa a horizontal con mas de seis columnas. Todos los archivos llevan
+la version del producto (BuildProperties, "dev" sin build-info): al final del pie del PDF y en la
+ultima fila del Excel.
 
 ## Base de datos
 

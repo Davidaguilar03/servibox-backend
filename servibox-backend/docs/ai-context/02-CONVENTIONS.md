@@ -257,8 +257,13 @@ producto en negativo.
 | IVA Neto a Pagar | Generado menos Descontable, `SaleDetail.ivaDifference` | Por linea es el mismo concepto que `Sale.ivaPorPagar` por factura |
 | Movimiento (en Reporting) | Un documento de negocio resumido: `VENTA`, `COMPRA`, `GASTO`, `INGRESO` | **No es un `Movement` de tesoreria.** Una venta a credito es un movimiento del dashboard aunque no haya movido ninguna cuenta |
 
+| Antiguedad (cartera) | Dias desde `dueDate` hasta hoy; sin `dueDate`, desde `invoiceDate`. Minimo 0 | Rangos `0-30`, `31-60`, `61-90`, `90+`. Una factura que aun no vence cae en `0-30` con 0 dias |
+| Ticket promedio | Total vendido con IVA sobre numero de facturas no anuladas | 0 si no hay facturas |
+| Margen % (productos vendidos) | `(ingresos sin IVA - costo congelado) / ingresos * 100`, 2 decimales | 0 si no hubo ingresos; un servicio tiene costo 0 y margen 100 |
+
 Regla de exclusion de `ANULADA`: ver Modulo Reporting en
-[01-ARCHITECTURE.md](01-ARCHITECTURE.md).
+[01-ARCHITECTURE.md](01-ARCHITECTURE.md). En los reportes en vivo de Ventas y Compras las anuladas
+**aparecen** como filas (con saldo 0) pero no suman en `summary`, `series` ni en los totales.
 
 ### Unicidad en entidades multi-tenant
 

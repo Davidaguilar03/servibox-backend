@@ -12,6 +12,34 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-11-21: Reportes en vivo de ventas, productos vendidos, compras y cartera (tarea 60)
+
+* Contexto: la evaluacion externa vio los reportes genericos frente a Autollantas y sin consulta
+  en vivo ni filtros. Primera tanda de 1.1.0; Inventario y rotacion, Flujo de caja y los filtros
+  nuevos de Estado de Resultados, IVA y Movimientos quedan para otra tarea.
+* Decision: cinco rutas JSON con una forma comun `{desde, hasta, corte, appliedFilters, summary,
+  rows, series}` (`LiveReportResponse`), y su exportacion por el mismo `/export` y `ReportModel`
+  (nuevos `ReportType`). El archivo se arma desde la misma respuesta JSON: no hay dos calculos.
+* Rango: sin `desde` ni `hasta`, el mes en curso del reloj de negocio; con uno solo, 400. Es
+  distinto de KPIs, Movimientos e IVA, que siguen exigiendo las dos fechas.
+* Cartera: foto al dia de hoy (`corte`), solo facturas `PENDIENTE` con saldo mayor que la
+  tolerancia de 1 peso. Antiguedad = dias desde `dueDate` (las dos tablas la tienen y es
+  obligatoria a credito desde Sales y Purchases); si es null, desde `invoiceDate`; minimo 0, asi
+  que lo que aun no vence cae en `0-30`. Autollantas tenia un bloque aparte "Aun no vence"; la
+  tarea pidio cuatro rangos y el vencimiento futuro se ve en `dueDate` de la fila.
+* Saldo: total menos todos los movimientos de la factura, igual que `saldoPendiente`; 0 en una
+  ANULADA. Ventas y Compras muestran las anuladas como filas pero no las suman.
+* Productos vendidos: agrupado por producto con el costo congelado de la linea; la categoria es la
+  **actual** del producto (no se congela). Compras con `categoriaId`: facturas con al menos una
+  linea de esa categoria, con sus totales completos (no solo esas lineas).
+* Consultas en `reporting/repository` y no en el modulo de cada entidad: cruzan factura, tercero,
+  producto y movimientos, y proyectan escalares para no cargar miles de entidades con sus EAGER.
+* `ProductResponse.vatApplies`: el frontend deja de deducirlo de `taxAmount`, que es 0 en un
+  producto de costo 0 aunque su categoria lleve IVA.
+* Alternativas consideradas: calcular en memoria con las entidades (N+1 de terceros y
+  movimientos por factura); un `(:x IS NULL OR ...)` en JPQL (problemas de tipado en PostgreSQL);
+  endpoints solo de exportacion (no resuelve la consulta en vivo).
+
 ## 2026-11-21: Servicios como items de producto con tipo SERVICIO (tarea 59)
 
 * Contexto: la evaluacion externa observo que solo se registraban productos, y una serviteca vende

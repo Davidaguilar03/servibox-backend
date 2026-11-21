@@ -14,6 +14,8 @@ import org.apache.poi.xssf.usermodel.XSSFColor;
 import org.apache.poi.xssf.usermodel.XSSFFont;
 import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.info.BuildProperties;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayOutputStream;
@@ -28,7 +30,8 @@ import java.util.Map;
  * Un ReportModel en xlsx con Apache POI: una hoja, encabezado del tenant en filas
  * combinadas y la tabla con su fila de titulos inmovilizada. Los montos son celdas
  * numericas reales (#,##0), no texto. Anchos fijos: autoSizeColumn necesita fuentes del
- * sistema y falla en un contenedor sin ellas. Mismos colores que el PDF; sin pie.
+ * sistema y falla en un contenedor sin ellas. Mismos colores que el PDF; la ultima fila dice
+ * la version del producto.
  */
 @Component
 public class ExcelReportGenerator {
@@ -44,9 +47,15 @@ public class ExcelReportGenerator {
     private static final String BLANCO = "FFFFFF";
     private static final String NEGRO = "000000";
 
+    private final ObjectProvider<BuildProperties> buildProperties;
+
+    public ExcelReportGenerator(ObjectProvider<BuildProperties> buildProperties) {
+        this.buildProperties = buildProperties;
+    }
+
     public byte[] generar(ReportModel r) {
         try (XSSFWorkbook libro = new XSSFWorkbook(); ByteArrayOutputStream salida = new ByteArrayOutputStream()) {
-            new Hoja(libro, r).escribir();
+            new Hoja(libro, r).escribir("ServiBox " + PdfReportGenerator.version(buildProperties));
             libro.write(salida);
             return salida.toByteArray();
         } catch (IOException e) {
@@ -71,14 +80,13 @@ public class ExcelReportGenerator {
             this.n = r.columns().size();
         }
 
-        void escribir() {
+        void escribir(String version) {
             encabezado(r.tenantName(), estilo(null, true, NEGRO, 14, null));
             if (r.tenantNit() != null) {
                 encabezado("NIT " + r.tenantNit(), estilo(null, false, GRIS, 10, null));
             }
             encabezado(r.title(), estilo(null, true, NEGRO, 12, null));
-            encabezado("Período: " + r.desde().format(PdfReportGenerator.FECHA) + " a "
-                    + r.hasta().format(PdfReportGenerator.FECHA), estilo(null, false, GRIS, 10, null));
+            encabezado(PdfReportGenerator.periodo(r), estilo(null, false, GRIS, 10, null));
             if (r.subtitle() != null) {
                 encabezado(r.subtitle(), estilo(null, false, GRIS, 10, null));
             }
@@ -113,6 +121,17 @@ public class ExcelReportGenerator {
             if (r.filter() && !r.rows().isEmpty()) {
                 hoja.setAutoFilter(new CellRangeAddress(filaTitulos, fila - 1, 0, n - 1));
             }
+            if (r.footer() != null) {
+                Row xr = hoja.createRow(fila++);
+                for (int c = 0; c < n; c++) {
+                    Object celda = r.footer().get(c);
+                    if (c == 0 || celda == null) {
+                        valor(xr.createCell(c), celda, ColumnType.TEXT, FONDO_TOTAL, true, null);
+                    } else {
+                        valor(xr.createCell(c), celda, r.columns().get(c).type(), FONDO_TOTAL, true, null);
+                    }
+                }
+            }
 
             for (Total total : r.totals()) {
                 filaTotal(total, FONDO_TOTAL, null);
@@ -128,6 +147,10 @@ public class ExcelReportGenerator {
                 nota.setCellValue(r.note());
                 nota.setCellStyle(estilo(null, false, GRIS, 0, null));
             }
+            fila += 2;
+            Cell pie = hoja.createRow(fila).createCell(0);
+            pie.setCellValue(version);
+            pie.setCellStyle(estilo(null, false, GRIS, 0, null));
         }
 
         private void encabezado(String texto, XSSFCellStyle estilo) {
@@ -146,12 +169,17 @@ public class ExcelReportGenerator {
                 xr.createCell(c).setCellStyle(estilo(fondo, true, NEGRO, 0, null));
             }
             combinar(fila, 0, n - 2);
-            valor(xr.createCell(n - 1), total.amount(), ColumnType.MONEY, fondo, true, colorTexto);
+            valor(xr.createCell(n - 1), total.amount(), total.type(), fondo, true, colorTexto);
             fila++;
         }
 
         private void valor(Cell celda, Object valor, ColumnType tipo, String fondo, boolean negrita,
                            String colorForzado) {
+            if (valor == null) {
+                celda.setCellValue("");
+                celda.setCellStyle(estilo(fondo, negrita, NEGRO, 0, null));
+                return;
+            }
             switch (tipo) {
                 case DATE -> {
                     celda.setCellValue((LocalDate) valor);
@@ -164,6 +192,18 @@ public class ExcelReportGenerator {
                     String formato = java.math.BigDecimal.valueOf(monto).stripTrailingZeros().scale() > 0
                             ? "#,##0.00" : "#,##0";
                     celda.setCellStyle(estilo(fondo, negrita, color, 0, formato));
+                }
+                case INTEGER -> {
+                    celda.setCellValue(((Number) valor).doubleValue());
+                    celda.setCellStyle(estilo(fondo, negrita, NEGRO, 0, "#,##0"));
+                }
+                case PERCENT -> {
+                    // Excel guarda la fraccion: 12,5 % es 0,125 con formato de porcentaje.
+                    double porcentaje = (Double) valor;
+                    celda.setCellValue(java.math.BigDecimal.valueOf(porcentaje)
+                            .divide(java.math.BigDecimal.valueOf(100)).doubleValue());
+                    String color = colorForzado != null ? colorForzado : porcentaje < 0 ? ROJO_NEGATIVO : NEGRO;
+                    celda.setCellStyle(estilo(fondo, negrita, color, 0, "0.00%"));
                 }
                 case TEXT -> {
                     celda.setCellValue(String.valueOf(valor));
@@ -197,7 +237,7 @@ public class ExcelReportGenerator {
                 if (formato != null) {
                     estilo.setDataFormat(libro.createDataFormat().getFormat(formato));
                 }
-                if ("#,##0".equals(formato) || "#,##0.00".equals(formato)) {
+                if ("#,##0".equals(formato) || "#,##0.00".equals(formato) || "0.00%".equals(formato)) {
                     estilo.setAlignment(HorizontalAlignment.RIGHT);
                 }
                 if (fondo != null || formato != null) {
