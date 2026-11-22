@@ -329,7 +329,8 @@ class ReportingTest {
         TenantContext.clear();
 
         // Bruta 400 - 200 = 200; neta 200 + 30 - 50 = 180, en el global y en el periodo.
-        for (String query : List.of("", "?desde=" + HOY + "&hasta=" + HOY)) {
+        // Sin fechas /kpis es el mes en curso (tarea 61): el mes de HOY va explicito.
+        for (String query : List.of("?desde=2026-09-01&hasta=2026-09-30", "?desde=" + HOY + "&hasta=" + HOY)) {
             mockMvc.perform(get("/api/reporting/kpis" + query).header("Authorization", "Bearer " + tokenUno))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.totalSales", closeTo(476.0, DELTA)))
@@ -341,7 +342,8 @@ class ReportingTest {
                     .andExpect(jsonPath("$.otherIncome", closeTo(30.0, DELTA)))
                     .andExpect(jsonPath("$.netProfit", closeTo(180.0, DELTA)));
         }
-        mockMvc.perform(get("/api/reporting/kpis").header("Authorization", "Bearer " + tokenDos))
+        mockMvc.perform(get("/api/reporting/kpis?desde=2026-09-01&hasta=2026-09-30")
+                        .header("Authorization", "Bearer " + tokenDos))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.otherIncome", closeTo(90000.0, DELTA)))
                 .andExpect(jsonPath("$.netProfit", closeTo(90000.0, DELTA)));
@@ -612,7 +614,8 @@ class ReportingTest {
         dos.gastar("Arriendo", HOY, 9000.0);
         TenantContext.clear();
 
-        mockMvc.perform(get("/api/reporting/kpis").header("Authorization", "Bearer " + tokenUno))
+        mockMvc.perform(get("/api/reporting/kpis?desde=2026-09-01&hasta=2026-09-30")
+                        .header("Authorization", "Bearer " + tokenUno))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalSales", closeTo(476.0, DELTA)))
                 .andExpect(jsonPath("$.totalPurchases", closeTo(119.0, DELTA)))
@@ -628,7 +631,8 @@ class ReportingTest {
                 .andExpect(jsonPath("$.totalSales", closeTo(476.0, DELTA)))
                 .andExpect(jsonPath("$.netProfit", closeTo(150.0, DELTA)));
 
-        mockMvc.perform(get("/api/reporting/kpis").header("Authorization", "Bearer " + tokenDos))
+        mockMvc.perform(get("/api/reporting/kpis?desde=2026-09-01&hasta=2026-09-30")
+                        .header("Authorization", "Bearer " + tokenDos))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalSales", closeTo(11900.0, DELTA)))
                 .andExpect(jsonPath("$.totalPurchases", closeTo(595.0, DELTA)))
@@ -669,7 +673,9 @@ class ReportingTest {
 
     @Test
     void unRangoIncompletoOInvertidoResponde400() throws Exception {
-        mockMvc.perform(get("/api/reporting/iva").header("Authorization", "Bearer " + tokenUno))
+        // Sin ninguna fecha es el mes en curso (tarea 61); una sola sigue siendo 400.
+        mockMvc.perform(get("/api/reporting/iva").param("hasta", "2026-09-30")
+                        .header("Authorization", "Bearer " + tokenUno))
                 .andExpect(status().isBadRequest());
         mockMvc.perform(get("/api/reporting/kpis").param("desde", "2026-09-01")
                         .header("Authorization", "Bearer " + tokenUno))

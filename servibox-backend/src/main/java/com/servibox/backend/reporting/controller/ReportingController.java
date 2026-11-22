@@ -2,7 +2,15 @@ package com.servibox.backend.reporting.controller;
 
 import com.servibox.backend.inventory.entity.ItemType;
 import com.servibox.backend.purchases.entity.PurchaseStatus;
+import com.servibox.backend.inventory.entity.StockStatus;
+import com.servibox.backend.reporting.dto.CashFlowReport;
+import com.servibox.backend.reporting.dto.IncomeStatementReport;
+import com.servibox.backend.reporting.dto.InventoryReport;
 import com.servibox.backend.reporting.dto.LiveReportResponse;
+import com.servibox.backend.reporting.dto.MovementsReport;
+import com.servibox.backend.reporting.dto.VatReport;
+import com.servibox.backend.treasury.entity.MovementType;
+import com.servibox.backend.reporting.dto.SeriesPoint;
 import com.servibox.backend.reporting.dto.PortfolioReport;
 import com.servibox.backend.reporting.dto.ProductsSoldReport;
 import com.servibox.backend.reporting.dto.PurchasesReport;
@@ -45,8 +53,8 @@ import java.util.stream.Collectors;
  * KPIs, movimientos e IVA en JSON, y la exportacion de reportes en PDF y Excel
  * (GET /export). Ver 03-DECISIONS.md, "Exportacion de reportes en PDF y Excel".
  *
- * desde / hasta son fechas ISO (2026-09-01). Van opcionales en la firma para que, si
- * faltan, respondan 400 con el mensaje del service y no el 500 generico.
+ * desde / hasta son fechas ISO (2026-09-01) y opcionales: sin las dos, el mes en curso; con una
+ * sola, 400 con el mensaje del service.
  */
 @RestController
 @RequestMapping("/api/reporting")
@@ -62,35 +70,44 @@ public class ReportingController {
     private final PdfReportGenerator pdfReportGenerator;
     private final ExcelReportGenerator excelReportGenerator;
 
-    /** Sin desde ni hasta: KPIs globales. Con los dos: KPIs del periodo. */
+    /**
+     * KPIs del periodo. Sin desde ni hasta, el mes en curso (antes de la tarea 61 eran los KPIs
+     * globales); con una sola fecha o desde posterior a hasta, 400. Sin tope de dias, como antes.
+     */
     @GetMapping("/kpis")
     public KpisResponse kpis(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta) {
-        if (desde == null && hasta == null) {
-            return reportingService.getGlobalKpis();
-        }
-        return reportingService.getPeriodKpis(desde, hasta);
+        LiveReportService.Rango rango = mesSiFaltan(desde, hasta);
+        return reportingService.getPeriodKpis(rango.desde(), rango.hasta());
     }
 
     @GetMapping("/movements")
     public List<MovementSummaryResponse> movements(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta) {
-        return reportingService.getMovements(desde, hasta);
+        LiveReportService.Rango rango = mesSiFaltan(desde, hasta);
+        return reportingService.getMovements(rango.desde(), rango.hasta());
     }
 
     @GetMapping("/iva")
     public IvaReportResponse iva(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta) {
-        return reportingService.buildReporteIva(desde, hasta);
+        LiveReportService.Rango rango = mesSiFaltan(desde, hasta);
+        return reportingService.buildReporteIva(rango.desde(), rango.hasta());
+    }
+
+    /** Sin las dos fechas, el mes en curso; si no, las mismas fechas, que valida el service. */
+    private LiveReportService.Rango mesSiFaltan(LocalDate desde, LocalDate hasta) {
+        return desde == null && hasta == null ? liveReportService.rango(null, null)
+                : new LiveReportService.Rango(desde, hasta);
     }
 
     // ---- Reportes en vivo. Sin desde ni hasta: el mes en curso. ----
 
     @GetMapping("/sales")
-    public LiveReportResponse<SalesReport.Summary, SalesReport.Row> sales(
+    public LiveReportResponse<SalesReport.Summary, SalesReport.Row, SeriesPoint> sales(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
             @RequestParam(required = false) Long clienteId,
@@ -100,7 +117,7 @@ public class ReportingController {
     }
 
     @GetMapping("/products-sold")
-    public LiveReportResponse<ProductsSoldReport.Summary, ProductsSoldReport.Row> productsSold(
+    public LiveReportResponse<ProductsSoldReport.Summary, ProductsSoldReport.Row, SeriesPoint> productsSold(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
             @RequestParam(required = false) ItemType itemType,
@@ -110,7 +127,7 @@ public class ReportingController {
     }
 
     @GetMapping("/purchases")
-    public LiveReportResponse<PurchasesReport.Summary, PurchasesReport.Row> purchases(
+    public LiveReportResponse<PurchasesReport.Summary, PurchasesReport.Row, SeriesPoint> purchases(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
             @RequestParam(required = false) Long proveedorId,
@@ -121,28 +138,73 @@ public class ReportingController {
 
     /** Foto al dia de hoy: no usa desde ni hasta. antiguedad: 0-30, 31-60, 61-90 o 90+. */
     @GetMapping("/receivables")
-    public LiveReportResponse<PortfolioReport.Summary, PortfolioReport.Row> receivables(
+    public LiveReportResponse<PortfolioReport.Summary, PortfolioReport.Row, SeriesPoint> receivables(
             @RequestParam(required = false) Long clienteId,
             @RequestParam(required = false) String antiguedad) {
         return liveReportService.carteraPorCobrar(clienteId, AgingRange.parse(antiguedad));
     }
 
     @GetMapping("/payables")
-    public LiveReportResponse<PortfolioReport.Summary, PortfolioReport.Row> payables(
+    public LiveReportResponse<PortfolioReport.Summary, PortfolioReport.Row, SeriesPoint> payables(
             @RequestParam(required = false) Long proveedorId,
             @RequestParam(required = false) String antiguedad) {
         return liveReportService.carteraPorPagar(proveedorId, AgingRange.parse(antiguedad));
     }
 
+    @GetMapping("/inventory")
+    public LiveReportResponse<InventoryReport.Summary, InventoryReport.Row, SeriesPoint> inventory(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
+            @RequestParam(required = false) Long categoriaId,
+            @RequestParam(required = false) StockStatus estadoStock) {
+        return liveReportService.inventario(desde, hasta, categoriaId, estadoStock);
+    }
+
+    @GetMapping("/cash-flow")
+    public LiveReportResponse<CashFlowReport.Summary, CashFlowReport.Row, SeriesPoint> cashFlow(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
+            @RequestParam(required = false) Long cuentaId) {
+        return liveReportService.flujoDeCaja(desde, hasta, cuentaId);
+    }
+
+    @GetMapping("/income-statement")
+    public LiveReportResponse<IncomeStatementReport.Summary, IncomeStatementReport.Row, IncomeStatementReport.Point>
+    incomeStatement(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta) {
+        return liveReportService.estadoDeResultados(desde, hasta);
+    }
+
+    @GetMapping("/vat")
+    public LiveReportResponse<VatReport.Summary, VatReport.Row, SeriesPoint> vat(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta) {
+        return liveReportService.iva(desde, hasta);
+    }
+
+    /** tipo: INGRESO o EGRESO (MovementType). */
+    @GetMapping("/movements-report")
+    public LiveReportResponse<MovementsReport.Summary, MovementsReport.Row, SeriesPoint> movementsReport(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
+            @RequestParam(required = false) Long cuentaId,
+            @RequestParam(required = false) MovementType tipo) {
+        return liveReportService.movimientos(desde, hasta, cuentaId, tipo);
+    }
+
     /** Los filtros que acepta cada reporte en /export, ademas de desde y hasta. */
     private static final Map<ReportType, Set<String>> FILTROS = Map.of(
             ReportType.ESTADO_RESULTADOS, Set.of(),
-            ReportType.MOVIMIENTOS, Set.of("accountId"),
+            ReportType.MOVIMIENTOS, Set.of("accountId", "cuentaId", "tipo"),
             ReportType.VENTAS, Set.of("clienteId", "formaPago", "estado"),
             ReportType.PRODUCTOS_VENDIDOS, Set.of("itemType", "categoriaId", "productoId"),
             ReportType.COMPRAS, Set.of("proveedorId", "categoriaId", "estado"),
             ReportType.CARTERA_COBRAR, Set.of("clienteId", "antiguedad"),
-            ReportType.CARTERA_PAGAR, Set.of("proveedorId", "antiguedad"));
+            ReportType.CARTERA_PAGAR, Set.of("proveedorId", "antiguedad"),
+            ReportType.INVENTARIO, Set.of("categoriaId", "estadoStock"),
+            ReportType.FLUJO_CAJA, Set.of("cuentaId"),
+            ReportType.IVA, Set.of());
 
     /**
      * El reporte como archivo descargable, con los mismos filtros que su ruta JSON. Sin
@@ -164,7 +226,10 @@ public class ReportingController {
             @RequestParam(required = false) ItemType itemType,
             @RequestParam(required = false) Long categoriaId,
             @RequestParam(required = false) Long productoId,
-            @RequestParam(required = false) String antiguedad) {
+            @RequestParam(required = false) String antiguedad,
+            @RequestParam(required = false) Long cuentaId,
+            @RequestParam(required = false) MovementType tipo,
+            @RequestParam(required = false) StockStatus estadoStock) {
         if (type == null) {
             throw new DomainValidationException("Falta el parametro type: " + Arrays.stream(ReportType.values())
                     .map(Enum::name).collect(Collectors.joining(", ")));
@@ -184,6 +249,9 @@ public class ReportingController {
         filtros.put("categoriaId", categoriaId);
         filtros.put("productoId", productoId);
         filtros.put("antiguedad", antiguedad);
+        filtros.put("cuentaId", cuentaId);
+        filtros.put("tipo", tipo);
+        filtros.put("estadoStock", estadoStock);
         filtros.forEach((nombre, valor) -> {
             if (valor != null && !FILTROS.get(type).contains(nombre)) {
                 throw new DomainValidationException("El parametro " + nombre + " no aplica al reporte " + type);
@@ -192,7 +260,9 @@ public class ReportingController {
 
         ReportModel reporte = switch (type) {
             case ESTADO_RESULTADOS -> reportExportService.estadoDeResultados(desde, hasta);
-            case MOVIMIENTOS -> reportExportService.movimientos(desde, hasta, accountId);
+            // accountId es el nombre de siempre; cuentaId, el de los reportes en vivo.
+            case MOVIMIENTOS -> reportExportService.movimientos(desde, hasta,
+                    accountId != null ? accountId : cuentaId, tipo);
             case VENTAS -> reportExportService.ventas(desde, hasta, clienteId, formaPago,
                     estado(SaleStatus.class, estado));
             case PRODUCTOS_VENDIDOS -> reportExportService.productosVendidos(desde, hasta, itemType, categoriaId,
@@ -201,6 +271,9 @@ public class ReportingController {
                     estado(PurchaseStatus.class, estado));
             case CARTERA_COBRAR -> reportExportService.carteraPorCobrar(clienteId, AgingRange.parse(antiguedad));
             case CARTERA_PAGAR -> reportExportService.carteraPorPagar(proveedorId, AgingRange.parse(antiguedad));
+            case INVENTARIO -> reportExportService.inventario(desde, hasta, categoriaId, estadoStock);
+            case FLUJO_CAJA -> reportExportService.flujoDeCaja(desde, hasta, cuentaId);
+            case IVA -> reportExportService.iva(desde, hasta);
         };
         byte[] archivo = format == ReportFormat.PDF
                 ? pdfReportGenerator.generar(reporte)

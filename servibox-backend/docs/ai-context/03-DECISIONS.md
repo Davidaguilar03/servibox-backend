@@ -12,6 +12,41 @@ Formato de cada entrada:
 * Motivo: por que se eligio esta opcion sobre las demas.
 ```
 
+## 2026-11-21: Reportes en vivo de inventario, flujo de caja, resultados, IVA y movimientos (tarea 61)
+
+* Contexto: segunda tanda de reportes de 1.1.0, con el mismo patron de la tarea 60
+  (`LiveReportService`, `LiveReportRepository`, `LiveReportResponse`, `/export`).
+* Transferencias en el flujo de caja: **sin cuenta se excluyen**. Las dos patas suman lo mismo,
+  el saldo de todas las cuentas no cambia con ellas y solo inflarian entradas y salidas
+  (Autollantas hace lo mismo en `buildFlujoCaja`). Con `cuentaId` son entradas y salidas reales de
+  esa cuenta: filas "Transferencias recibidas" y "Transferencias enviadas". En los dos casos saldo
+  inicial mas entradas menos salidas es el saldo final, con `TreasuryService.saldoAl`. El reporte
+  de Movimientos si muestra las dos patas, como su exportacion: es un listado de movimientos.
+* Conceptos del flujo: `RECAUDO_VENTA` de una venta CONTADO es "Ventas de contado" y de una
+  CREDITO "Abonos de clientes"; `PAGO_COMPRA` igual con "Compras de contado" y "Pagos a
+  proveedores"; `INGRESO_OCASIONAL`, `GASTO_OPERATIVO` y las transferencias. Solo movimientos
+  activos (los de facturas anuladas no cuentan).
+* Regla de stock replicada en `inventory.entity.StockStatus`, igual a
+  `servibox-frontend/src/lib/stock.ts`: `SIN_STOCK` si stock <= 0, `CRITICO` si <= umbral rojo de
+  la categoria, `BAJO` si <= umbral amarillo, `NORMAL` si no. Los umbrales son las columnas NOT
+  NULL `stock_min_amarillo` y `stock_min_rojo` de CATEGORIA_PRODUCTOS; los valores por defecto del
+  frontend (5 y 2) solo cubren un nulo. El prompt pidio NORMAL, BAJO y AGOTADO; David eligio los
+  cuatro estados y nombres del frontend. Los servicios no entran al inventario.
+* Mes en curso por defecto en todos los reportes, tambien `/kpis`, `/movements`, `/iva` y las
+  exportaciones `ESTADO_RESULTADOS` y `MOVIMIENTOS`. `/kpis` sin fechas deja de dar los KPIs
+  globales (el frontend siempre manda fechas). Las tres rutas viejas siguen sin tope de dias.
+* Compras con `categoriaId`: subtotal, IVA y total son los de las lineas de esa categoria; lo
+  pagado se reparte en proporcion al total de esas lineas sobre el de la factura, para que el saldo
+  pendiente tambien sea de la categoria.
+* IVA en vivo: tarifa = IVA generado de la linea sobre su base, en por ciento a un decimal
+  (congelada como la linea). Los totales son los de `/iva`.
+* Estado de resultados en vivo: sale de `getPeriodKpis`; cuadra con `/kpis` y con la exportacion.
+  Serie por mes si el rango cruza meses, si no por dia; el punto trae ingresos, costo y utilidad
+  neta, por eso `LiveReportResponse` gano el tipo del punto (`P`).
+* Alternativas consideradas: transferencias en el flujo sin cuenta (inflan entradas y salidas en
+  el mismo monto); tres estados de stock (no coincide con lo que ya muestra el frontend); saldo de
+  la factura completa en Compras por categoria (el saldo podria superar el total de la fila).
+
 ## 2026-11-21: Reportes en vivo de ventas, productos vendidos, compras y cartera (tarea 60)
 
 * Contexto: la evaluacion externa vio los reportes genericos frente a Autollantas y sin consulta
@@ -21,7 +56,8 @@ Formato de cada entrada:
   rows, series}` (`LiveReportResponse`), y su exportacion por el mismo `/export` y `ReportModel`
   (nuevos `ReportType`). El archivo se arma desde la misma respuesta JSON: no hay dos calculos.
 * Rango: sin `desde` ni `hasta`, el mes en curso del reloj de negocio; con uno solo, 400. Es
-  distinto de KPIs, Movimientos e IVA, que siguen exigiendo las dos fechas.
+  distinto de KPIs, Movimientos e IVA, que siguen exigiendo las dos fechas. (Reemplazado en la
+  tarea 61: todos los reportes usan el mes en curso sin fechas.)
 * Cartera: foto al dia de hoy (`corte`), solo facturas `PENDIENTE` con saldo mayor que la
   tolerancia de 1 peso. Antiguedad = dias desde `dueDate` (las dos tablas la tienen y es
   obligatoria a credito desde Sales y Purchases); si es null, desde `invoiceDate`; minimo 0, asi
@@ -31,7 +67,8 @@ Formato de cada entrada:
   ANULADA. Ventas y Compras muestran las anuladas como filas pero no las suman.
 * Productos vendidos: agrupado por producto con el costo congelado de la linea; la categoria es la
   **actual** del producto (no se congela). Compras con `categoriaId`: facturas con al menos una
-  linea de esa categoria, con sus totales completos (no solo esas lineas).
+  linea de esa categoria, con sus totales completos (no solo esas lineas). (Reemplazado en la
+  tarea 61: suma solo las lineas de la categoria.)
 * Consultas en `reporting/repository` y no en el modulo de cada entidad: cruzan factura, tercero,
   producto y movimientos, y proyectan escalares para no cargar miles de entidades con sus EAGER.
 * `ProductResponse.vatApplies`: el frontend deja de deducirlo de `taxAmount`, que es 0 en un
